@@ -2831,6 +2831,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
                 } else {
                     let supplemental = makeSupplementalTextContainer(attributed: attributed)
                     dynamicContentStack.addArrangedSubview(supplemental)
+                    supplemental.widthAnchor.constraint(equalTo: dynamicContentStack.widthAnchor).isActive = true
                     dynamicContentViews.append(supplemental)
                 }
             case .code(let language, let code):
@@ -2870,11 +2871,14 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         textView.attributedText = attributed
 
         container.addSubview(textView)
+        let textPrefersFillWidth = textView.widthAnchor.constraint(equalTo: container.widthAnchor)
+        textPrefersFillWidth.priority = .defaultLow
         NSLayoutConstraint.activate([
             textView.topAnchor.constraint(equalTo: container.topAnchor),
             textView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            textView.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor),
-            textView.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+            textView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            textView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            textPrefersFillWidth
         ])
         return container
     }

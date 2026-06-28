@@ -132,6 +132,79 @@ struct MessageBubbleMetadataTests {
         }
     }
 
+    @Test("T1465: supplemental body text uses wide bubble content width")
+    func supplementalBodyTextUsesWideBubbleContentWidth() {
+        let message = Message(
+            id: "t1465-supplemental-width",
+            role: .assistant,
+            content: """
+            Actioned. T1438 stays Code Review Done.
+
+            Why: the shrdlu proof-runner still passes, but the repair is not device-proven.
+            """,
+            timestamp: Date(timeIntervalSince1970: 1_772_496_540),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal",
+            sender: "CLU"
+        )
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        var streamingState = StreamingTableParseState()
+        let presentation = MessagePresentationBuilder.build(
+            from: message,
+            metrics: metrics,
+            streamingState: &streamingState
+        )
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 560, height: 1))
+
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: .short,
+            metrics: metrics,
+            maxWidth: 560,
+            truncationHeightOverride: nil,
+            bubbleSizingV2: nil,
+            showsHeader: true,
+            paddingScale: 1,
+            minWidthOverride: 120,
+            maxWidthOverride: 560,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+
+        let measured = bubble.systemLayoutSizeFitting(
+            CGSize(width: 560, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        bubble.frame = CGRect(origin: .zero, size: measured)
+        bubble.layoutIfNeeded()
+
+        let firstBody = findSubview(in: bubble) { view in
+            guard let textView = view as? UITextView else { return false }
+            return textView.text.contains("Actioned.")
+        }
+        let supplementalBody = findSubview(in: bubble) { view in
+            guard let textView = view as? UITextView else { return false }
+            return textView.text.contains("Why:")
+        }
+        #expect(firstBody != nil)
+        #expect(supplementalBody != nil)
+
+        if let firstBody, let supplementalBody {
+            let firstFrame = firstBody.convert(firstBody.bounds, to: bubble)
+            let supplementalFrame = supplementalBody.convert(supplementalBody.bounds, to: bubble)
+
+            #expect(firstFrame.width > 300)
+            #expect(supplementalFrame.width > 480)
+        }
+    }
+
     @Test("T320: bubble title bar menu button is wired on iOS/iPadOS")
     func titleBarMenuButtonIsWiredForTitleTap() {
         let message = Message(

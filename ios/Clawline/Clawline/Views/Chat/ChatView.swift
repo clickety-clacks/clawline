@@ -4346,7 +4346,7 @@ private struct PromptFocusShortcutHost: UIViewRepresentable {
         view.notificationVisibleCount = notificationVisibleCount
         view.keyboardOwnershipStore = keyboardOwnershipStore
         view.hasTargetOwnership = hasTargetOwnership
-        view.refreshKeyCommandsIfNeeded()
+        view.refreshKeyCommandsIfNeeded(allowFirstResponderRecycle: hasTargetOwnership)
 #if os(visionOS)
         // Spatial-only: visionOS can keep Clawline visible while another app owns typing focus.
         // Passive SwiftUI updates may refresh shortcuts, but must not activate or retain the
@@ -4420,7 +4420,7 @@ private final class PromptFocusShortcutView: UIView {
         return noTextCommands + appCommandShortcuts
     }
 
-    func refreshKeyCommandsIfNeeded() {
+    func refreshKeyCommandsIfNeeded(allowFirstResponderRecycle: Bool = true) {
         let nextSignature = ChatAppCommandShortcut.keyCommandSignature(
             notificationVisibleCount: notificationVisibleCount,
             selectorShortcutSlots: Set(keyboardOwnershipStore.chatSelectorShortcutMap.keys)
@@ -4432,6 +4432,10 @@ private final class PromptFocusShortcutView: UIView {
         }
         guard isFirstResponder else { return }
         guard didChangeSignature || hasDeferredKeyCommandFirstResponderRecycle else { return }
+        guard allowFirstResponderRecycle else {
+            hasDeferredKeyCommandFirstResponderRecycle = false
+            return
+        }
         guard !defersKeyCommandFirstResponderRecycle else {
             hasDeferredKeyCommandFirstResponderRecycle = true
             return

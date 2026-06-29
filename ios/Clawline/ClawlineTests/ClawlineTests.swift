@@ -7,6 +7,7 @@
 
 import Foundation
 import Testing
+import UIKit
 @testable import Clawline
 
 struct ClawlineTests {
@@ -181,6 +182,61 @@ struct ClawlineTests {
 
         #expect(singleLineHeight == TypingIndicatorCell.bubbleHeight)
         #expect(wrappedHeight > TypingIndicatorCell.bubbleHeight)
+    }
+
+    @Test("T1483: typing indicator renders full-height bubble chrome")
+    @MainActor
+    func typingIndicatorRendersFullHeightBubbleChrome() {
+        let progressSummary = "Reading a very long status update from the current provider while scanning repository context"
+        let expectedHeight = TypingIndicatorCell.height(progressSummary: progressSummary)
+        let cell = TypingIndicatorCell(frame: CGRect(
+            x: 0,
+            y: 0,
+            width: TypingIndicatorCell.bubbleWidth,
+            height: expectedHeight
+        ))
+        cell.contentView.frame = cell.bounds
+        cell.configure(
+            message: TypingIndicatorCell.makeMessage(sessionKey: "test-session"),
+            presentation: TypingIndicatorCell.makePresentation(metrics: ChatFlowTheme.Metrics(isCompact: true)),
+            isCompact: true,
+            maxWidth: TypingIndicatorCell.bubbleWidth,
+            progressSummary: progressSummary
+        )
+
+        cell.setNeedsLayout()
+        cell.layoutIfNeeded()
+
+        let renderedFrame = cell.renderedBubbleFrame(in: cell.contentView)
+        #expect(renderedFrame.height >= expectedHeight - 0.5)
+        #expect(renderedFrame.height > 40)
+        writeT1483ProofImageIfRequested(cell: cell, renderedFrame: renderedFrame, expectedHeight: expectedHeight)
+    }
+
+    @MainActor
+    private func writeT1483ProofImageIfRequested(
+        cell: TypingIndicatorCell,
+        renderedFrame: CGRect,
+        expectedHeight: CGFloat
+    ) {
+        guard let proofDirectory = ProcessInfo.processInfo.environment["T1483_VISUAL_PROOF_DIR"],
+              !proofDirectory.isEmpty else { return }
+        let directoryURL = URL(filePath: proofDirectory, directoryHint: .isDirectory)
+        do {
+            try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+            let image = UIGraphicsImageRenderer(bounds: cell.bounds).image { context in
+                cell.layer.render(in: context.cgContext)
+            }
+            let outputURL = directoryURL.appending(path: "typing-indicator-cell.png")
+            guard let pngData = image.pngData() else {
+                Issue.record("Failed to encode T1483 visual proof image")
+                return
+            }
+            try pngData.write(to: outputURL)
+            print("T1483 geometry proof renderedFrame=\(renderedFrame) expectedHeight=\(expectedHeight) proofImage=\(outputURL.path)")
+        } catch {
+            Issue.record("Failed to write T1483 visual proof: \(error)")
+        }
     }
 
     @Test("T127: Spatial chat viewport keeps 25 percent top and bottom insets")

@@ -496,6 +496,7 @@ final class MessageBubbleUIKitContainerView: UIView {
                    paddingScale: CGFloat = 1,
                    minWidthOverride: CGFloat? = nil,
                    maxWidthOverride: CGFloat? = nil,
+                   minHeightOverride: CGFloat? = nil,
                    useContinuousCorners: Bool = true,
                    isDark: Bool? = nil,
                    terminalConnectionPool: TerminalSessionConnectionPool? = nil,
@@ -527,6 +528,7 @@ final class MessageBubbleUIKitContainerView: UIView {
             paddingScale: paddingScale,
             minWidthOverride: minWidthOverride,
             maxWidthOverride: maxWidthOverride,
+            minHeightOverride: minHeightOverride,
             useContinuousCorners: useContinuousCorners,
             isDark: isDark,
             terminalConnectionPool: terminalConnectionPool,
@@ -637,6 +639,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private var maxWidthConstraint: NSLayoutConstraint!
     private var minWidthConstraint: NSLayoutConstraint!
     private var fixedWidthConstraint: NSLayoutConstraint?
+    private var minHeightConstraint: NSLayoutConstraint?
     private var bodyMaxWidthConstraint: NSLayoutConstraint?
     private var dynamicContentHeightConstraint: NSLayoutConstraint?
     private var fileTapHandlers: [ObjectIdentifier: () -> Void] = [:]
@@ -1195,6 +1198,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
                    paddingScale: CGFloat = 1,
                    minWidthOverride: CGFloat? = nil,
                    maxWidthOverride: CGFloat? = nil,
+                   minHeightOverride: CGFloat? = nil,
                    useContinuousCorners: Bool = true,
                    isDark: Bool? = nil,
                    terminalConnectionPool: TerminalSessionConnectionPool? = nil,
@@ -1267,6 +1271,17 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         maxWidthConstraint.constant = effectiveMaxWidth
         fixedWidthConstraint?.isActive = false
         fixedWidthConstraint = nil
+        if let minHeightOverride {
+            if minHeightConstraint == nil {
+                let constraint = bubbleBackgroundView.heightAnchor.constraint(greaterThanOrEqualToConstant: minHeightOverride)
+                constraint.identifier = "MessageBubbleUIKitView.minHeightOverride"
+                minHeightConstraint = constraint
+            }
+            minHeightConstraint?.constant = minHeightOverride
+            minHeightConstraint?.isActive = true
+        } else {
+            minHeightConstraint?.isActive = false
+        }
         self.onRequestExpand = onRequestExpand
         self.onRequestLayout = onRequestLayout
         self.onInteractiveCallback = onInteractiveCallback

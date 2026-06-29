@@ -114,6 +114,7 @@ final class TypingIndicatorCell: UICollectionViewCell {
             paddingScale: paddingScale,
             minWidthOverride: Self.bubbleWidth,
             maxWidthOverride: Self.bubbleWidth,
+            minHeightOverride: Self.height(progressSummary: trimmedProgress),
             isDark: isDark,
             onRequestExpand: nil,
             onRequestLayout: nil,

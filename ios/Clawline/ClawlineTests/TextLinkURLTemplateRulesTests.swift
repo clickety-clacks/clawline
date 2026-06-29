@@ -402,6 +402,42 @@ struct TextLinkURLTemplateRulesTests {
         })
     }
 
+    @Test("T1369: expanded detail does not resolve selected snapshot across sessions")
+    @MainActor
+    func expandedDetailDoesNotResolveSelectedSnapshotAcrossSessions() {
+        let viewModel = makeT1369ChatViewModel()
+        defer { viewModel.onDisappear(origin: "T1369CrossSessionDetailTest") }
+        let sharedID = "t1369-shared-detail-id"
+        let otherSessionMessage = Message(
+            id: sharedID,
+            role: .assistant,
+            content: "Other session content must not appear.",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:other",
+            sender: "CLU"
+        )
+        let selectedSnapshot = Message(
+            id: sharedID,
+            role: .assistant,
+            content: "",
+            timestamp: otherSessionMessage.timestamp,
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal",
+            sender: "CLU"
+        )
+        viewModel.debugUpsertMessage(otherSessionMessage, isServer: true)
+
+        let resolved = viewModel.expandedDetailMessage(for: selectedSnapshot)
+
+        #expect(resolved.sessionKey == selectedSnapshot.sessionKey)
+        #expect(resolved.content == selectedSnapshot.content)
+    }
+
     @Test("T1369: full content sheet renders presentation table when selected message content is blank")
     func fullContentSheetRendersPresentationTableForBlankSelectedMessageContent() {
         let table = TableModel(
@@ -482,6 +518,10 @@ struct TextLinkURLTemplateRulesTests {
         | --- | ---: |
         | Alpha | 1 |
         | Beta | 2 |
+        | Gamma | 3 |
+        | Delta | 4 |
+        | Epsilon | 5 |
+        | Zeta | 6 |
         """
         let canonical = Message(
             id: "t1369-canonical-table-detail",
@@ -521,9 +561,9 @@ struct TextLinkURLTemplateRulesTests {
         #expect(resolved.content == content)
         #expect(blocks.contains { block in
             if case .table(let table) = block {
-                return table.rows.count == 2
+                return table.rows.count == 6
                     && table.rows.first?.cells.first?.plainText == "Alpha"
-                    && table.rows.last?.cells.first?.plainText == "Beta"
+                    && table.rows.last?.cells.first?.plainText == "Zeta"
             }
             return false
         })

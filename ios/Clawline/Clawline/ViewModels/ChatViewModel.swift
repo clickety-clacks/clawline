@@ -434,7 +434,7 @@ final class ChatViewModel: ChatViewModelHosting {
            let message = sessionMessages.first(where: { $0.id == selectedMessage.id }) {
             return message
         }
-        return findMessage(id: selectedMessage.id)?.message ?? selectedMessage
+        return selectedMessage
     }
 
     func streamDotState(for sessionKey: String) -> StreamDotState {

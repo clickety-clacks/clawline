@@ -799,7 +799,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             // Fill the allocated cell width. The flow layout decides the cell width; the bubble background
             // should match it so "wide" bubbles don't render with a right-side gap.
             bubbleBackgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            bubbleBackgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            bubbleBackgroundView.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
             maxWidthConstraint,
             minWidthConstraint,
             // Shadow container matches bubble frame (clear background, no inset needed)
@@ -981,9 +981,9 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         bodyTextContainer.translatesAutoresizingMaskIntoConstraints = false
         bodyTextContainer.backgroundColor = .clear
         bodyTextContainer.addSubview(bodyLabel)
-        // Keep text left-aligned and allow OTW caps without forcing non-text content to narrow.
+        // Keep text left-aligned while preventing wide bubbles from collapsing body text.
         let bodyPrefersFillWidth = bodyLabel.widthAnchor.constraint(equalTo: bodyTextContainer.widthAnchor)
-        bodyPrefersFillWidth.priority = .defaultLow
+        bodyPrefersFillWidth.priority = UILayoutPriority(999)
         NSLayoutConstraint.activate([
             bodyLabel.topAnchor.constraint(equalTo: bodyTextContainer.topAnchor),
             bodyLabel.leadingAnchor.constraint(equalTo: bodyTextContainer.leadingAnchor),
@@ -2931,11 +2931,14 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         textView.attributedText = attributed
 
         container.addSubview(textView)
+        let textPrefersFillWidth = textView.widthAnchor.constraint(equalTo: container.widthAnchor)
+        textPrefersFillWidth.priority = UILayoutPriority(999)
         NSLayoutConstraint.activate([
             textView.topAnchor.constraint(equalTo: container.topAnchor),
             textView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             textView.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor),
-            textView.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+            textView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            textPrefersFillWidth
         ])
         return container
     }

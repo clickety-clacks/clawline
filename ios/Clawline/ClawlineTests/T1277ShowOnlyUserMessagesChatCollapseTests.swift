@@ -23,6 +23,45 @@ final class T1277ShowOnlyUserMessagesChatCollapseTests: XCTestCase {
         )
     }
 
+    func testStreamSearchFiltersVisibleMessageContent() {
+        let messages = [
+            t1277Message(id: "a1", role: .assistant, content: "assistant one"),
+            t1277Message(id: "u1", role: .user, content: "user needle"),
+            t1277Message(id: "a2", role: .assistant, content: "assistant needle")
+        ]
+
+        XCTAssertEqual(
+            StreamMessageSearch.filteredMessages(from: messages, query: "needle").map(\.id),
+            ["u1", "a2"]
+        )
+    }
+
+    func testCollapsedProjectionSearchFiltersOnlyVisibleUserMessages() {
+        let messages = [
+            t1277Message(id: "a1", role: .assistant, content: "needle hidden"),
+            t1277Message(id: "u1", role: .user, content: "visible needle"),
+            t1277Message(id: "a2", role: .assistant, content: "needle hidden assistant")
+        ]
+        let visibleMessages = ShowOnlyUserMessagesChatCollapse.visibleMessages(from: messages, isCollapsed: true)
+
+        XCTAssertEqual(
+            StreamMessageSearch.filteredMessages(from: visibleMessages, query: "needle").map(\.id),
+            ["u1"]
+        )
+    }
+
+    func testClearingStreamSearchRestoresProjectedVisibleMessages() {
+        let messages = [
+            t1277Message(id: "a1", role: .assistant, content: "assistant one"),
+            t1277Message(id: "u1", role: .user, content: "user one")
+        ]
+
+        XCTAssertEqual(
+            StreamMessageSearch.filteredMessages(from: messages, query: "").map(\.id),
+            ["a1", "u1"]
+        )
+    }
+
     func testAnimationAndRetainedCountsMatchSpecValues() {
         XCTAssertEqual(ShowOnlyUserMessagesChatCollapse.animationDuration, 0.3)
         XCTAssertEqual(

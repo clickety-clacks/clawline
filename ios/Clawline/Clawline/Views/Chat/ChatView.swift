@@ -360,6 +360,7 @@ struct ChatView: View {
     @State private var keyboardAnimationCurve: UIView.AnimationCurve = .easeInOut
     @State private var keyboardRefreshToken: Int = 0
     @State private var messageListDismissModeSummary = "keyboardDismissMode=interactive;keyboardPinned=0"
+    @State private var streamSearchQueryBySessionKey: [String: String] = [:]
     @State private var layoutCoordinator = ChatLayoutCoordinator()
     @State private var layoutRevision: Int = 0
     @State private var selectionRange = NSRange(location: 0, length: 0)
@@ -2604,6 +2605,7 @@ struct ChatView: View {
             layoutCoordinator: layoutCoordinator,
             sessionKey: sessionKey,
             sessionStatus: viewModel.sessionStatus(for: sessionKey),
+            streamSearchQuery: streamSearchQueryBySessionKey[sessionKey] ?? "",
             forceReReadGeneration: viewModel.forceReReadGeneration(for: sessionKey),
             sendIndicatorRevision: viewModel.sendIndicatorRevision,
             fontScaleChangeSequence: fontScaleChangeSequence,
@@ -2643,6 +2645,9 @@ struct ChatView: View {
             onShowOnlyUserMessagesModeChanged: { sessionKey, isCollapsed in
                 showOnlyUserMessagesCollapsedBySessionKey[sessionKey] = isCollapsed
                 viewModel.setShowOnlyUserMessagesMode(isCollapsed, for: sessionKey)
+            },
+            onStreamSearchQueryChanged: { sessionKey, query in
+                streamSearchQueryBySessionKey[sessionKey] = query
             },
             onKeyboardDismissModeChanged: { summary in
                 messageListDismissModeSummary = summary

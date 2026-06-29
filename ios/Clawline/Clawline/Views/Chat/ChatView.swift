@@ -9035,50 +9035,52 @@ final class NotificationReplyUITextView: UITextView {
     }
 
     @objc private func didPressCtrlW(_ sender: UIKeyCommand) {
-        guard isEditable, isFirstResponder else { return }
-        guard case .handled(.notificationReply(let routedSourceChatId)) = KeyboardCommandRouter
-            .route(intent: .textModifiedNewline, store: keyboardOwnershipStore)
-            .outcome,
-              routedSourceChatId == sourceChatId else { return }
+        deletePreviousWordForReplyShortcut()
+    }
 
-        if let selectedRange = selectedTextRange, !selectedRange.isEmpty {
-            replaceUserText(selectedRange, with: "")
+    override func insertText(_ text: String) {
+        if text == "\u{17}", deletePreviousWordForReplyShortcut() {
             return
         }
+        super.insertText(text)
+    }
 
-        guard let cursor = selectedTextRange?.start else { return }
-        guard let textBeforeCursorRange = textRange(from: beginningOfDocument, to: cursor),
-              let textBeforeCursor = text(in: textBeforeCursorRange),
-              !textBeforeCursor.isEmpty else { return }
-
-        var deleteStartIndex = textBeforeCursor.endIndex
-        while deleteStartIndex > textBeforeCursor.startIndex {
-            let previousIndex = textBeforeCursor.index(before: deleteStartIndex)
-            if !textBeforeCursor[previousIndex].isWhitespace { break }
-            deleteStartIndex = previousIndex
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if presses.contains(where: isControlWPress(_:)),
+           deletePreviousWordForReplyShortcut() {
+            return
         }
+        super.pressesBegan(presses, with: event)
+    }
 
-        while deleteStartIndex > textBeforeCursor.startIndex {
-            let previousIndex = textBeforeCursor.index(before: deleteStartIndex)
-            if textBeforeCursor[previousIndex].isWhitespace { break }
-            deleteStartIndex = previousIndex
-        }
+    @discardableResult
+    private func deletePreviousWordForReplyShortcut() -> Bool {
+        guard isEditable, isFirstResponder, isOwnedReplyShortcutRoute else { return false }
+        guard let range = NotificationReplyPreviousWordDeletion.deleteRange(
+            in: text ?? "",
+            selectedRange: selectedRange
+        ) else { return false }
+        replacePlainText(in: range, with: "")
+        return true
+    }
 
-        let charsToDelete = textBeforeCursor.distance(from: deleteStartIndex, to: textBeforeCursor.endIndex)
-        guard charsToDelete > 0,
-              let deleteStart = position(from: cursor, offset: -charsToDelete),
-              let deleteRange = textRange(from: deleteStart, to: cursor) else { return }
+    private var isOwnedReplyShortcutRoute: Bool {
+        guard case .handled(.notificationReply(let routedSourceChatId)) = KeyboardCommandRouter
+            .route(intent: .textModifiedNewline, store: keyboardOwnershipStore)
+            .outcome else { return false }
+        return routedSourceChatId == sourceChatId
+    }
 
-        replaceUserText(deleteRange, with: "")
+    private func isControlWPress(_ press: UIPress) -> Bool {
+        guard let key = press.key else { return false }
+        return NotificationReplyControlWShortcut.matches(
+            charactersIgnoringModifiers: key.charactersIgnoringModifiers,
+            modifierFlags: key.modifierFlags
+        )
     }
 
     private func insertPlainText(_ text: String) {
         replacePlainText(in: selectedRange, with: text)
-    }
-
-    private func replaceUserText(_ range: UITextRange, with text: String) {
-        replace(range, withText: text)
-        delegate?.textViewDidChange?(self)
     }
 
     private func replacePlainText(in range: NSRange, with text: String) {
@@ -9086,6 +9088,41 @@ final class NotificationReplyUITextView: UITextView {
         textStorage.replaceCharacters(in: range, with: attributed)
         selectedRange = NSRange(location: range.location + attributed.length, length: 0)
         delegate?.textViewDidChange?(self)
+    }
+}
+
+struct NotificationReplyControlWShortcut {
+    static func matches(charactersIgnoringModifiers: String, modifierFlags: UIKeyModifierFlags) -> Bool {
+        let modifiers = modifierFlags.intersection([.command, .shift, .alternate, .control])
+        return modifiers == [.control]
+            && charactersIgnoringModifiers.lowercased() == "w"
+    }
+}
+
+struct NotificationReplyPreviousWordDeletion {
+    static func deleteRange(in text: String, selectedRange: NSRange) -> NSRange? {
+        guard let range = Range(selectedRange, in: text) else { return nil }
+        guard selectedRange.length == 0 else { return selectedRange }
+        let cursor = range.lowerBound
+        guard selectedRange.location > 0 else { return nil }
+
+        var deleteStartIndex = cursor
+        while deleteStartIndex > text.startIndex {
+            let previousIndex = text.index(before: deleteStartIndex)
+            if !text[previousIndex].isWhitespace { break }
+            deleteStartIndex = previousIndex
+        }
+
+        while deleteStartIndex > text.startIndex {
+            let previousIndex = text.index(before: deleteStartIndex)
+            if text[previousIndex].isWhitespace { break }
+            deleteStartIndex = previousIndex
+        }
+
+        let lowerBound = deleteStartIndex.utf16Offset(in: text)
+        let length = selectedRange.location - lowerBound
+        guard length > 0 else { return nil }
+        return NSRange(location: lowerBound, length: length)
     }
 }
 

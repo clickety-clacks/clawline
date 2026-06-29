@@ -559,6 +559,71 @@ struct PromptFocusShortcutActivationTests {
         #expect(textView.selectedRange == NSRange(location: 6, length: 0))
     }
 
+    @Test("T1476 reply input previous-word deletion helper covers selection and words")
+    func replyInputPreviousWordDeletionHelperCoversSelectionAndWords() {
+        #expect(
+            NotificationReplyPreviousWordDeletion.deleteRange(
+                in: "alpha beta   ",
+                selectedRange: NSRange(location: 13, length: 0)
+            ) == NSRange(location: 6, length: 7)
+        )
+        #expect(
+            NotificationReplyPreviousWordDeletion.deleteRange(
+                in: "keep remove tail",
+                selectedRange: NSRange(location: 5, length: 7)
+            ) == NSRange(location: 5, length: 7)
+        )
+        #expect(
+            NotificationReplyPreviousWordDeletion.deleteRange(
+                in: "alpha",
+                selectedRange: NSRange(location: 0, length: 0)
+            ) == nil
+        )
+    }
+
+    @Test("T1476 reply input recognizes hardware Ctrl-W press shape")
+    func replyInputRecognizesHardwareCtrlWPressShape() {
+        #expect(
+            NotificationReplyControlWShortcut.matches(
+                charactersIgnoringModifiers: "w",
+                modifierFlags: [.control]
+            )
+        )
+        #expect(
+            NotificationReplyControlWShortcut.matches(
+                charactersIgnoringModifiers: "W",
+                modifierFlags: [.control]
+            )
+        )
+        #expect(
+            NotificationReplyControlWShortcut.matches(
+                charactersIgnoringModifiers: "w",
+                modifierFlags: [.command]
+            ) == false
+        )
+        #expect(
+            NotificationReplyControlWShortcut.matches(
+                charactersIgnoringModifiers: "w",
+                modifierFlags: [.control, .shift]
+            ) == false
+        )
+    }
+
+    @Test("T1476 reply input handles delivered Ctrl-W text input event")
+    @MainActor
+    func replyInputHandlesDeliveredCtrlWTextInputEvent() {
+        let (textView, window) = focusedNotificationReplyTextView(sourceChatId: "reply-source")
+        defer { window.isHidden = true }
+
+        textView.text = "alpha beta"
+        textView.selectedRange = NSRange(location: 10, length: 0)
+
+        textView.insertText("\u{17}")
+
+        #expect(textView.text == "alpha ")
+        #expect(textView.selectedRange == NSRange(location: 6, length: 0))
+    }
+
     @Test("T1476 reply input Ctrl-W deletes active selection")
     @MainActor
     func replyInputCtrlWDeletesActiveSelection() {

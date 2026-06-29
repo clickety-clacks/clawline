@@ -587,7 +587,7 @@ final class MessageBubbleUIKitContainerView: UIView {
     }
 
     func bubbleFrameInContainer() -> CGRect {
-        bubbleView.frame
+        bubbleView.renderedBubbleFrame(in: self)
     }
 }
 
@@ -2197,6 +2197,11 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             view.centerXAnchor.constraint(equalTo: bubbleBackgroundView.centerXAnchor),
             view.centerYAnchor.constraint(equalTo: bubbleBackgroundView.centerYAnchor)
         ])
+    }
+
+    func renderedBubbleFrame(in view: UIView) -> CGRect {
+        layoutIfNeeded()
+        return bubbleBackgroundView.convert(bubbleBackgroundView.bounds, to: view)
     }
 
     private func updateAppearanceColors() {

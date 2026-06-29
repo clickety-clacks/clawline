@@ -4379,6 +4379,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
         flowLayout.minimumInteritemSpacing = metrics.flowGap
         flowLayout.minimumLineSpacing = metrics.flowGap
+        flowLayout.rowSpacingProvider = { [weak self] previousIndex, nextIndex in
+            self?.rowSpacing(afterItemAt: previousIndex, beforeItemAt: nextIndex, metrics: metrics)
+                ?? metrics.flowGap
+        }
+        flowLayout.rowSpacingFingerprintProvider = { [weak self] in
+            self?.rowSpacingFingerprint() ?? 0
+        }
         // Section inset is just for padding - content insets handle safe areas
         flowLayout.sectionInset = Self.flowSectionInset(
             containerPadding: metrics.containerPadding,
@@ -4418,6 +4425,50 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             scheduleLayoutInvalidation()
         }
         return measurementInputsChanged
+    }
+
+    private static func interBubbleRowSpacing(isCompact: Bool) -> CGFloat {
+        isCompact ? 4 : 6
+    }
+
+    private func rowSpacing(afterItemAt previousIndex: Int,
+                            beforeItemAt nextIndex: Int,
+                            metrics: ChatFlowTheme.Metrics) -> CGFloat {
+        guard isNormalMessageItem(at: previousIndex),
+              isNormalMessageItem(at: nextIndex) else {
+            return metrics.flowGap
+        }
+        return Self.interBubbleRowSpacing(isCompact: isCompact)
+    }
+
+    private func isNormalMessageItem(at itemIndex: Int) -> Bool {
+        let indexPath = IndexPath(item: itemIndex, section: 0)
+        guard let id = dataSource.itemIdentifier(for: indexPath) else { return false }
+        guard id != TypingIndicatorCell.itemId,
+              id != SessionMetadataFooterCell.itemId,
+              !DateSeparatorCell.isDateSeparatorItemID(id),
+              !id.hasPrefix("web_") else {
+            return false
+        }
+        return messagesById[id] != nil
+    }
+
+    private func rowSpacingFingerprint() -> Int {
+        var hasher = Hasher()
+        for id in dataSource.snapshot().itemIdentifiers {
+            hasher.combine(id)
+            hasher.combine(rowSpacingClass(forItemId: id))
+        }
+        return hasher.finalize()
+    }
+
+    private func rowSpacingClass(forItemId id: String) -> Int {
+        if id == TypingIndicatorCell.itemId { return 1 }
+        if id == SessionMetadataFooterCell.itemId { return 2 }
+        if DateSeparatorCell.isDateSeparatorItemID(id) { return 3 }
+        if id.hasPrefix("web_") { return 4 }
+        if messagesById[id] != nil { return 5 }
+        return 0
     }
 
     private func availableContentWidth() -> CGFloat {
@@ -6934,6 +6985,9 @@ enum FooterActionHitTesting {
 }
 
 private final class MessageFlowLayout: UICollectionViewFlowLayout {
+    var rowSpacingProvider: ((Int, Int) -> CGFloat)?
+    var rowSpacingFingerprintProvider: (() -> Int)?
+
     enum InvalidationMode {
         case fullRebuild
         case itemHeightChange(index: Int, delta: CGFloat)
@@ -6957,6 +7011,7 @@ private final class MessageFlowLayout: UICollectionViewFlowLayout {
         let sectionInset: UIEdgeInsets
         let minimumInteritemSpacing: CGFloat
         let minimumLineSpacing: CGFloat
+        let rowSpacingFingerprint: Int
     }
 
     private func isFullRowItem(_ width: CGFloat, contentWidth: CGFloat) -> Bool {
@@ -6992,7 +7047,8 @@ private final class MessageFlowLayout: UICollectionViewFlowLayout {
             contentWidth: contentWidth,
             sectionInset: sectionInset,
             minimumInteritemSpacing: minimumInteritemSpacing,
-            minimumLineSpacing: minimumLineSpacing
+            minimumLineSpacing: minimumLineSpacing,
+            rowSpacingFingerprint: rowSpacingFingerprintProvider?() ?? 0
         )
         if case let .itemHeightChange(index, delta) = pendingInvalidation,
            !needsRebuild,
@@ -7035,7 +7091,8 @@ private final class MessageFlowLayout: UICollectionViewFlowLayout {
         var x = sectionInset.left
         var y = sectionInset.top
         var rowHeight: CGFloat = 0
-        var pendingRowSpacing = false
+        var pendingRowSpacingAfterItem: Int?
+        var currentRowLastItem: Int?
 
         for item in 0 ..< itemCount {
             let indexPath = IndexPath(item: item, section: 0)
@@ -7043,21 +7100,23 @@ private final class MessageFlowLayout: UICollectionViewFlowLayout {
                 .collectionView?(collectionView, layout: self, sizeForItemAt: indexPath) ?? itemSize
             let fullRowItem = isFullRowItem(size.width, contentWidth: contentWidth)
 
-            if pendingRowSpacing {
-                y += minimumLineSpacing
-                pendingRowSpacing = false
+            if let previousItem = pendingRowSpacingAfterItem {
+                y += rowSpacing(afterItem: previousItem, beforeItem: item)
+                pendingRowSpacingAfterItem = nil
             }
 
             if fullRowItem, x > sectionInset.left {
                 x = sectionInset.left
-                y += rowHeight + minimumLineSpacing
+                y += rowHeight + rowSpacing(afterItem: currentRowLastItem ?? max(0, item - 1), beforeItem: item)
                 rowHeight = 0
+                currentRowLastItem = nil
             }
 
             if !fullRowItem, x + size.width > maxX, x > sectionInset.left {
                 x = sectionInset.left
-                y += rowHeight + minimumLineSpacing
+                y += rowHeight + rowSpacing(afterItem: currentRowLastItem ?? max(0, item - 1), beforeItem: item)
                 rowHeight = 0
+                currentRowLastItem = nil
             }
 
             let frame = CGRect(x: x, y: y, width: size.width, height: size.height)
@@ -7069,10 +7128,12 @@ private final class MessageFlowLayout: UICollectionViewFlowLayout {
                 x = sectionInset.left
                 y = frame.maxY
                 rowHeight = 0
-                pendingRowSpacing = true
+                pendingRowSpacingAfterItem = item
+                currentRowLastItem = nil
             } else {
                 x += size.width + minimumInteritemSpacing
                 rowHeight = max(rowHeight, size.height)
+                currentRowLastItem = item
             }
         }
 
@@ -7081,6 +7142,10 @@ private final class MessageFlowLayout: UICollectionViewFlowLayout {
         needsRebuild = false
         pendingInvalidation = .none
         StreamSwitchTiming.log("layout_prepare_end", sessionKey: sessionKey)
+    }
+
+    private func rowSpacing(afterItem previousItem: Int, beforeItem nextItem: Int) -> CGFloat {
+        rowSpacingProvider?(previousItem, nextItem) ?? minimumLineSpacing
     }
 
     private func canAppendIncrementally(from previous: LayoutSignature, to current: LayoutSignature) -> Bool {
@@ -7118,7 +7183,7 @@ private final class MessageFlowLayout: UICollectionViewFlowLayout {
         var currentRowHeight = rowHeight
         if x + size.width > maxX, x > sectionInset.left {
             x = sectionInset.left
-            y = rowMinY + rowHeight + minimumLineSpacing
+            y = rowMinY + rowHeight + rowSpacing(afterItem: previousIndexPath.item, beforeItem: newItemIndex)
             currentRowHeight = 0
         }
 

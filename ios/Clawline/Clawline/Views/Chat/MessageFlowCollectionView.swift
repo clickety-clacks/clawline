@@ -2009,6 +2009,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onExpand: onExpand,
             sessionKey: channelOverride,
             sessionStatus: sessionStatus,
+            streamSearchQuery: streamSearchQuery,
             forceReReadGeneration: readState(for: sessionKey).lastSeenForceReReadGeneration,
             sendIndicatorRevision: currentSendIndicatorRevision,
             fontScaleChangeSequence: currentFontScaleChangeSequence,
@@ -2020,6 +2021,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onInsertMessageIntoPrompt: onInsertMessageIntoPrompt,
             onReferenceMessageInPrompt: onReferenceMessageInPrompt,
             onShowOnlyUserMessagesModeChanged: onShowOnlyUserMessagesModeChanged,
+            onStreamSearchQueryChanged: onStreamSearchQueryChanged,
             onKeyboardDismissModeChanged: onKeyboardDismissModeChanged,
             isDark: currentIsDark,
             allowsTransparentWindowBackground: allowsTransparentWindowBackground
@@ -2300,6 +2302,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onExpand: onExpand,
             sessionKey: channelOverride,
             sessionStatus: sessionStatus,
+            streamSearchQuery: streamSearchQuery,
             forceReReadGeneration: 0,
             sendIndicatorRevision: viewModel.sendIndicatorRevision,
             onScrollEvent: onScrollEvent,
@@ -2310,6 +2313,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onInsertMessageIntoPrompt: onInsertMessageIntoPrompt,
             onReferenceMessageInPrompt: onReferenceMessageInPrompt,
             onShowOnlyUserMessagesModeChanged: onShowOnlyUserMessagesModeChanged,
+            onStreamSearchQueryChanged: onStreamSearchQueryChanged,
             onKeyboardDismissModeChanged: onKeyboardDismissModeChanged,
             isDark: currentIsDark,
             allowsTransparentWindowBackground: allowsTransparentWindowBackground

@@ -62,6 +62,22 @@ final class T1277ShowOnlyUserMessagesChatCollapseTests: XCTestCase {
         )
     }
 
+    func testMaterializationRefreshPreservesActiveStreamSearchQuery() throws {
+        let source = try t1277MessageFlowCollectionViewSource()
+        let body = try XCTUnwrap(t1277FunctionBody(named: "runMaterializationRefreshPass", in: source))
+
+        XCTAssertTrue(body.contains("streamSearchQuery: streamSearchQuery"))
+        XCTAssertTrue(body.contains("onStreamSearchQueryChanged: onStreamSearchQueryChanged"))
+    }
+
+    func testCollapsedModeRebuildPreservesStreamSearchCallback() throws {
+        let source = try t1277MessageFlowCollectionViewSource()
+        let body = try XCTUnwrap(t1277FunctionBody(named: "setShowOnlyUserMessages", in: source))
+
+        XCTAssertTrue(body.contains("streamSearchQuery: streamSearchQuery"))
+        XCTAssertTrue(body.contains("onStreamSearchQueryChanged: onStreamSearchQueryChanged"))
+    }
+
     func testAnimationAndRetainedCountsMatchSpecValues() {
         XCTAssertEqual(ShowOnlyUserMessagesChatCollapse.animationDuration, 0.3)
         XCTAssertEqual(
@@ -260,6 +276,35 @@ private func t1277Message(id: String, role: Message.Role, content: String) -> Me
         deviceId: nil,
         sessionKey: t1277SessionKey
     )
+}
+
+private func t1277MessageFlowCollectionViewSource() throws -> String {
+    let testsURL = URL(fileURLWithPath: #filePath)
+    let sourceURL = testsURL
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("Clawline/Views/Chat/MessageFlowCollectionView.swift")
+    return try String(contentsOf: sourceURL, encoding: .utf8)
+}
+
+private func t1277FunctionBody(named name: String, in source: String) -> String? {
+    guard let signatureRange = source.range(of: "func \(name)") else { return nil }
+    guard let openingBrace = source[signatureRange.lowerBound...].firstIndex(of: "{") else { return nil }
+    var depth = 0
+    var index = openingBrace
+    while index < source.endIndex {
+        let character = source[index]
+        if character == "{" {
+            depth += 1
+        } else if character == "}" {
+            depth -= 1
+            if depth == 0 {
+                return String(source[openingBrace...index])
+            }
+        }
+        index = source.index(after: index)
+    }
+    return nil
 }
 
 @MainActor

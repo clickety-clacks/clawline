@@ -8980,6 +8980,9 @@ final class NotificationReplyUITextView: UITextView {
             modifierFlags: [],
             action: #selector(didPressEscape)
         )
+        let emacsCommands = [
+            UIKeyCommand(input: "w", modifierFlags: [.control], action: #selector(didPressCtrlW))
+        ]
         let modifiedReturnCommands = KeyboardCommandBridge.textInputSpecs.compactMap { spec -> UIKeyCommand? in
             guard spec.intent == .textModifiedNewline else { return nil }
             return UIKeyCommand(
@@ -8988,7 +8991,7 @@ final class NotificationReplyUITextView: UITextView {
                 action: #selector(didPressModifiedReturn)
             )
         }
-        return prioritizedNotificationCommands + [escapeCommand] + modifiedReturnCommands + (super.keyCommands ?? [])
+        return prioritizedNotificationCommands + [escapeCommand] + modifiedReturnCommands + emacsCommands + (super.keyCommands ?? [])
     }
 
     override func didMoveToWindow() {
@@ -9031,9 +9034,55 @@ final class NotificationReplyUITextView: UITextView {
         insertPlainText("\n")
     }
 
+    @objc private func didPressCtrlW(_ sender: UIKeyCommand) {
+        guard isEditable, isFirstResponder else { return }
+        guard case .handled(.notificationReply(let routedSourceChatId)) = KeyboardCommandRouter
+            .route(intent: .textModifiedNewline, store: keyboardOwnershipStore)
+            .outcome,
+              routedSourceChatId == sourceChatId else { return }
+
+        if let selectedRange = selectedTextRange, !selectedRange.isEmpty {
+            replaceUserText(selectedRange, with: "")
+            return
+        }
+
+        guard let cursor = selectedTextRange?.start else { return }
+        guard let textBeforeCursorRange = textRange(from: beginningOfDocument, to: cursor),
+              let textBeforeCursor = text(in: textBeforeCursorRange),
+              !textBeforeCursor.isEmpty else { return }
+
+        var deleteStartIndex = textBeforeCursor.endIndex
+        while deleteStartIndex > textBeforeCursor.startIndex {
+            let previousIndex = textBeforeCursor.index(before: deleteStartIndex)
+            if !textBeforeCursor[previousIndex].isWhitespace { break }
+            deleteStartIndex = previousIndex
+        }
+
+        while deleteStartIndex > textBeforeCursor.startIndex {
+            let previousIndex = textBeforeCursor.index(before: deleteStartIndex)
+            if textBeforeCursor[previousIndex].isWhitespace { break }
+            deleteStartIndex = previousIndex
+        }
+
+        let charsToDelete = textBeforeCursor.distance(from: deleteStartIndex, to: textBeforeCursor.endIndex)
+        guard charsToDelete > 0,
+              let deleteStart = position(from: cursor, offset: -charsToDelete),
+              let deleteRange = textRange(from: deleteStart, to: cursor) else { return }
+
+        replaceUserText(deleteRange, with: "")
+    }
+
     private func insertPlainText(_ text: String) {
+        replacePlainText(in: selectedRange, with: text)
+    }
+
+    private func replaceUserText(_ range: UITextRange, with text: String) {
+        replace(range, withText: text)
+        delegate?.textViewDidChange?(self)
+    }
+
+    private func replacePlainText(in range: NSRange, with text: String) {
         let attributed = NSAttributedString(string: text, attributes: typingAttributes)
-        let range = selectedRange
         textStorage.replaceCharacters(in: range, with: attributed)
         selectedRange = NSRange(location: range.location + attributed.length, length: 0)
         delegate?.textViewDidChange?(self)

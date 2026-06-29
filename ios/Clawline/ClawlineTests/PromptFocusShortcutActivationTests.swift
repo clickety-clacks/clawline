@@ -489,6 +489,20 @@ struct PromptFocusShortcutActivationTests {
         )
     }
 
+    @Test("T1476 reply input exposes Ctrl-W previous-word delete shortcut")
+    @MainActor
+    func replyInputExposesCtrlWPreviousWordDeleteShortcut() {
+        let textView = NotificationReplyUITextView()
+
+        #expect(
+            textView.keyCommands?.contains { command in
+                command.input == "w"
+                    && command.modifierFlags == [.control]
+                    && command.action == Selector(("didPressCtrlW:"))
+            } == true
+        )
+    }
+
     @Test("T342 reply input modified Return inserts newline at caret")
     @MainActor
     func replyInputModifiedReturnInsertsNewlineAtCaret() {
@@ -525,6 +539,64 @@ struct PromptFocusShortcutActivationTests {
         )
         #expect(textView.text == "re\n\nply")
         #expect(textView.selectedRange == NSRange(location: 4, length: 0))
+    }
+
+    @Test("T1476 reply input Ctrl-W deletes previous word and trailing spaces")
+    @MainActor
+    func replyInputCtrlWDeletesPreviousWordAndTrailingSpaces() {
+        let (textView, window) = focusedNotificationReplyTextView(sourceChatId: "reply-source")
+        defer { window.isHidden = true }
+
+        textView.text = "alpha beta   "
+        textView.selectedRange = NSRange(location: 13, length: 0)
+
+        textView.perform(
+            Selector(("didPressCtrlW:")),
+            with: UIKeyCommand(input: "w", modifierFlags: [.control], action: Selector(("didPressCtrlW:")))
+        )
+
+        #expect(textView.text == "alpha ")
+        #expect(textView.selectedRange == NSRange(location: 6, length: 0))
+    }
+
+    @Test("T1476 reply input Ctrl-W deletes active selection")
+    @MainActor
+    func replyInputCtrlWDeletesActiveSelection() {
+        let (textView, window) = focusedNotificationReplyTextView(sourceChatId: "reply-source")
+        defer { window.isHidden = true }
+
+        textView.text = "keep remove tail"
+        textView.selectedRange = NSRange(location: 5, length: 7)
+
+        textView.perform(
+            Selector(("didPressCtrlW:")),
+            with: UIKeyCommand(input: "w", modifierFlags: [.control], action: Selector(("didPressCtrlW:")))
+        )
+
+        #expect(textView.text == "keep tail")
+        #expect(textView.selectedRange == NSRange(location: 5, length: 0))
+    }
+
+    @Test("T1476 reply input Ctrl-W preserves text when reply route is not focused")
+    @MainActor
+    func replyInputCtrlWPreservesTextWhenReplyRouteIsNotFocused() {
+        let sourceChatId = "reply-source"
+        let (textView, window) = focusedNotificationReplyTextView(
+            sourceChatId: sourceChatId,
+            isReplyFocused: false
+        )
+        defer { window.isHidden = true }
+
+        textView.text = "alpha beta"
+        textView.selectedRange = NSRange(location: 10, length: 0)
+
+        textView.perform(
+            Selector(("didPressCtrlW:")),
+            with: UIKeyCommand(input: "w", modifierFlags: [.control], action: Selector(("didPressCtrlW:")))
+        )
+
+        #expect(textView.text == "alpha beta")
+        #expect(textView.selectedRange == NSRange(location: 10, length: 0))
     }
 
     @Test("T342 main prompt software Return delegate path stays submit because Shift-Return is not distinguishable")
@@ -1755,6 +1827,30 @@ private func assertModifiedReturnCommands(in commands: [UIKeyCommand]?, action: 
             )
         }
     }
+}
+
+@MainActor
+private func focusedNotificationReplyTextView(
+    sourceChatId: String,
+    focusedSourceChatId: String? = nil,
+    isReplyFocused: Bool = true
+) -> (NotificationReplyUITextView, UIWindow) {
+    let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 120))
+    let textView = NotificationReplyUITextView(frame: CGRect(x: 0, y: 0, width: 320, height: 44), textContainer: nil)
+    textView.sourceChatId = sourceChatId
+    let routedFocusedSourceChatId = isReplyFocused ? (focusedSourceChatId ?? sourceChatId) : nil
+    textView.keyboardOwnershipStore = KeyboardOwnershipSceneFactory.chatScene(
+        visibleNotificationSourceChatIds: [sourceChatId],
+        mentionPickerVisible: false,
+        composerFocused: false,
+        notificationReplySourceChatIds: [sourceChatId],
+        notificationReplyFocusedSourceChatId: routedFocusedSourceChatId,
+        actionMenuSourceChatId: nil
+    )
+    window.addSubview(textView)
+    window.makeKeyAndVisible()
+    #expect(textView.becomeFirstResponder())
+    return (textView, window)
 }
 
 @MainActor

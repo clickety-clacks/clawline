@@ -126,9 +126,21 @@ struct MessageBubbleMetadataTests {
         if let avatar, let body {
             let avatarFrame = avatar.convert(avatar.bounds, to: bubble)
             let bodyFrame = body.convert(body.bounds, to: bubble)
+            let wrapper = body.superview?.superview?.superview?.superview
+            let bubbleBackground = wrapper?.superview?.superview
 
             #expect(avatarFrame.minY < 80)
             #expect(bodyFrame.minY - avatarFrame.maxY < 40)
+            #expect(bodyFrame.width > bubble.bounds.width * 0.85)
+
+            #expect(wrapper != nil)
+            #expect(bubbleBackground != nil)
+            if let wrapper, let bubbleBackground {
+                let wrapperFrame = wrapper.convert(wrapper.bounds, to: bubble)
+                let backgroundFrame = bubbleBackground.convert(bubbleBackground.bounds, to: bubble)
+                #expect(backgroundFrame.maxY - wrapperFrame.maxY < 20)
+                #expect(backgroundFrame.height < bubble.bounds.height / 2)
+            }
         }
     }
 

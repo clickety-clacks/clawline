@@ -624,6 +624,24 @@ struct PromptFocusShortcutActivationTests {
         #expect(textView.selectedRange == NSRange(location: 6, length: 0))
     }
 
+    @Test("T1476 reply input delivered Ctrl-W preserves text when reply route is not focused")
+    @MainActor
+    func replyInputDeliveredCtrlWPreservesTextWhenReplyRouteIsNotFocused() {
+        let (textView, window) = focusedNotificationReplyTextView(
+            sourceChatId: "reply-source",
+            isReplyFocused: false
+        )
+        defer { window.isHidden = true }
+
+        textView.text = "alpha beta"
+        textView.selectedRange = NSRange(location: 10, length: 0)
+
+        textView.insertText("\u{17}")
+
+        #expect(textView.text == "alpha beta")
+        #expect(textView.selectedRange == NSRange(location: 10, length: 0))
+    }
+
     @Test("T1476 reply input Ctrl-W deletes active selection")
     @MainActor
     func replyInputCtrlWDeletesActiveSelection() {

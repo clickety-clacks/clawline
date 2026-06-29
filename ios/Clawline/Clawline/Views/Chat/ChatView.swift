@@ -9039,7 +9039,8 @@ final class NotificationReplyUITextView: UITextView {
     }
 
     override func insertText(_ text: String) {
-        if text == "\u{17}", deletePreviousWordForReplyShortcut() {
+        if text == "\u{17}" {
+            _ = deletePreviousWordForReplyShortcut()
             return
         }
         super.insertText(text)

@@ -30,6 +30,9 @@ struct StreamPageDotsView: View {
     @State private var scrubCandidateIndex: Int?
     @State private var scrubIsCancelled = false
     @State private var scrubTapSuppressionExpiresAt = Date.distantPast
+#if os(visionOS)
+    @State private var isSpatialHovering = false
+#endif
 
     private static let collapsedMaxVisibleDots = 11
     private static let dotDiameter: CGFloat = 7
@@ -46,6 +49,9 @@ struct StreamPageDotsView: View {
     }
     static func unreadEdgeBloomOpacity(colorScheme: ColorScheme) -> Double {
         0.40
+    }
+    static func spatialHoverScale(isHovering: Bool, isSpatial: Bool) -> CGFloat {
+        isHovering && isSpatial ? 2 : 1
     }
     private static let unreadEdgeBloomSourceSize = CGSize(width: 14, height: 9)
     private static let unreadEdgeBloomBorderClearance: CGFloat = 9
@@ -328,6 +334,13 @@ struct StreamPageDotsView: View {
         .accessibilityLabel("Manage streams")
         .accessibilityValue("Stream \(activeIndex + 1) of \(sessionKeys.count)")
         .accessibilityHint("Tap to open stream manager. Long press and drag to preview streams.")
+#if os(visionOS)
+        .scaleEffect(Self.spatialHoverScale(isHovering: isSpatialHovering, isSpatial: true))
+        .animation(.spring(response: 0.22, dampingFraction: 0.72), value: isSpatialHovering)
+        .onHover { isHovering in
+            isSpatialHovering = isHovering
+        }
+#endif
     }
 
     private func handleTap() {

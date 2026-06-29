@@ -1614,6 +1614,8 @@ struct ChatView: View {
                 containerWidth: geometry.size.width,
                 bottomSafeAreaInset: geometry.safeAreaInsets.bottom
             )
+            .visionOSOverlayDepthOffset(48)
+            .zIndex(50)
 #else
             EmptyView()
 #endif

@@ -68,6 +68,13 @@ struct StreamPageDotsViewTests {
         #expect(visibleCount == 11)
     }
 
+    @Test("Spatial hover affordance doubles only for Spatial hover")
+    func spatialHoverAffordanceDoublesOnlyForSpatialHover() {
+        #expect(StreamPageDotsView.spatialHoverScale(isHovering: true, isSpatial: true) == 2)
+        #expect(StreamPageDotsView.spatialHoverScale(isHovering: false, isSpatial: true) == 1)
+        #expect(StreamPageDotsView.spatialHoverScale(isHovering: true, isSpatial: false) == 1)
+    }
+
     @Test("Rendered indicator width matches the visible control width")
     func renderedControlWidthMatchesVisibleControlWidth() {
         let visibleCount = StreamPageDotsView.fittingVisibleDotCount(

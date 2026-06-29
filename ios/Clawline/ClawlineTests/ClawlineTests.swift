@@ -239,6 +239,113 @@ struct ClawlineTests {
         }
     }
 
+    @Test("T1485: bubble geometry owns adjacent row rhythm")
+    func bubbleGeometryOwnsAdjacentRowRhythm() {
+        let compactMetrics = ChatFlowTheme.Metrics(isCompact: true)
+        let regularMetrics = ChatFlowTheme.Metrics(isCompact: false)
+
+        #expect(
+            MessageBubbleGeometry.adjacentMessageRowSpacing(metrics: compactMetrics)
+                == floor(min(compactMetrics.containerPadding, compactMetrics.flowGap) / 4)
+        )
+        #expect(
+            MessageBubbleGeometry.adjacentMessageRowSpacing(metrics: regularMetrics)
+                == floor(min(regularMetrics.containerPadding, regularMetrics.flowGap) / 4)
+        )
+        #expect(MessageBubbleGeometry.adjacentMessageRowSpacing(metrics: compactMetrics) < 4)
+        #expect(MessageBubbleGeometry.adjacentMessageRowSpacing(metrics: regularMetrics) < 6)
+    }
+
+    @Test("T1485: normal bubble bottom blank space is only owned chrome inset")
+    @MainActor
+    func normalBubbleBottomBlankSpaceIsOnlyOwnedChromeInset() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
+        let message = Message(
+            id: "t1485-short-message",
+            role: .user,
+            content: "Short geometry proof",
+            timestamp: Date(timeIntervalSince1970: 0),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "test-session"
+        )
+        let presentation = MessagePresentation(
+            parts: [.text(message.content)],
+            wordCount: 3,
+            hasTextualContent: true,
+            isEmojiOnly: false,
+            hasMediaOnly: false,
+            detectedURLs: [],
+            detectedURLCount: 0,
+            hasSingleURL: false
+        )
+        let bubble = MessageBubbleUIKitView()
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: .short,
+            metrics: metrics,
+            maxWidth: 220,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+
+        let measuredSize = bubble.systemLayoutSizeFitting(
+            CGSize(width: 220, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        bubble.frame = CGRect(origin: .zero, size: measuredSize)
+        bubble.setNeedsLayout()
+        bubble.layoutIfNeeded()
+
+        let geometry = bubble.renderedGeometryForTests(in: bubble)
+        let ownedInsets = MessageBubbleGeometry.contentInsets(
+            metrics: metrics,
+            paddingScale: 1,
+            hasTerminalSessions: false,
+            hasMediaOnly: false
+        )
+        let bottomBlank = geometry.bubbleFrame.maxY - geometry.contentFrame.maxY
+
+        #expect(abs(bottomBlank - ownedInsets.bottom) <= 0.5)
+        #expect(geometry.dynamicContentFrame.maxY <= geometry.contentFrame.maxY + 0.5)
+        #expect(geometry.bodyFrame.maxY <= geometry.contentFrame.maxY + 0.5)
+        print(
+            "T1485 geometry proof bubbleFrame=\(geometry.bubbleFrame) contentFrame=\(geometry.contentFrame) bodyFrame=\(geometry.bodyFrame) dynamicContentFrame=\(geometry.dynamicContentFrame) bottomBlank=\(bottomBlank) ownedBottomInset=\(ownedInsets.bottom) rowGap=\(MessageBubbleGeometry.adjacentMessageRowSpacing(metrics: metrics)) horizontalSide=\(metrics.containerPadding) horizontalBubbleGap=\(metrics.flowGap)"
+        )
+        writeT1485ProofImageIfRequested(bubble: bubble, geometry: geometry, bottomBlank: bottomBlank, ownedBottomInset: ownedInsets.bottom)
+    }
+
+    @MainActor
+    private func writeT1485ProofImageIfRequested(
+        bubble: MessageBubbleUIKitView,
+        geometry: MessageBubbleRenderedGeometry,
+        bottomBlank: CGFloat,
+        ownedBottomInset: CGFloat
+    ) {
+        guard let proofDirectory = ProcessInfo.processInfo.environment["T1485_GEOMETRY_PROOF_DIR"],
+              !proofDirectory.isEmpty else { return }
+        let directoryURL = URL(filePath: proofDirectory, directoryHint: .isDirectory)
+        do {
+            try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+            let image = UIGraphicsImageRenderer(bounds: bubble.bounds).image { context in
+                bubble.layer.render(in: context.cgContext)
+            }
+            let outputURL = directoryURL.appending(path: "normal-bubble-geometry.png")
+            guard let pngData = image.pngData() else {
+                Issue.record("Failed to encode T1485 visual proof image")
+                return
+            }
+            try pngData.write(to: outputURL)
+            print("T1485 geometry proof image=\(outputURL.path) geometry=\(geometry) bottomBlank=\(bottomBlank) ownedBottomInset=\(ownedBottomInset)")
+        } catch {
+            Issue.record("Failed to write T1485 visual proof: \(error)")
+        }
+    }
+
     @Test("T127: Spatial chat viewport keeps 25 percent top and bottom insets")
     func spatialChatViewportKeepsQuarterWindowInsets() throws {
         let sourcePath = URL(filePath: #filePath)

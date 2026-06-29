@@ -135,8 +135,8 @@ struct MessageFlowCacheSeamIntegrityTests {
             "Incremental append wrapping should use the same pair-specific row spacing as full layout rebuilds."
         )
         #expect(
-            contents.contains("isCompact ? 4 : 6"),
-            "T1484 proof: compact row gap is 4pt and regular row gap is 6pt."
+            contents.contains("MessageBubbleGeometry.adjacentMessageRowSpacing(metrics: metrics)"),
+            "T1485 proof: compact row gap comes from the shared bubble geometry invariant."
         )
     }
 }

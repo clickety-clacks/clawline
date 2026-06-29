@@ -13,10 +13,10 @@ final class TypingIndicatorCell: UICollectionViewCell {
     static let reuseIdentifier = "TypingIndicatorCell"
     /// Fixed ID used in the diffable data source for the typing indicator item.
     static let itemId = "__typing_indicator__"
-    static let bubbleWidth: CGFloat = 240
-    static let bubbleHeight: CGFloat = 86
-    static let bubblePaddingScale: CGFloat = 0.2
-    static let progressLabelWidth: CGFloat = 192
+    static let bubbleWidth: CGFloat = MessageBubbleGeometry.typingBubbleWidth
+    static let bubbleHeight: CGFloat = MessageBubbleGeometry.typingBubbleHeight
+    static let bubblePaddingScale: CGFloat = MessageBubbleGeometry.typingBubblePaddingScale
+    static let progressLabelWidth: CGFloat = MessageBubbleGeometry.typingProgressLabelWidth
 
     private static let indicatorText = ""
     private let containerView = MessageBubbleUIKitContainerView()
@@ -195,19 +195,7 @@ final class TypingIndicatorCell: UICollectionViewCell {
     }
 
     static func height(progressSummary: String?, font: UIFont = .preferredFont(forTextStyle: .caption1)) -> CGFloat {
-        let trimmedProgress = progressSummary?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let trimmedProgress, !trimmedProgress.isEmpty else { return bubbleHeight }
-
-        let labelHeight = ceil((trimmedProgress as NSString).boundingRect(
-            with: CGSize(width: progressLabelWidth, height: .greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: [.font: font],
-            context: nil
-        ).height)
-        let dotsHeight: CGFloat = 7
-        let overlaySpacing: CGFloat = 9
-        let verticalChrome = bubbleHeight - dotsHeight - overlaySpacing - ceil(font.lineHeight * 2)
-        return max(bubbleHeight, ceil(dotsHeight + overlaySpacing + labelHeight + verticalChrome))
+        MessageBubbleGeometry.typingHeight(progressSummary: progressSummary, font: font)
     }
 }
 

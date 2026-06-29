@@ -4427,8 +4427,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         return measurementInputsChanged
     }
 
-    private static func interBubbleRowSpacing(isCompact: Bool) -> CGFloat {
-        isCompact ? 4 : 6
+    private static func interBubbleRowSpacing(metrics: ChatFlowTheme.Metrics) -> CGFloat {
+        MessageBubbleGeometry.adjacentMessageRowSpacing(metrics: metrics)
     }
 
     private func rowSpacing(afterItemAt previousIndex: Int,
@@ -4438,7 +4438,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
               isNormalMessageItem(at: nextIndex) else {
             return metrics.flowGap
         }
-        return Self.interBubbleRowSpacing(isCompact: isCompact)
+        return Self.interBubbleRowSpacing(metrics: metrics)
     }
 
     private func isNormalMessageItem(at itemIndex: Int) -> Bool {

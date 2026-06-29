@@ -39,6 +39,61 @@ struct MessageBubbleMetadataDebugState {
     let replyIndicatorChipHeight: CGFloat
 }
 
+struct MessageBubbleRenderedGeometry {
+    let bubbleFrame: CGRect
+    let contentFrame: CGRect
+    let bodyFrame: CGRect
+    let dynamicContentFrame: CGRect
+}
+
+enum MessageBubbleGeometry {
+    static let typingBubbleWidth: CGFloat = 240
+    static let typingBubbleHeight: CGFloat = 86
+    static let typingBubblePaddingScale: CGFloat = 0.2
+    static let typingProgressLabelWidth: CGFloat = 192
+
+    static func contentInsets(
+        metrics: ChatFlowTheme.Metrics,
+        paddingScale: CGFloat,
+        hasTerminalSessions: Bool,
+        hasMediaOnly: Bool
+    ) -> UIEdgeInsets {
+        let hasChromelessContent = hasTerminalSessions || hasMediaOnly
+        let horizontal = hasChromelessContent ? 0 : metrics.bubblePaddingHorizontal
+        let top = hasChromelessContent ? 0 : metrics.bubblePaddingTop
+        let bottom = hasChromelessContent ? 0 : metrics.bubblePaddingBottom
+        return UIEdgeInsets(
+            top: round(top * paddingScale),
+            left: round(horizontal * paddingScale),
+            bottom: round(bottom * paddingScale),
+            right: round(horizontal * paddingScale)
+        )
+    }
+
+    static func adjacentMessageRowSpacing(metrics: ChatFlowTheme.Metrics) -> CGFloat {
+        floor(min(metrics.containerPadding, metrics.flowGap) / 4)
+    }
+
+    static func typingHeight(
+        progressSummary: String?,
+        font: UIFont = .preferredFont(forTextStyle: .caption1)
+    ) -> CGFloat {
+        let trimmedProgress = progressSummary?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmedProgress, !trimmedProgress.isEmpty else { return typingBubbleHeight }
+
+        let labelHeight = ceil((trimmedProgress as NSString).boundingRect(
+            with: CGSize(width: typingProgressLabelWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font],
+            context: nil
+        ).height)
+        let dotsHeight: CGFloat = 7
+        let overlaySpacing: CGFloat = 9
+        let verticalChrome = typingBubbleHeight - dotsHeight - overlaySpacing - ceil(font.lineHeight * 2)
+        return max(typingBubbleHeight, ceil(dotsHeight + overlaySpacing + labelHeight + verticalChrome))
+    }
+}
+
 private final class BubbleSafeAreaNeutralScrollView: UIScrollView {
     override var safeAreaInsets: UIEdgeInsets { .zero }
 
@@ -1677,13 +1732,15 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             dynamicContentViews.append(htmlView)
         }
 
-        // Flynn: terminal bubbles render without bubble chrome and without standard padding.
-        let basePaddingHorizontal = (hasTerminalSessions || presentation.hasMediaOnly) ? 0 : metrics.bubblePaddingHorizontal
-        let basePaddingTop = (hasTerminalSessions || presentation.hasMediaOnly) ? 0 : metrics.bubblePaddingTop
-        let basePaddingBottom = (hasTerminalSessions || presentation.hasMediaOnly) ? 0 : metrics.bubblePaddingBottom
-        currentContentPaddingHorizontal = round(basePaddingHorizontal * contentPaddingScale)
-        currentContentPaddingTop = round(basePaddingTop * contentPaddingScale)
-        currentContentPaddingBottom = round(basePaddingBottom * contentPaddingScale)
+        let contentInsets = MessageBubbleGeometry.contentInsets(
+            metrics: metrics,
+            paddingScale: contentPaddingScale,
+            hasTerminalSessions: hasTerminalSessions,
+            hasMediaOnly: presentation.hasMediaOnly
+        )
+        currentContentPaddingHorizontal = contentInsets.left
+        currentContentPaddingTop = contentInsets.top
+        currentContentPaddingBottom = contentInsets.bottom
         contentLeadingConstraint.constant = currentContentPaddingHorizontal
         contentTrailingConstraint.constant = -currentContentPaddingHorizontal
         contentTopConstraint.constant = currentContentPaddingTop
@@ -2217,6 +2274,16 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     func renderedBubbleFrame(in view: UIView) -> CGRect {
         layoutIfNeeded()
         return bubbleBackgroundView.convert(bubbleBackgroundView.bounds, to: view)
+    }
+
+    func renderedGeometryForTests(in view: UIView) -> MessageBubbleRenderedGeometry {
+        layoutIfNeeded()
+        return MessageBubbleRenderedGeometry(
+            bubbleFrame: bubbleBackgroundView.convert(bubbleBackgroundView.bounds, to: view),
+            contentFrame: contentStack.convert(contentStack.bounds, to: view),
+            bodyFrame: bodyLabel.convert(bodyLabel.bounds, to: view),
+            dynamicContentFrame: dynamicContentWrapper.convert(dynamicContentWrapper.bounds, to: view)
+        )
     }
 
     private func updateAppearanceColors() {

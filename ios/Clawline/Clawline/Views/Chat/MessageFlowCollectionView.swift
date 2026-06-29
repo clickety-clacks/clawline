@@ -50,6 +50,14 @@ enum ShowOnlyUserMessagesChatCollapse {
     }
 }
 
+enum StreamMessageSearch {
+    static func filteredMessages(from messages: [Message], query: String) -> [Message] {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else { return messages }
+        return messages.filter { $0.content.localizedStandardContains(trimmedQuery) }
+    }
+}
+
 enum ChatDateLabelCalendar {
     static func startOfDay(for date: Date, calendar: Calendar = .autoupdatingCurrent) -> Date {
         calendar.startOfDay(for: date)
@@ -178,6 +186,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     /// Optional session override - if provided, shows messages for this session instead of activeSessionKey
     var sessionKey: String?
     var sessionStatus: SessionStatus?
+    var streamSearchQuery: String = ""
     var forceReReadGeneration: Int = 0
     var sendIndicatorRevision: Int = 0
     var fontScaleChangeSequence: Int = 0
@@ -189,6 +198,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     var onInsertMessageIntoPrompt: (@MainActor (Message) -> Void)?
     var onReferenceMessageInPrompt: (@MainActor (Message) -> Void)?
     var onShowOnlyUserMessagesModeChanged: (@MainActor (String, Bool) -> Void)?
+    var onStreamSearchQueryChanged: (@MainActor (String, String) -> Void)?
     var onKeyboardDismissModeChanged: (@MainActor (String) -> Void)? = nil
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.allowsTransparentWindowBackground) private var allowsTransparentWindowBackground
@@ -227,6 +237,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             onExpand: onExpand,
             sessionKey: sessionKey,
             sessionStatus: sessionStatus,
+            streamSearchQuery: streamSearchQuery,
             forceReReadGeneration: forceReReadGeneration,
             sendIndicatorRevision: sendIndicatorRevision,
             fontScaleChangeSequence: fontScaleChangeSequence,
@@ -238,6 +249,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             onInsertMessageIntoPrompt: onInsertMessageIntoPrompt,
             onReferenceMessageInPrompt: onReferenceMessageInPrompt,
             onShowOnlyUserMessagesModeChanged: onShowOnlyUserMessagesModeChanged,
+            onStreamSearchQueryChanged: onStreamSearchQueryChanged,
             onKeyboardDismissModeChanged: onKeyboardDismissModeChanged,
             isDark: isDark,
             allowsTransparentWindowBackground: allowsTransparentWindowBackground
@@ -266,6 +278,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             onExpand: onExpand,
             sessionKey: sessionKey,
             sessionStatus: sessionStatus,
+            streamSearchQuery: streamSearchQuery,
             forceReReadGeneration: forceReReadGeneration,
             sendIndicatorRevision: sendIndicatorRevision,
             fontScaleChangeSequence: fontScaleChangeSequence,
@@ -277,6 +290,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             onInsertMessageIntoPrompt: onInsertMessageIntoPrompt,
             onReferenceMessageInPrompt: onReferenceMessageInPrompt,
             onShowOnlyUserMessagesModeChanged: onShowOnlyUserMessagesModeChanged,
+            onStreamSearchQueryChanged: onStreamSearchQueryChanged,
             onKeyboardDismissModeChanged: onKeyboardDismissModeChanged,
             isDark: isDark,
             allowsTransparentWindowBackground: allowsTransparentWindowBackground
@@ -309,6 +323,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let onExpand: ((Message) -> Void)?
         let sessionKey: String?
         let sessionStatus: SessionStatus?
+        let streamSearchQuery: String
         let forceReReadGeneration: Int
         let sendIndicatorRevision: Int
         let fontScaleChangeSequence: Int
@@ -320,6 +335,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let onInsertMessageIntoPrompt: (@MainActor (Message) -> Void)?
         let onReferenceMessageInPrompt: (@MainActor (Message) -> Void)?
         let onShowOnlyUserMessagesModeChanged: (@MainActor (String, Bool) -> Void)?
+        let onStreamSearchQueryChanged: (@MainActor (String, String) -> Void)?
         let onKeyboardDismissModeChanged: (@MainActor (String) -> Void)?
         let isDark: Bool?
         let allowsTransparentWindowBackground: Bool
@@ -548,9 +564,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var onInsertMessageIntoPrompt: (@MainActor (Message) -> Void)?
     private var onReferenceMessageInPrompt: (@MainActor (Message) -> Void)?
     private var onShowOnlyUserMessagesModeChanged: (@MainActor (String, Bool) -> Void)?
+    private var onStreamSearchQueryChanged: (@MainActor (String, String) -> Void)?
     private var onKeyboardDismissModeChanged: (@MainActor (String) -> Void)?
     private let webBubbleCoordinator = WebBubbleCoordinator()
     private var lastMessages: [Message] = []
+    private var streamSearchQuery = ""
     private var lastEffectiveStream: ChatStream?
     private var showOnlyUserMessagesTransitionSessionKeys: Set<String> = []
     private var pendingShowOnlyUserMessagesRevealTargetBySessionKey: [String: String] = [:]
@@ -1991,6 +2009,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onExpand: onExpand,
             sessionKey: channelOverride,
             sessionStatus: sessionStatus,
+            streamSearchQuery: streamSearchQuery,
             forceReReadGeneration: readState(for: sessionKey).lastSeenForceReReadGeneration,
             sendIndicatorRevision: currentSendIndicatorRevision,
             fontScaleChangeSequence: currentFontScaleChangeSequence,
@@ -2002,6 +2021,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onInsertMessageIntoPrompt: onInsertMessageIntoPrompt,
             onReferenceMessageInPrompt: onReferenceMessageInPrompt,
             onShowOnlyUserMessagesModeChanged: onShowOnlyUserMessagesModeChanged,
+            onStreamSearchQueryChanged: onStreamSearchQueryChanged,
             onKeyboardDismissModeChanged: onKeyboardDismissModeChanged,
             isDark: currentIsDark,
             allowsTransparentWindowBackground: allowsTransparentWindowBackground
@@ -2282,6 +2302,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onExpand: onExpand,
             sessionKey: channelOverride,
             sessionStatus: sessionStatus,
+            streamSearchQuery: streamSearchQuery,
             forceReReadGeneration: 0,
             sendIndicatorRevision: viewModel.sendIndicatorRevision,
             onScrollEvent: onScrollEvent,
@@ -2292,6 +2313,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onInsertMessageIntoPrompt: onInsertMessageIntoPrompt,
             onReferenceMessageInPrompt: onReferenceMessageInPrompt,
             onShowOnlyUserMessagesModeChanged: onShowOnlyUserMessagesModeChanged,
+            onStreamSearchQueryChanged: onStreamSearchQueryChanged,
             onKeyboardDismissModeChanged: onKeyboardDismissModeChanged,
             isDark: currentIsDark,
             allowsTransparentWindowBackground: allowsTransparentWindowBackground
@@ -2333,6 +2355,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 onExpand: request.onExpand,
                 sessionKey: request.sessionKey,
                 sessionStatus: request.sessionStatus,
+                streamSearchQuery: request.streamSearchQuery,
                 forceReReadGeneration: request.forceReReadGeneration,
                 sendIndicatorRevision: request.sendIndicatorRevision,
                 onScrollEvent: request.onScrollEvent,
@@ -2343,6 +2366,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 onInsertMessageIntoPrompt: request.onInsertMessageIntoPrompt,
                 onReferenceMessageInPrompt: request.onReferenceMessageInPrompt,
                 onShowOnlyUserMessagesModeChanged: request.onShowOnlyUserMessagesModeChanged,
+                onStreamSearchQueryChanged: request.onStreamSearchQueryChanged,
                 onKeyboardDismissModeChanged: request.onKeyboardDismissModeChanged,
                 isDark: request.isDark,
                 allowsTransparentWindowBackground: request.allowsTransparentWindowBackground
@@ -2420,6 +2444,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
               self.isInputActive == request.isInputActive,
               self.keepsKeyboardPinned == request.keepsKeyboardPinned,
               self.currentSendIndicatorRevision == request.sendIndicatorRevision,
+              self.streamSearchQuery == request.streamSearchQuery,
               abs(self.topInset - request.topInset) <= 0.5,
               abs(self.trailingContentInset - max(0, request.trailingContentInset)) <= 0.5,
               self.firstUnreadMessageId == request.firstUnreadMessageId,
@@ -2454,6 +2479,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         onExpand: ((Message) -> Void)? = nil,
         sessionKey: String? = nil,
         sessionStatus: SessionStatus? = nil,
+        streamSearchQuery: String = "",
         forceReReadGeneration: Int = 0,
         sendIndicatorRevision: Int = 0,
         fontScaleChangeSequence: Int = 0,
@@ -2465,6 +2491,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         onInsertMessageIntoPrompt: (@MainActor (Message) -> Void)? = nil,
         onReferenceMessageInPrompt: (@MainActor (Message) -> Void)? = nil,
         onShowOnlyUserMessagesModeChanged: (@MainActor (String, Bool) -> Void)? = nil,
+        onStreamSearchQueryChanged: (@MainActor (String, String) -> Void)? = nil,
         onKeyboardDismissModeChanged: (@MainActor (String) -> Void)? = nil,
         isDark: Bool? = nil,
         allowsTransparentWindowBackground: Bool = false
@@ -2485,6 +2512,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onExpand: onExpand,
             sessionKey: sessionKey,
             sessionStatus: sessionStatus,
+            streamSearchQuery: streamSearchQuery,
             forceReReadGeneration: forceReReadGeneration,
             sendIndicatorRevision: sendIndicatorRevision,
             fontScaleChangeSequence: fontScaleChangeSequence,
@@ -2496,6 +2524,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onInsertMessageIntoPrompt: onInsertMessageIntoPrompt,
             onReferenceMessageInPrompt: onReferenceMessageInPrompt,
             onShowOnlyUserMessagesModeChanged: onShowOnlyUserMessagesModeChanged,
+            onStreamSearchQueryChanged: onStreamSearchQueryChanged,
             onKeyboardDismissModeChanged: onKeyboardDismissModeChanged,
             isDark: isDark,
             allowsTransparentWindowBackground: allowsTransparentWindowBackground
@@ -2545,7 +2574,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         self.onInsertMessageIntoPrompt = onInsertMessageIntoPrompt
         self.onReferenceMessageInPrompt = onReferenceMessageInPrompt
         self.onShowOnlyUserMessagesModeChanged = onShowOnlyUserMessagesModeChanged
+        self.onStreamSearchQueryChanged = onStreamSearchQueryChanged
         self.onKeyboardDismissModeChanged = onKeyboardDismissModeChanged
+        self.streamSearchQuery = streamSearchQuery
         self.allowsTransparentWindowBackground = allowsTransparentWindowBackground
 #if !os(visionOS)
         let desiredDismissMode = MessageFlowCollectionView.keyboardDismissModeForInputFocus(
@@ -2655,19 +2686,25 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 allowTailStage: isFirstActivationForSession
             )
         )
+        let hasSearchQuery = !streamSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let materializedMessages: [Message]
-        switch materializationPlan.stage {
-        case .tail:
-            let lower = max(0, min(materializationPlan.windowBounds.lowerBound, messages.count))
-            let upper = max(lower, min(materializationPlan.windowBounds.upperBound, messages.count))
-            materializedMessages = Array(messages[lower ..< upper])
-        case .full:
+        if hasSearchQuery {
             materializedMessages = messages
+        } else {
+            switch materializationPlan.stage {
+            case .tail:
+                let lower = max(0, min(materializationPlan.windowBounds.lowerBound, messages.count))
+                let upper = max(lower, min(materializationPlan.windowBounds.upperBound, messages.count))
+                materializedMessages = Array(messages[lower ..< upper])
+            case .full:
+                materializedMessages = messages
+            }
         }
-        let snapshotMessages = ShowOnlyUserMessagesChatCollapse.visibleMessages(
+        let collapsedVisibleMessages = ShowOnlyUserMessagesChatCollapse.visibleMessages(
             from: materializedMessages,
             isCollapsed: isShowingOnlyUserMessages
         )
+        let snapshotMessages = StreamMessageSearch.filteredMessages(from: collapsedVisibleMessages, query: streamSearchQuery)
         lastMessages = messages
         let effectiveStream = SessionKey.stream(for: effectiveSessionKey)
         lastEffectiveStream = effectiveStream
@@ -2710,8 +2747,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         } else {
             snapshot.appendItems(snapshotItemIds)
         }
-        if !isShowingOnlyUserMessages,
-           SessionMetadataFooterCell.shouldAppendFooter(after: snapshotItemIds, status: sessionStatus) {
+        if SessionMetadataFooterCell.shouldAppendFooter(after: fullMessageIds, status: sessionStatus) {
             snapshot.appendItems([SessionMetadataFooterCell.itemId])
         }
         StreamSwitchTiming.log("snapshot_build_end", sessionKey: effectiveSessionKey)
@@ -4091,7 +4127,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                     status: self.sessionStatus,
                     isDark: self.currentIsDark,
                     onSelect: self.onSessionControlSelected,
-                    onTestMenuSelect: self.onFooterTestMenuSelected
+                    onTestMenuSelect: self.onFooterTestMenuSelected,
+                    searchQuery: self.streamSearchQuery,
+                    onSearchQueryChanged: { [weak self] query in
+                        guard let self,
+                              let sessionKey = self.callbackSessionKey() else { return }
+                        self.onStreamSearchQueryChanged?(sessionKey, query)
+                    }
                 )
                 cell?.alpha = self.footerRevealAlpha()
                 return cell
@@ -5981,22 +6023,32 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         guard !readState(for: effectiveSessionKey).isShowingOnlyUserMessages else {
             snapshot.deleteAllItems()
             snapshot.appendSections([0])
-            snapshot.appendItems(ShowOnlyUserMessagesChatCollapse.visibleMessages(
+            let collapsedVisibleMessages = ShowOnlyUserMessagesChatCollapse.visibleMessages(
                 from: materializeMessagesForActiveStage(
                     allMessages: lastMessages,
                     sessionKey: effectiveSessionKey
                 ),
                 isCollapsed: true
+            )
+            snapshot.appendItems(StreamMessageSearch.filteredMessages(
+                from: collapsedVisibleMessages,
+                query: streamSearchQuery
             ).map(\.id))
+            if SessionMetadataFooterCell.shouldAppendFooter(after: lastMessages.map(\.id), status: sessionStatus) {
+                snapshot.appendItems([SessionMetadataFooterCell.itemId])
+            }
             applyDiffableSnapshot(snapshot, animatingDifferences: false) { [weak self] in
                 self?.updateVisibleFooterAlpha()
                 self?.notifyTypingIndicatorAnchorFrameIfNeeded()
             }
             return
         }
-        let snapshotMessages = materializeMessagesForActiveStage(
-            allMessages: lastMessages,
-            sessionKey: effectiveSessionKey
+        let snapshotMessages = StreamMessageSearch.filteredMessages(
+            from: materializeMessagesForActiveStage(
+                allMessages: lastMessages,
+                sessionKey: effectiveSessionKey
+            ),
+            query: streamSearchQuery
         )
         let desiredItemIds = snapshotItemsWithWebBubbles(
             from: snapshotItemsWithDateSeparators(from: snapshotMessages),
@@ -6014,7 +6066,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         } else {
             snapshot.appendItems(desiredItemIds)
         }
-        if SessionMetadataFooterCell.shouldAppendFooter(after: desiredItemIds, status: sessionStatus) {
+        if SessionMetadataFooterCell.shouldAppendFooter(after: lastMessages.map(\.id), status: sessionStatus) {
             snapshot.appendItems([SessionMetadataFooterCell.itemId])
         }
         applyDiffableSnapshot(snapshot, animatingDifferences: false) { [weak self] in
@@ -6160,12 +6212,15 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
     static let horizontalPadding: CGFloat = 12
     static let actionRegionHeight: CGFloat = 44
     static let versionRowHeight: CGFloat = 22
-    static let fadeRevealRange: CGFloat = topPadding + actionRegionHeight + versionRowHeight
+    static let searchRowHeight: CGFloat = 30
+    static let fadeRevealRange: CGFloat = topPadding + actionRegionHeight + versionRowHeight + searchRowHeight
     static let testMenuIconPointSize: CGFloat = 11
 
     private let stackView = UIStackView()
     private let controlsStackView = UIStackView()
     private let versionStackView = UIStackView()
+    private let searchField = FooterSearchField()
+    private var onSearchQueryChanged: (@MainActor (String) -> Void)?
 
     private struct FooterItem {
         let text: String
@@ -6222,6 +6277,20 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         }
     }
 
+    private final class FooterSearchField: UITextField {
+        override func textRect(forBounds bounds: CGRect) -> CGRect {
+            bounds.insetBy(dx: 8, dy: 0)
+        }
+
+        override func editingRect(forBounds bounds: CGRect) -> CGRect {
+            textRect(forBounds: bounds)
+        }
+
+        override func placeholderRect(forBounds bounds: CGRect) -> CGRect {
+            textRect(forBounds: bounds)
+        }
+    }
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         contentView.backgroundColor = .clear
@@ -6252,6 +6321,18 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         versionStackView.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         stackView.addArrangedSubview(versionStackView)
 
+        searchField.font = Self.footerFont
+        searchField.borderStyle = .none
+        searchField.clearButtonMode = .whileEditing
+        searchField.returnKeyType = .search
+        searchField.autocorrectionType = .no
+        searchField.autocapitalizationType = .none
+        searchField.accessibilityLabel = "Search current stream"
+        searchField.addTarget(self, action: #selector(searchFieldDidChange), for: .editingChanged)
+        searchField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        searchField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        stackView.addArrangedSubview(searchField)
+
         NSLayoutConstraint.activate([
             stackView.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: Self.horizontalPadding),
             stackView.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -Self.horizontalPadding),
@@ -6259,6 +6340,9 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             stackView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Self.topPadding),
             controlsStackView.heightAnchor.constraint(equalToConstant: Self.actionRegionHeight),
             versionStackView.heightAnchor.constraint(equalToConstant: Self.versionRowHeight),
+            searchField.heightAnchor.constraint(equalToConstant: Self.searchRowHeight),
+            searchField.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
+            searchField.widthAnchor.constraint(lessThanOrEqualTo: contentView.widthAnchor, constant: -(Self.horizontalPadding * 2)),
         ])
     }
 
@@ -6284,9 +6368,12 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         isDark: Bool,
         isSpatial: Bool = SessionMetadataFooterCell.isSpatialPlatform,
         onSelect: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?,
-        onTestMenuSelect: (@MainActor (FooterTestMenuAction) -> Void)? = nil
+        onTestMenuSelect: (@MainActor (FooterTestMenuAction) -> Void)? = nil,
+        searchQuery: String = "",
+        onSearchQueryChanged: (@MainActor (String) -> Void)? = nil
     ) {
         let textColor = Self.textColor(isDark: isDark, isSpatial: isSpatial)
+        self.onSearchQueryChanged = onSearchQueryChanged
         for view in controlsStackView.arrangedSubviews {
             controlsStackView.removeArrangedSubview(view)
             view.removeFromSuperview()
@@ -6302,17 +6389,47 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         }
         versionStackView.addArrangedSubview(versionLabel(color: textColor))
         versionStackView.addArrangedSubview(testMenuButton(color: textColor, onSelect: onTestMenuSelect))
+        configureSearchField(query: searchQuery, textColor: textColor, isDark: isDark, isSpatial: isSpatial)
         accessibilityLabel = Self.footerText(for: status)
         accessibilityTraits = items.contains { $0.action != nil && !$0.options.isEmpty } ? .button : .staticText
     }
 
     static func height(for status: SessionStatus?) -> CGFloat {
         guard footerText(for: status) != nil else { return 0 }
-        return ceil(actionRegionHeight + versionRowHeight + topPadding + bottomPadding)
+        return ceil(actionRegionHeight + versionRowHeight + searchRowHeight + topPadding + bottomPadding)
     }
 
     static func shouldAppendFooter(after itemIds: [String], status: SessionStatus?) -> Bool {
         !itemIds.isEmpty && footerText(for: status) != nil
+    }
+
+    private func configureSearchField(query: String, textColor: UIColor, isDark: Bool, isSpatial: Bool) {
+        if searchField.text != query {
+            searchField.text = query
+        }
+        searchField.textColor = textColor
+        searchField.tintColor = textColor
+        let palette = ChatFlowUIKitTheme.palette(isDark: isDark)
+        searchField.backgroundColor = isSpatial
+            ? UIColor.white.withAlphaComponent(0.08)
+            : palette.cream.withAlphaComponent(isDark ? 0.18 : 0.52)
+        searchField.layer.cornerRadius = 8
+        searchField.layer.borderWidth = 0.5
+        searchField.layer.borderColor = textColor.withAlphaComponent(0.20).cgColor
+        searchField.attributedPlaceholder = NSAttributedString(
+            string: "Search current stream",
+            attributes: [
+                .font: Self.footerFont,
+                .foregroundColor: textColor.withAlphaComponent(0.58)
+            ]
+        )
+    }
+
+    @objc private func searchFieldDidChange() {
+        let query = searchField.text ?? ""
+        Task { @MainActor in
+            onSearchQueryChanged?(query)
+        }
     }
 
     static func footerText(for status: SessionStatus?) -> String? {

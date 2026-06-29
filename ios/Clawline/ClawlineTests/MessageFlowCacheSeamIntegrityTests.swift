@@ -101,4 +101,42 @@ struct MessageFlowCacheSeamIntegrityTests {
             "Incremental append should fall back to a rebuild when a full-row item is involved."
         )
     }
+
+    @Test("T1484: message rows use compact inter-bubble spacing")
+    func messageRowsUseCompactInterBubbleSpacing() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // ClawlineTests
+            .deletingLastPathComponent() // Clawline
+            .appendingPathComponent("Clawline/Views/Chat/MessageFlowCollectionView.swift")
+        let contents = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        #expect(
+            contents.contains("flowLayout.minimumLineSpacing = metrics.flowGap"),
+            "Default row spacing should remain the broader flow gap for date separators, footer/search, web, and typing rows."
+        )
+        #expect(
+            contents.contains("flowLayout.rowSpacingProvider = { [weak self] previousIndex, nextIndex in"),
+            "Message flow layout should support pair-specific row spacing."
+        )
+        #expect(
+            contents.contains("flowLayout.rowSpacingFingerprintProvider = { [weak self] in"),
+            "Pair-specific spacing must participate in the layout cache signature."
+        )
+        #expect(
+            contents.contains("guard isNormalMessageItem(at: previousIndex),\n              isNormalMessageItem(at: nextIndex) else"),
+            "Only normal message-to-message adjacency should use compact T1484 spacing."
+        )
+        #expect(
+            contents.contains("let rowSpacingFingerprint: Int"),
+            "Layout signature should change when row-spacing-relevant item identity changes."
+        )
+        #expect(
+            contents.contains("rowMinY + rowHeight + rowSpacing(afterItem: previousIndexPath.item, beforeItem: newItemIndex)"),
+            "Incremental append wrapping should use the same pair-specific row spacing as full layout rebuilds."
+        )
+        #expect(
+            contents.contains("isCompact ? 4 : 6"),
+            "T1484 proof: compact row gap is 4pt and regular row gap is 6pt."
+        )
+    }
 }

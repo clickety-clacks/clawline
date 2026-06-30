@@ -900,7 +900,7 @@ describe("ChatRoute", () => {
     expect(screen.getByRole("dialog", { name: "Sessions" })).toBeInTheDocument();
     expect(renameInput).toHaveFocus();
     expect(renameInput).toHaveValue("New Chat");
-    expect(screen.getByRole("textbox", { name: "Filter chats" })).toHaveValue("zzz");
+    expect(screen.getByRole("textbox", { name: "Filter chats" })).toHaveValue("");
   });
 
   it("dismisses source notifications after local stream deletion succeeds", async () => {

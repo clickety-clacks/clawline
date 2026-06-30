@@ -379,6 +379,7 @@ export function SessionListSheet({
       if (!stream) {
         return;
       }
+      onFilterQueryChange("");
       beginRename(stream.sessionKey, resolveStreamDisplayName(stream));
     } finally {
       setPendingActionKey(null);

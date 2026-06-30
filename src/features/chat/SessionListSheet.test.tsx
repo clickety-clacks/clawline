@@ -109,6 +109,7 @@ describe("SessionListSheet", () => {
 
   it("keeps the popup open and focuses inline rename after Add creates and selects a chat", async () => {
     const onClose = vi.fn();
+    const onFilterQueryChange = vi.fn();
     const onSelectSession = vi.fn();
     const createdStream = streamRecord({
       displayName: "New Chat",
@@ -135,7 +136,7 @@ describe("SessionListSheet", () => {
             return createdStream;
           }}
           onDeleteSession={vi.fn()}
-          onFilterQueryChange={vi.fn()}
+          onFilterQueryChange={onFilterQueryChange}
           onRenameSession={vi.fn()}
           onSelectSession={onSelectSession}
           provisionedSessionKeys={[
@@ -158,7 +159,7 @@ describe("SessionListSheet", () => {
     expect(screen.getByTestId("session-popover")).toBeInTheDocument();
     expect(renameInput).toHaveFocus();
     expect(renameInput).toHaveValue("New Chat");
-    expect(screen.getByRole("textbox", { name: "Filter chats" })).toHaveValue("zzz");
+    expect(onFilterQueryChange).toHaveBeenCalledWith("");
     expect(onSelectSession).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
   });

@@ -25,12 +25,15 @@ export function ChatShell({
   isSessionListOpen,
   isStreamManagerOpen,
   onCloseSessionList,
+  onCreateSession,
+  onDeleteSession,
   onChatPanelTouchCancel,
   onChatPanelTouchEnd,
   onChatPanelTouchStart,
   onOpenSessionList,
   onOpenStreamManager,
   onPopupSessionSelect,
+  onRenameSession,
   onCancelCurrentPrompt,
   onRememberScrollState,
   onSessionControlSelected,
@@ -52,6 +55,8 @@ export function ChatShell({
   isSessionListOpen: boolean;
   isStreamManagerOpen: boolean;
   onCloseSessionList: () => void;
+  onCreateSession: () => Promise<StreamRecord | null>;
+  onDeleteSession: (sessionKey: string) => Promise<void>;
   onChatPanelTouchCancel: () => void;
   onChatPanelTouchEnd: (input: {
     touch: { clientX: number; clientY: number } | null;
@@ -63,6 +68,7 @@ export function ChatShell({
   onOpenSessionList: () => void;
   onOpenStreamManager: () => void;
   onPopupSessionSelect: (sessionKey: string) => void;
+  onRenameSession: (sessionKey: string, displayName: string) => Promise<void>;
   onCancelCurrentPrompt?: (sessionKey: string) => Promise<void> | void;
   onRememberScrollState: (input: {
     offsetTop: number;
@@ -174,8 +180,10 @@ export function ChatShell({
         filterQuery={sessionFilterQuery}
         isOpen={isSessionListOpen}
         onClose={onCloseSessionList}
+        onCreateSession={onCreateSession}
+        onDeleteSession={onDeleteSession}
         onFilterQueryChange={setSessionFilterQuery}
-        onOpenStreamManager={onOpenStreamManager}
+        onRenameSession={onRenameSession}
         onSelectSession={onPopupSessionSelect}
         provisionedSessionKeys={provisionedSessionKeys}
         streamDotStateBySessionKey={streamDotStateBySessionKey}

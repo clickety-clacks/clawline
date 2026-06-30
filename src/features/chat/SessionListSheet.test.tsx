@@ -25,15 +25,15 @@ describe("SessionListSheet", () => {
     expect(parseStreamName("agent:main:clawline:flynn:side_thread")).toBe("Side Thread");
   });
 
-  it("keeps the stream picker on the wrapping flow layout", () => {
+  it("keeps the stream picker on a measured-width scrolling list", () => {
     const styleText = readFileSync("src/app/styles.css", "utf8");
 
-    expect(styleText).toContain("width: min(48rem, calc(100vw - 1.5rem));");
+    expect(styleText).toContain("--session-popover-content-width");
     expect(styleText).toContain(
-      "grid-template-columns: repeat(auto-fill, minmax(min(9.5rem, 100%), 1fr));"
+      "max(18rem, calc(var(--session-popover-content-width, 0px) + 7.75rem))"
     );
-    expect(styleText).toContain("gap: 10px;");
-    expect(styleText).toContain("min-height: 76px;");
+    expect(styleText).toContain("width: 100%;");
+    expect(styleText).toContain("overflow: auto;");
     expect(styleText).toContain("border-radius: 8px;");
   });
 });

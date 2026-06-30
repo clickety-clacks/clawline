@@ -274,6 +274,62 @@ export function ChatRoute() {
     },
     [authState.session?.serverUrl, authState.session?.token]
   );
+  const createSessionFromPopup = useCallback(async () => {
+    const token = authState.session?.token;
+    const serverUrl = authState.session?.serverUrl;
+    if (!token || !serverUrl) {
+      return null;
+    }
+
+    const streamApiClient = createStreamApiClient();
+    const response = await streamApiClient.createStream({
+      displayName: "New Chat",
+      idempotencyKey: crypto.randomUUID(),
+      serverUrl,
+      token
+    });
+    chatStore.upsertStream(response.stream);
+    handleSelectSession(response.stream.sessionKey, "popup");
+    return response.stream;
+  }, [authState.session?.serverUrl, authState.session?.token, chatStore]);
+  const renameSessionFromPopup = useCallback(
+    async (sessionKey: string, displayName: string) => {
+      const token = authState.session?.token;
+      const serverUrl = authState.session?.serverUrl;
+      if (!token || !serverUrl) {
+        return;
+      }
+
+      const streamApiClient = createStreamApiClient();
+      const response = await streamApiClient.renameStream({
+        displayName,
+        serverUrl,
+        sessionKey,
+        token
+      });
+      chatStore.upsertStream(response.stream);
+    },
+    [authState.session?.serverUrl, authState.session?.token, chatStore]
+  );
+  const deleteSessionFromPopup = useCallback(
+    async (sessionKey: string) => {
+      const token = authState.session?.token;
+      const serverUrl = authState.session?.serverUrl;
+      if (!token || !serverUrl) {
+        return;
+      }
+
+      const streamApiClient = createStreamApiClient();
+      await streamApiClient.deleteStream({
+        idempotencyKey: crypto.randomUUID(),
+        serverUrl,
+        sessionKey,
+        token
+      });
+      chatStore.removeStream(sessionKey);
+    },
+    [authState.session?.serverUrl, authState.session?.token, chatStore]
+  );
 
   useEffect(() => {
     if (!activeSessionKey) {
@@ -338,12 +394,15 @@ export function ChatRoute() {
         isSessionListOpen={coordinator.isSessionListOpen}
         isStreamManagerOpen={coordinator.isStreamManagerOpen}
         onCloseSessionList={coordinator.closeSessionList}
+        onCreateSession={createSessionFromPopup}
+        onDeleteSession={deleteSessionFromPopup}
         onChatPanelTouchCancel={interactionCoordinator.handleChatPanelTouchCancel}
         onChatPanelTouchEnd={interactionCoordinator.handleChatPanelTouchEnd}
         onChatPanelTouchStart={interactionCoordinator.handleChatPanelTouchStart}
         onOpenSessionList={coordinator.openSessionList}
         onOpenStreamManager={coordinator.openStreamManager}
         onPopupSessionSelect={interactionCoordinator.handlePopupSessionSelect}
+        onRenameSession={renameSessionFromPopup}
         onCancelCurrentPrompt={(sessionKey) =>
           applySessionControl(sessionKey, "cancel_current_run")
         }

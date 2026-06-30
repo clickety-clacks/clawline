@@ -277,6 +277,7 @@ export function SessionListSheet({
                         {isEditing ? (
                           <input
                             aria-label={`Rename ${displayName}`}
+                            autoFocus
                             className="session-sheet-card-edit"
                             onBlur={() => void commitRename(stream.sessionKey)}
                             onChange={(event) => setRenameValue(event.target.value)}

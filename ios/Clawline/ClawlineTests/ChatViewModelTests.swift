@@ -1308,6 +1308,74 @@ struct ChatViewModelTests {
         #expect(secondViewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["New after dismiss"])
     }
 
+    @Test("T1171 same assistant message id can notify when content changes after dismissal")
+    @MainActor
+    func sameAssistantMessageIdCanNotifyWhenContentChangesAfterDismissal() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_t1171_changed_content"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Changed Content", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.t1171.changedContent")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        let original = #"{"type":"message","id":"s_t1171_changed","role":"assistant","content":"Original content","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(original.utf8))))
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["Original content"] { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["Original content"])
+
+        viewModel.dismissCrossChatNotification(sourceChatId: source)
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source] == nil)
+
+        chatService.startReplayCount = 1
+        chatService.emitSyncCompleteOnStart = false
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        try await Task.sleep(forDuration: .milliseconds(2100))
+        viewModel.handleSceneActiveStateChanged(isActive: true)
+        for _ in 0..<50 {
+            if chatService.connectCallCount >= 2 { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .serverMessage(data: Data(original.utf8))))
+        try await Task.sleep(forDuration: .milliseconds(30))
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source] == nil)
+
+        let changed = #"{"type":"message","id":"s_t1171_changed","role":"assistant","content":"Changed content","timestamp":1700000000001,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .serverMessage(data: Data(changed.utf8))))
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .syncComplete))
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["Changed content"] { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.id) == ["s_t1171_changed"])
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["Changed content"])
+    }
+
     @Test("T1213 replay failure discards pending notification snapshot")
     @MainActor
     func replayFailureDiscardsPendingNotifications() async throws {
@@ -7514,6 +7582,7 @@ private func resetChatPersistence() {
     for key in defaults.dictionaryRepresentation().keys {
         if key.hasPrefix("clawline.lastServerMessageId.")
             || key.hasPrefix("clawline.lastReadMessageId.")
+            || key.hasPrefix("clawline.suppressedCrossChatNotificationEntryKeys.")
             || key.hasPrefix("clawline.replayCursorBySession.v1.")
             || key.hasPrefix("clawline.lastStream")
             || key.hasPrefix("clawline.lastSessionKey")

@@ -211,7 +211,7 @@ enum BubbleSizingV2 {
         if plan.isSingleLinkPreview {
             return plan.heightPolicy.heightCap
         }
-        let naturalHeight = max(1, measuredContentHeight + chromeHeight)
+        let naturalHeight = max(44, measuredContentHeight + chromeHeight)
         if plan.allowsOuterScroll {
             return min(naturalHeight, plan.heightPolicy.heightCap)
         }

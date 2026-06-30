@@ -522,6 +522,78 @@ struct MessageBubbleMetadataTests {
         #expect(chromeHeight == 22)
     }
 
+    @Test("T1465: short BubbleSizingV2 normal bubbles keep the 44pt cell floor")
+    func bubbleSizingV2ShortNormalBubbleKeepsMinimumCellFloor() {
+        let heightPolicy = BubbleSizingV2.BubbleHeightPolicy(
+            isSingleLinkPreview: false,
+            heightCapMode: .designSystem,
+            heightCap: 2_000,
+            v1TruncationHeightOverride: nil,
+            linkPreviewViewportMaxHeight: 1_956,
+            cacheFingerprint: 1
+        )
+        let plan = BubbleSizingV2.Plan(
+            messageId: "short-normal-floor",
+            presentationFingerprint: 1,
+            sizeClass: .short,
+            isSingleLinkPreview: false,
+            isWide: false,
+            maxWidth: 396,
+            minWidth: 40,
+            heightPolicy: heightPolicy,
+            allowsOuterScroll: false,
+            linkPreviewURL: nil
+        )
+
+        let cellHeight = BubbleSizingV2.finalMeasuredCellHeight(
+            plan: plan,
+            measuredFittingHeight: 12,
+            measuredContentHeight: 18,
+            chromeHeight: 14
+        )
+
+        #expect(cellHeight == 44)
+    }
+
+    @Test("T1465: BubbleSizingV2 specialized non-link bubbles still cap overflowing content")
+    func bubbleSizingV2SpecializedNonLinkBubbleStillCapsOverflow() {
+        let heightPolicy = BubbleSizingV2.BubbleHeightPolicy(
+            isSingleLinkPreview: false,
+            heightCapMode: .screenAware,
+            heightCap: 320,
+            v1TruncationHeightOverride: 320,
+            linkPreviewViewportMaxHeight: 276,
+            cacheFingerprint: 1
+        )
+        let plan = BubbleSizingV2.Plan(
+            messageId: "non-link-specialized-overflow",
+            presentationFingerprint: 1,
+            sizeClass: .long,
+            isSingleLinkPreview: false,
+            isWide: true,
+            maxWidth: 396,
+            minWidth: 80,
+            heightPolicy: heightPolicy,
+            allowsOuterScroll: true,
+            linkPreviewURL: nil
+        )
+
+        let cellHeight = BubbleSizingV2.finalMeasuredCellHeight(
+            plan: plan,
+            measuredFittingHeight: 320,
+            measuredContentHeight: 420,
+            chromeHeight: 54
+        )
+        let viewportHeight = BubbleSizingV2.finalOuterScrollViewportHeight(
+            plan: plan,
+            measuredContentHeight: 420,
+            provisionalViewportHeight: 266
+        )
+
+        #expect(cellHeight == 320)
+        #expect(viewportHeight == 266)
+    }
+
     @Test("T1465: BubbleSizingV2 long normal bubbles do not reserve cap height when content fits")
     func bubbleSizingV2LongNormalBubbleUsesNaturalHeightWhenContentFits() {
         let metrics = ChatFlowTheme.Metrics(isCompact: false)

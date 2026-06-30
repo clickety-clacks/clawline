@@ -341,8 +341,9 @@ export function ChatRoute() {
         token
       });
       chatStore.removeStream(sessionKey);
+      notificationStore.dismissCrossChatNotification(sessionKey);
     },
-    [authState.session?.serverUrl, authState.session?.token, chatStore]
+    [authState.session?.serverUrl, authState.session?.token, chatStore, notificationStore]
   );
 
   useEffect(() => {

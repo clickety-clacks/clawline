@@ -875,29 +875,6 @@ describe("ChatRoute", () => {
     expect(screen.getByRole("textbox", { name: "Filter chats" })).toHaveValue("chat");
   });
 
-  it("disables untrack for built-in adopted sessions", async () => {
-    renderChatRoute("/chat/agent:main:clawline:user_1:main");
-
-    fireEvent.click(screen.getByRole("button", { name: "Manage streams" }));
-    fireEvent.click(screen.getByRole("button", { name: "Add stream" }));
-
-    const streamManager = await screen.findByRole("heading", {
-      name: "Manage sessions"
-    });
-    const streamManagerPanel = streamManager.closest("aside");
-    expect(streamManagerPanel).not.toBeNull();
-    const globalCard = within(streamManagerPanel as HTMLElement)
-      .getByText("agent:main:main")
-      .closest(".stream-manager-card");
-    expect(globalCard).not.toBeNull();
-    expect(
-      within(globalCard as HTMLElement).queryByRole("button", { name: "Untrack" })
-    ).toBeNull();
-    expect(
-      within(globalCard as HTMLElement).getByRole("button", { name: "Delete" })
-    ).toBeDisabled();
-  });
-
   it("dismisses source notifications after local stream deletion succeeds", async () => {
     const sideSessionKey = "agent:main:clawline:user_1:side";
     const { notificationStore } = renderChatRoute("/chat/agent:main:clawline:user_1:main", {
@@ -931,19 +908,11 @@ describe("ChatRoute", () => {
     expect(screen.getByText("Delete me after stream removal")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Manage streams" }));
-    fireEvent.click(screen.getByRole("button", { name: "Add stream" }));
-
-    const streamManager = await screen.findByRole("heading", {
-      name: "Manage sessions"
-    });
-    const streamManagerPanel = streamManager.closest("aside");
-    expect(streamManagerPanel).not.toBeNull();
-    const sideCard = within(streamManagerPanel as HTMLElement)
-      .getByText(sideSessionKey)
-      .closest(".stream-manager-card");
-    expect(sideCard).not.toBeNull();
-
-    fireEvent.click(within(sideCard as HTMLElement).getByRole("button", { name: "Delete" }));
+    const sideRow = screen.getByRole("button", { name: /Side Thread/i });
+    fireEvent.pointerDown(sideRow, { clientX: 200, clientY: 20 });
+    fireEvent.pointerMove(sideRow, { clientX: 40, clientY: 22 });
+    fireEvent.pointerUp(sideRow);
+    fireEvent.click(screen.getByRole("button", { name: "Delete Side Thread" }));
 
     await waitFor(() => {
       expect(

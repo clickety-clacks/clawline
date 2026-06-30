@@ -39,16 +39,47 @@ struct SessionMetadataFooterHitTestingTests {
         let cell = makeConfiguredCell()
         let buttons = try footerButtons(in: cell)
         let frames = buttons.map { $0.convert($0.bounds, to: cell) }
+        let searchField = try footerSearchField(in: cell)
+        let searchFrame = searchField.convert(searchField.bounds, to: cell)
 
         #expect(SessionMetadataFooterCell.topPadding == 12)
-        #expect(SessionMetadataFooterCell.height(for: makeStatus()) == 82)
-        #expect(SessionMetadataFooterCell.fadeRevealRange == 78)
+        #expect(SessionMetadataFooterCell.height(for: makeStatus()) == 120)
+        #expect(SessionMetadataFooterCell.fadeRevealRange == 116)
         #expect(frames.allSatisfy {
-            let centeredY = SessionMetadataFooterCell.topPadding
+            let centeredY = searchFrame.maxY
+                + SessionMetadataFooterCell.footerRowSpacing
                 + (SessionMetadataFooterCell.actionRegionHeight - $0.height) / 2
             return abs($0.minY - centeredY) <= 0.5
         })
         #expect(frames.allSatisfy { $0.height <= 24 })
+    }
+
+    @Test("Footer search row is first with equal row spacing and centered text")
+    func footerSearchRowIsFirstWithEqualRowSpacingAndCenteredText() throws {
+        let cell = makeConfiguredCell()
+        let searchField = try footerSearchField(in: cell)
+        let searchFrame = searchField.convert(searchField.bounds, to: cell)
+        let buttons = try footerButtons(in: cell)
+        let actionRow = try #require(
+            allSubviews(in: cell).compactMap { $0 as? UIStackView }
+                .first { stack in stack.axis == .horizontal && buttons.allSatisfy { $0.superview === stack } }
+        )
+        let actionRowFrame = actionRow.convert(actionRow.bounds, to: cell)
+        let versionLabel = try #require(
+            allSubviews(in: cell).compactMap { $0 as? UILabel }
+                .first { $0.text == SessionMetadataFooterCell.versionBuildText() }
+        )
+        let versionRow = try #require(versionLabel.superview)
+        let versionFrame = versionRow.convert(versionRow.bounds, to: cell)
+        let searchToActions = actionRowFrame.minY - searchFrame.maxY
+        let actionsToVersion = versionFrame.minY - actionRowFrame.maxY
+
+        #expect(searchFrame.minY == SessionMetadataFooterCell.topPadding)
+        #expect(searchFrame.minY < actionRowFrame.minY)
+        #expect(actionRowFrame.minY < versionFrame.minY)
+        #expect(abs(searchToActions - actionsToVersion) <= 0.5)
+        #expect(abs(searchToActions - SessionMetadataFooterCell.footerRowSpacing) <= 0.5)
+        #expect(searchField.textAlignment == .center)
     }
 
     @Test("Thinking action hit target does not include off-glyph segment above compact label")
@@ -141,7 +172,7 @@ struct SessionMetadataFooterHitTestingTests {
         let foreground = try #require(configuration.baseForegroundColor)
 
         #expect(foreground.cgColor.alpha == SessionMetadataFooterCell.textAlpha(isDark: false))
-        #expect(SessionMetadataFooterCell.fadeRevealRange == 78)
+        #expect(SessionMetadataFooterCell.fadeRevealRange == 116)
     }
 
     @Test("T1184 Spatial footer text stays white across theme states")
@@ -154,6 +185,10 @@ struct SessionMetadataFooterHitTestingTests {
             let cell = makeConfiguredCell(authMode: "oauth", isDark: isDark, isSpatial: true)
             let buttons = allSubviews(in: cell).compactMap { $0 as? UIButton }
             let labels = allSubviews(in: cell).compactMap { $0 as? UILabel }
+                .filter { label in
+                    sequence(first: label.superview, next: { $0?.superview })
+                        .allSatisfy { !($0 is UITextField) }
+                }
 
             for button in buttons {
                 let foreground = try #require(button.configuration?.baseForegroundColor)
@@ -453,6 +488,14 @@ private func decodedStatus(displayModel: String, catalogModelsJSON: String) thro
 
 private func allSubviews(in view: UIView) -> [UIView] {
     view.subviews + view.subviews.flatMap { allSubviews(in: $0) }
+}
+
+@MainActor
+private func footerSearchField(in cell: SessionMetadataFooterCell) throws -> UITextField {
+    try #require(
+        allSubviews(in: cell).compactMap { $0 as? UITextField }
+            .first { $0.accessibilityLabel == "Search current stream" }
+    )
 }
 
 @MainActor

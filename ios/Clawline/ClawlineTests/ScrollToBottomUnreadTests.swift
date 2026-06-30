@@ -119,9 +119,7 @@ struct ScrollToBottomUnreadTests {
         let boundsHeight: CGFloat = 700
         let topInset: CGFloat = 40
         let bottomInset: CGFloat = 180
-        let footerHeight = SessionMetadataFooterCell.topPadding
-            + SessionMetadataFooterCell.actionRegionHeight
-            + SessionMetadataFooterCell.versionRowHeight
+        let footerHeight = SessionMetadataFooterCell.fadeRevealRange
             + SessionMetadataFooterCell.bottomPadding
         let restingContentHeight = MessageFlowCollectionViewController.restingBottomContentHeight(
             contentSizeHeight: contentHeight,
@@ -160,9 +158,7 @@ struct ScrollToBottomUnreadTests {
         let boundsHeight: CGFloat = 700
         let topInset: CGFloat = 40
         let bottomInset: CGFloat = 180
-        let footerHeight = SessionMetadataFooterCell.topPadding
-            + SessionMetadataFooterCell.actionRegionHeight
-            + SessionMetadataFooterCell.versionRowHeight
+        let footerHeight = SessionMetadataFooterCell.fadeRevealRange
             + SessionMetadataFooterCell.bottomPadding
         let restingContentHeight = MessageFlowCollectionViewController.restingBottomContentHeight(
             contentSizeHeight: contentHeight,

@@ -151,6 +151,64 @@ struct MessageBubbleMetadataTests {
         }
     }
 
+    @Test("T1465: normal bubble does not stretch to overallocated row cell height")
+    func normalBubbleDoesNotStretchToOverallocatedRowCellHeight() {
+        let message = Message(
+            id: "t1465-row-overallocation",
+            role: .assistant,
+            content: "Another normal message with enough words to wrap but not enough to need any scroll container.",
+            timestamp: Date(timeIntervalSince1970: 1_772_496_480),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal"
+        )
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        var streamingState = StreamingTableParseState()
+        let presentation = MessagePresentationBuilder.build(
+            from: message,
+            metrics: metrics,
+            streamingState: &streamingState
+        )
+        let container = MessageBubbleUIKitContainerView(frame: CGRect(x: 0, y: 0, width: 560, height: 1))
+
+        container.configure(
+            message: message,
+            presentation: presentation,
+            sendIndicatorState: nil,
+            isCompact: false,
+            maxWidth: 560,
+            bubbleHeightPolicy: nil,
+            truncationHeightOverride: nil,
+            bubbleSizingV2: nil,
+            showsHeader: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil,
+            onInsertIntoPrompt: nil,
+            onReferenceMessage: nil,
+            onResend: nil
+        )
+
+        let measured = container.systemLayoutSizeFitting(
+            CGSize(width: 560, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        let overallocatedHeight = measured.height + 260
+        container.frame = CGRect(x: 0, y: 0, width: measured.width, height: overallocatedHeight)
+        container.layoutIfNeeded()
+
+        let bubbleFrame = container.bubbleFrameInContainer()
+        #expect(measured.height > 40)
+        #expect(abs(bubbleFrame.height - measured.height) <= 1)
+        #expect(overallocatedHeight - bubbleFrame.height > 200)
+        print(
+            "T1465 row-overallocation proof cellHeight=\(overallocatedHeight) measuredBubbleHeight=\(measured.height) renderedBubbleFrame=\(bubbleFrame)"
+        )
+    }
+
     @Test("T320: bubble title bar menu button is wired on iOS/iPadOS")
     func titleBarMenuButtonIsWiredForTitleTap() {
         let message = Message(
@@ -414,6 +472,182 @@ struct MessageBubbleMetadataTests {
         )
 
         #expect(viewportHeight == 52)
+    }
+
+    @Test("T1465: BubbleSizingV2 non-scrolling normal bubbles use content height for final cell")
+    func bubbleSizingV2NormalBubbleCellHeightIgnoresProvisionalViewport() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
+        let env = BubbleSizingV2.Environment(
+            containerWidth: 396,
+            containerHeight: 844,
+            singleLinkContainerHeight: 844,
+            topInset: 0,
+            bottomInset: 0,
+            truncationBottomInset: 0,
+            isVisionOS: false,
+            metricsFingerprint: 1
+        )
+        let heightPolicy = BubbleSizingV2.BubbleHeightPolicy.resolve(
+            metrics: metrics,
+            env: env,
+            isSingleLinkPreview: false,
+            prefersScreenAwareHeightCap: false,
+            allowsOuterScroll: false
+        )
+        let plan = BubbleSizingV2.Plan(
+            messageId: "normal-bubble",
+            presentationFingerprint: 1,
+            sizeClass: .short,
+            isSingleLinkPreview: false,
+            isWide: false,
+            maxWidth: 396,
+            minWidth: 40,
+            heightPolicy: heightPolicy,
+            allowsOuterScroll: false,
+            linkPreviewURL: nil
+        )
+
+        let cellHeight = BubbleSizingV2.finalMeasuredCellHeight(
+            plan: plan,
+            measuredFittingHeight: 2_000,
+            measuredContentHeight: 52,
+            chromeHeight: 22
+        )
+        let chromeHeight = BubbleSizingV2.finalMeasuredChromeHeight(
+            measuredFittingHeight: 2_000,
+            provisionalViewportHeight: 1_978
+        )
+
+        #expect(cellHeight == 74)
+        #expect(chromeHeight == 22)
+    }
+
+    @Test("T1465: BubbleSizingV2 long normal bubbles do not reserve cap height when content fits")
+    func bubbleSizingV2LongNormalBubbleUsesNaturalHeightWhenContentFits() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let env = BubbleSizingV2.Environment(
+            containerWidth: 834,
+            containerHeight: 1194,
+            singleLinkContainerHeight: 1194,
+            topInset: 0,
+            bottomInset: 0,
+            truncationBottomInset: 0,
+            isVisionOS: false,
+            metricsFingerprint: 1
+        )
+        let heightPolicy = BubbleSizingV2.BubbleHeightPolicy.resolve(
+            metrics: metrics,
+            env: env,
+            isSingleLinkPreview: false,
+            prefersScreenAwareHeightCap: false,
+            allowsOuterScroll: true
+        )
+        let plan = BubbleSizingV2.Plan(
+            messageId: "long-normal-fits",
+            presentationFingerprint: 1,
+            sizeClass: .long,
+            isSingleLinkPreview: false,
+            isWide: false,
+            maxWidth: 617,
+            minWidth: 80,
+            heightPolicy: heightPolicy,
+            allowsOuterScroll: true,
+            linkPreviewURL: nil
+        )
+
+        let cellHeight = BubbleSizingV2.finalMeasuredCellHeight(
+            plan: plan,
+            measuredFittingHeight: heightPolicy.heightCap,
+            measuredContentHeight: 118,
+            chromeHeight: 54
+        )
+
+        #expect(cellHeight == 172)
+        #expect(cellHeight < heightPolicy.heightCap)
+    }
+
+    @Test("T1465: BubbleSizingV2 medium normal bubble ignores provisional viewport in live view")
+    @MainActor
+    func bubbleSizingV2MediumNormalBubbleUsesMeasuredContentHeight() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let message = Message(
+            id: "medium-normal",
+            role: .assistant,
+            content: "Another normal message with enough words to wrap but not enough to need any scroll container.",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:visual:t1465"
+        )
+        var streamingState = StreamingTableParseState()
+        let presentation = MessagePresentationBuilder.build(
+            from: message,
+            metrics: metrics,
+            streamingState: &streamingState
+        )
+        let heightPolicy = BubbleSizingV2.BubbleHeightPolicy(
+            isSingleLinkPreview: false,
+            heightCapMode: .designSystem,
+            heightCap: 2_000,
+            v1TruncationHeightOverride: nil,
+            linkPreviewViewportMaxHeight: 1_980,
+            cacheFingerprint: 1
+        )
+        let plan = BubbleSizingV2.Plan(
+            messageId: message.id,
+            presentationFingerprint: 1,
+            sizeClass: .medium,
+            isSingleLinkPreview: false,
+            isWide: false,
+            maxWidth: 617,
+            minWidth: 80,
+            heightPolicy: heightPolicy,
+            allowsOuterScroll: false,
+            linkPreviewURL: nil
+        )
+        let layoutState = BubbleSizingV2.LayoutState(
+            plan: plan,
+            measurement: BubbleSizingV2.Measurement(
+                measuredCellSize: CGSize(width: 617, height: 96),
+                measuredBubbleWidth: 617,
+                contentHeight: 48,
+                chromeHeight: 48,
+                outerScrollEnabled: false,
+                outerScrollViewportHeight: 260,
+                isFinal: true
+            ),
+            linkPreviewCacheKey: nil,
+            linkPreviewEstimatedHeight: nil,
+            linkPreviewMinHeight: 40,
+            linkPreviewMaxHeight: 1_980
+        )
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 617, height: 1))
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: .medium,
+            metrics: metrics,
+            maxWidth: 617,
+            bubbleHeightPolicy: heightPolicy,
+            bubbleSizingV2: layoutState,
+            showsHeader: true,
+            paddingScale: 1,
+            minWidthOverride: 80,
+            maxWidthOverride: nil,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+        let measured = bubble.systemLayoutSizeFitting(
+            CGSize(width: 617, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+
+        #expect(measured.height < 140)
     }
 
     @Test("Reply quote text participates in normal bubble width")

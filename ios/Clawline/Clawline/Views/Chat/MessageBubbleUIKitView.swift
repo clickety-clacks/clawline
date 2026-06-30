@@ -490,6 +490,7 @@ private final class BubbleTextView: UITextView {
             height: .greatestFiniteMagnitude
         )
         textContainer.size = targetSize
+        layoutManager.invalidateLayout(forCharacterRange: NSRange(location: 0, length: textStorage.length), actualCharacterRange: nil)
         layoutManager.ensureLayout(for: textContainer)
         let usedRect = layoutManager.usedRect(for: textContainer)
         return CGSize(
@@ -516,7 +517,7 @@ final class MessageBubbleUIKitContainerView: UIView {
         bubbleView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(bubbleView)
 
-        bubbleBottomConstraint = bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor)
+        bubbleBottomConstraint = bubbleView.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor)
         NSLayoutConstraint.activate([
             bubbleView.leadingAnchor.constraint(equalTo: leadingAnchor),
             bubbleView.topAnchor.constraint(equalTo: topAnchor),
@@ -2124,7 +2125,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     }
 
     private func applyBubbleSizingV2(_ state: BubbleSizingV2.LayoutState) {
-        guard state.plan.sizeClass == .short else {
+        guard !state.measurement.outerScrollEnabled, !state.plan.isSingleLinkPreview else {
             dynamicContentHeightConstraint?.constant = 2000
             return
         }
@@ -2140,8 +2141,8 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         dynamicContentHeightConstraint?.constant = max(44, viewportHeight)
     }
 
-    private func updateDynamicContentHeightPreference(for sizeClass: MessageSizeClass) {
-        wrapperPrefersContentHeightConstraint?.priority = (sizeClass == .long) ? .defaultLow : UILayoutPriority(999)
+    private func updateDynamicContentHeightPreference(for _: MessageSizeClass) {
+        wrapperPrefersContentHeightConstraint?.priority = UILayoutPriority(999)
     }
 
     private var currentIdentityKey: String? {
@@ -2406,13 +2407,53 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     // Used by the V2 measurer to compute content vs chrome height without duplicating view-specific logic.
     func measuredDynamicContentHeight(fittingWidth width: CGFloat) -> CGFloat {
         layoutIfNeeded()
-        let target = CGSize(width: max(1, width), height: UIView.layoutFittingCompressedSize.height)
-        let measured = dynamicContentStack.systemLayoutSizeFitting(
-            target,
+        let fittingWidth = max(1, width)
+        let visibleViews = dynamicContentStack.arrangedSubviews.filter { !$0.isHidden }
+        let contentHeight = visibleViews.enumerated().reduce(CGFloat(0)) { partial, entry in
+            let spacing = entry.offset == 0 ? CGFloat(0) : dynamicContentStack.spacing
+            return partial + spacing + measuredDynamicSubviewHeight(entry.element, fittingWidth: fittingWidth)
+        }
+        return max(0, contentHeight)
+    }
+
+    private func measuredDynamicSubviewHeight(_ view: UIView, fittingWidth width: CGFloat) -> CGFloat {
+        if view === bodyTextContainer {
+            return measuredTextHeight(bodyLabel, fittingWidth: width)
+        }
+        if let textView = view.subviews.compactMap({ $0 as? BubbleTextView }).first {
+            return measuredTextHeight(textView, fittingWidth: width)
+        }
+        let measured = view.systemLayoutSizeFitting(
+            CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
             withHorizontalFittingPriority: .required,
             verticalFittingPriority: .fittingSizeLevel
         )
         return max(0, measured.height)
+    }
+
+    private func measuredTextHeight(_ textView: BubbleTextView, fittingWidth width: CGFloat) -> CGFloat {
+        guard let attributedText = textView.attributedText, attributedText.length > 0 else {
+            return 0
+        }
+        let inset = textView.textContainerInset
+        let horizontalInset = inset.left + inset.right + textView.textContainer.lineFragmentPadding * 2
+        let textWidth = max(1, width - horizontalInset)
+        let rect = attributedText.boundingRect(
+            with: CGSize(width: textWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            context: nil
+        )
+        return ceil(rect.height + inset.top + inset.bottom)
+    }
+
+    func measuredNaturalBubbleHeightForLayout() -> CGFloat {
+        layoutIfNeeded()
+        let contentWidth = max(1, dynamicContentWrapper.bounds.width)
+        let dynamicHeight = measuredDynamicContentHeight(fittingWidth: contentWidth)
+        let allocatedDynamicHeight = max(0, dynamicContentWrapper.bounds.height)
+        let allocatedBubbleHeight = max(0, bubbleBackgroundView.bounds.height)
+        let chromeHeight = max(0, allocatedBubbleHeight - allocatedDynamicHeight)
+        return max(1, dynamicHeight + chromeHeight)
     }
 
     @objc private func handleBodyTap(_ recognizer: UITapGestureRecognizer) {

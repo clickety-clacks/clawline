@@ -4869,6 +4869,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         )
         let minWidth: CGFloat = minWidthOverride ?? 120
         var height = max(1, measured.height)
+        if !hasLinkPreview {
+            let naturalHeight = uiKitBubbleSizer.measuredNaturalBubbleHeightForLayout()
+            height = min(height, naturalHeight)
+        }
         if let minHeight = minHeightOverride {
             height = max(height, minHeight)
         }
@@ -5185,6 +5189,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let dynamicHeight1 = uiKitBubbleSizer.measuredDynamicContentHeight(fittingWidth: contentWidth)
         let chromeHeight = max(0, measured1.height - dynamicHeight1)
         let viewportHeight = max(plan.heightPolicy.heightCap - chromeHeight, 44)
+        let provisional2ViewportHeight = plan.isSingleLinkPreview
+            ? viewportHeight
+            : max(44, dynamicHeight1)
 
         // Pass 2: reconfigure with the final link-preview viewport max height.
         // Web previews are fixed-height viewports with internal WKWebView scrolling.
@@ -5196,7 +5203,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 contentHeight: 0,
                 chromeHeight: chromeHeight,
                 outerScrollEnabled: false,
-                outerScrollViewportHeight: viewportHeight,
+                outerScrollViewportHeight: provisional2ViewportHeight,
                 isFinal: linkPreviewEstimatedHeight != nil
             ),
             linkPreviewCacheKey: linkPreviewCacheKey,
@@ -5229,29 +5236,31 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             verticalFittingPriority: .fittingSizeLevel
         )
         let dynamicHeight2 = uiKitBubbleSizer.measuredDynamicContentHeight(fittingWidth: contentWidth)
+        let finalChromeHeight = BubbleSizingV2.finalMeasuredChromeHeight(
+            measuredFittingHeight: measured2.height,
+            provisionalViewportHeight: provisional2ViewportHeight
+        )
 
-        let outerScrollEnabled = plan.allowsOuterScroll && measured2.height > plan.heightPolicy.heightCap
+        let naturalCellHeight = max(1, dynamicHeight2 + finalChromeHeight)
+        let outerScrollEnabled = plan.allowsOuterScroll && naturalCellHeight > plan.heightPolicy.heightCap
         let finalViewportHeight = BubbleSizingV2.finalOuterScrollViewportHeight(
             plan: plan,
             measuredContentHeight: dynamicHeight2,
             provisionalViewportHeight: viewportHeight
         )
-        let cellHeight: CGFloat = {
-            if plan.isSingleLinkPreview {
-                return plan.heightPolicy.heightCap
-            }
-            if plan.allowsOuterScroll {
-                return min(measured2.height, plan.heightPolicy.heightCap)
-            }
-            return measured2.height
-        }()
+        let cellHeight = BubbleSizingV2.finalMeasuredCellHeight(
+            plan: plan,
+            measuredFittingHeight: measured2.height,
+            measuredContentHeight: dynamicHeight2,
+            chromeHeight: finalChromeHeight
+        )
 
         let snappedSize = snapToPixel(CGSize(width: measuredBubbleWidth, height: max(1, cellHeight)))
         let measurement = BubbleSizingV2.Measurement(
             measuredCellSize: snappedSize,
             measuredBubbleWidth: snappedSize.width,
             contentHeight: dynamicHeight2,
-            chromeHeight: chromeHeight,
+            chromeHeight: finalChromeHeight,
             outerScrollEnabled: outerScrollEnabled,
             outerScrollViewportHeight: finalViewportHeight,
             isFinal: linkPreviewEstimatedHeight != nil

@@ -202,6 +202,29 @@ enum BubbleSizingV2 {
         return max(44, measuredContentHeight)
     }
 
+    static func finalMeasuredCellHeight(
+        plan: Plan,
+        measuredFittingHeight: CGFloat,
+        measuredContentHeight: CGFloat,
+        chromeHeight: CGFloat
+    ) -> CGFloat {
+        if plan.isSingleLinkPreview {
+            return plan.heightPolicy.heightCap
+        }
+        let naturalHeight = max(1, measuredContentHeight + chromeHeight)
+        if plan.allowsOuterScroll {
+            return min(naturalHeight, plan.heightPolicy.heightCap)
+        }
+        return naturalHeight
+    }
+
+    static func finalMeasuredChromeHeight(
+        measuredFittingHeight: CGFloat,
+        provisionalViewportHeight: CGFloat
+    ) -> CGFloat {
+        max(0, measuredFittingHeight - provisionalViewportHeight)
+    }
+
     // Simple in-memory LRU cache (controller-owned). Correctness must not depend on retention.
     final class LRUCache<Key: Hashable, Value> {
         private struct Entry {

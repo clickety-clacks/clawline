@@ -191,4 +191,25 @@ describe("useChatSessionCoordinator", () => {
     expect(result.current.isSessionListOpen).toBe(false);
     expect(result.current.isStreamManagerOpen).toBe(false);
   });
+
+  it("can switch sessions without closing the session list for inline add rename", () => {
+    const { result } = renderHook(() =>
+      useChatSessionCoordinator({
+        provisionedSessionKeys: STREAMS.map((stream) => stream.sessionKey),
+        routeSessionKey: "agent:main:clawline:user_1:main",
+        streams: STREAMS,
+        transportPhase: "live"
+      })
+    );
+
+    act(() => {
+      result.current.openSessionList();
+      result.current.requestSessionSwitch("agent:main:clawline:user_1:side", "popup", {
+        keepSessionListOpen: true
+      });
+    });
+
+    expect(result.current.isSessionListOpen).toBe(true);
+    expect(result.current.transition.source).toBe("popup");
+  });
 });

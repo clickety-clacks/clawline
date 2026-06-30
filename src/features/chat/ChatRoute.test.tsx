@@ -799,16 +799,80 @@ describe("ChatRoute", () => {
     expect(screen.queryByRole("dialog", { name: "Sessions" })).not.toBeInTheDocument();
   });
 
-  it("opens stream management from the session sheet without changing the route", () => {
+  it("keeps the session popup open for inline rename after Add creates and selects a chat", async () => {
+    const createdStream = {
+      sessionKey: "agent:main:clawline:user_1:new_chat",
+      displayName: "New Chat",
+      kind: "custom",
+      orderIndex: 3,
+      isBuiltIn: false,
+      createdAt: 12,
+      updatedAt: 12,
+      adopted: false
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input instanceof URL ? input : new URL(String(input));
+
+        if (url.pathname === "/api/streams" && init?.method === "POST") {
+          return new Response(JSON.stringify({ stream: createdStream }), {
+            headers: { "Content-Type": "application/json" },
+            status: 200
+          });
+        }
+
+        if (url.pathname === "/api/streams") {
+          return new Response(JSON.stringify({ streams: TEST_STREAMS }), {
+            headers: { "Content-Type": "application/json" },
+            status: 200
+          });
+        }
+
+        if (url.pathname === "/api/trackable-sessions") {
+          return new Response(JSON.stringify({ sessions: [] }), {
+            headers: { "Content-Type": "application/json" },
+            status: 200
+          });
+        }
+
+        if (url.pathname.startsWith("/api/streams/")) {
+          return new Response(
+            JSON.stringify({ deletedSessionKey: decodeURIComponent(url.pathname.slice("/api/streams/".length)) }),
+            {
+              headers: { "Content-Type": "application/json" },
+              status: 200
+            }
+          );
+        }
+
+        return new Response(JSON.stringify({ error: { code: "unexpected_path" } }), {
+          headers: { "Content-Type": "application/json" },
+          status: 404
+        });
+      })
+    );
+
     renderChatRoute("/chat/agent:main:clawline:user_1:main");
 
     fireEvent.click(screen.getByRole("button", { name: "Manage streams" }));
-    fireEvent.click(screen.getByRole("button", { name: "Add stream" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Filter chats" }), {
+      target: { value: "chat" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add chat" }));
 
-    expect(screen.getByRole("heading", { name: "Manage sessions" })).toBeInTheDocument();
-    expect(screen.getByTestId("location")).toHaveTextContent(
-      "/chat/agent:main:clawline:user_1:main"
-    );
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent(
+        "/chat/agent:main:clawline:user_1:new_chat"
+      );
+    });
+    const renameInput = await screen.findByRole("textbox", {
+      name: "Rename New Chat"
+    });
+    expect(screen.getByRole("dialog", { name: "Sessions" })).toBeInTheDocument();
+    expect(renameInput).toHaveFocus();
+    expect(renameInput).toHaveValue("New Chat");
+    expect(screen.getByRole("textbox", { name: "Filter chats" })).toHaveValue("chat");
   });
 
   it("disables untrack for built-in adopted sessions", async () => {

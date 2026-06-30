@@ -209,8 +209,12 @@ export function ChatRoute() {
   ]);
 
   const handleSelectSession = useCallback(
-    (sessionKey: string, source: ChatSessionSwitchSource) => {
-      coordinator.requestSessionSwitch(sessionKey, source);
+    (
+      sessionKey: string,
+      source: ChatSessionSwitchSource,
+      options?: { keepSessionListOpen?: boolean }
+    ) => {
+      coordinator.requestSessionSwitch(sessionKey, source, options);
       navigate(`/chat/${sessionKey}`);
     },
     [coordinator, navigate]
@@ -292,7 +296,9 @@ export function ChatRoute() {
       token
     });
     chatStore.upsertStream(response.stream);
-    handleSelectSession(response.stream.sessionKey, "popup");
+    handleSelectSession(response.stream.sessionKey, "popup", {
+      keepSessionListOpen: true
+    });
     return response.stream;
   }, [
     authState.session?.serverUrl,

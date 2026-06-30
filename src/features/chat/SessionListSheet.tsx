@@ -199,8 +199,9 @@ export function SessionListSheet({
                   <div className="session-sheet-row-actions" aria-hidden={!isRevealed}>
                     <button
                       className="session-sheet-row-action session-sheet-row-action--rename"
-                      disabled={pendingActionKey !== null}
+                      disabled={!isRevealed || pendingActionKey !== null}
                       onClick={() => beginRename(stream.sessionKey, displayName)}
+                      tabIndex={isRevealed ? 0 : -1}
                       type="button"
                     >
                       Rename
@@ -208,8 +209,9 @@ export function SessionListSheet({
                     <button
                       aria-label={`Delete ${displayName}`}
                       className="session-sheet-row-action session-sheet-row-action--delete"
-                      disabled={pendingActionKey !== null}
+                      disabled={!isRevealed || pendingActionKey !== null}
                       onClick={() => void deleteSession(stream.sessionKey)}
+                      tabIndex={isRevealed ? 0 : -1}
                       type="button"
                     >
                       <Trash2 size={17} strokeWidth={2} />

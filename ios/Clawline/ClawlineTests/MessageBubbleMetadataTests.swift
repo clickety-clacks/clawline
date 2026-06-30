@@ -112,7 +112,12 @@ struct MessageBubbleMetadataTests {
             onInteractiveCallback: nil
         )
 
-        bubble.frame = CGRect(x: 0, y: 0, width: 560, height: 520)
+        let measured = bubble.systemLayoutSizeFitting(
+            CGSize(width: 560, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        bubble.frame = CGRect(origin: .zero, size: measured)
         bubble.layoutIfNeeded()
 
         let avatar = findSubview(in: bubble) { $0 is AvatarCircleView }
@@ -126,21 +131,23 @@ struct MessageBubbleMetadataTests {
         if let avatar, let body {
             let avatarFrame = avatar.convert(avatar.bounds, to: bubble)
             let bodyFrame = body.convert(body.bounds, to: bubble)
-            let wrapper = body.superview?.superview?.superview?.superview
-            let bubbleBackground = wrapper?.superview?.superview
+            let geometry = bubble.renderedGeometryForTests(in: bubble)
+            let ownedInsets = MessageBubbleGeometry.contentInsets(
+                metrics: metrics,
+                paddingScale: 1,
+                hasTerminalSessions: false,
+                hasMediaOnly: false
+            )
+            let bottomBlank = geometry.bubbleFrame.maxY - geometry.contentFrame.maxY
 
             #expect(avatarFrame.minY < 80)
             #expect(bodyFrame.minY - avatarFrame.maxY < 40)
             #expect(bodyFrame.width > bubble.bounds.width * 0.85)
-
-            #expect(wrapper != nil)
-            #expect(bubbleBackground != nil)
-            if let wrapper, let bubbleBackground {
-                let wrapperFrame = wrapper.convert(wrapper.bounds, to: bubble)
-                let backgroundFrame = bubbleBackground.convert(bubbleBackground.bounds, to: bubble)
-                #expect(backgroundFrame.maxY - wrapperFrame.maxY < 20)
-                #expect(backgroundFrame.height < bubble.bounds.height / 2)
-            }
+            #expect(abs(bottomBlank - ownedInsets.bottom) <= 0.5)
+            #expect(abs(geometry.bubbleFrame.height - bubble.bounds.height) <= 0.5)
+            print(
+                "T1465 geometry proof bubbleFrame=\(geometry.bubbleFrame) contentFrame=\(geometry.contentFrame) bodyFrame=\(bodyFrame) bottomBlank=\(bottomBlank) ownedBottomInset=\(ownedInsets.bottom) measuredCellHeight=\(bubble.bounds.height)"
+            )
         }
     }
 

@@ -857,7 +857,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             // Fill the allocated cell width. The flow layout decides the cell width; the bubble background
             // should match it so "wide" bubbles don't render with a right-side gap.
             bubbleBackgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            bubbleBackgroundView.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
+            bubbleBackgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
             maxWidthConstraint,
             minWidthConstraint,
             // Shadow container matches bubble frame (clear background, no inset needed)

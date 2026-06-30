@@ -480,6 +480,7 @@ html[data-appearance="light"] body::before {
   justify-content: space-between;
   gap: 0.65rem;
   min-width: 0;
+  flex-wrap: wrap;
 }
 
 .message-sender-name {
@@ -493,16 +494,14 @@ html[data-appearance="light"] body::before {
 .message-timestamp {
   font-size: 11px;
   color: var(--color-text-dim);
-  font-family: var(--font-mono);
-  opacity: 0;
-  transition: opacity 160ms ease;
+  opacity: 0.78;
   white-space: nowrap;
   pointer-events: none;
 }
 
 .message-bubble:hover .message-timestamp,
 .message-bubble--timestamp-visible .message-timestamp {
-  opacity: 0.7;
+  opacity: 0.92;
 }
 
 .message-avatar {
@@ -2091,7 +2090,11 @@ html[data-appearance="light"] body::before {
   left: 50%;
   bottom: calc(8.8rem + env(safe-area-inset-bottom, 0px) + var(--chat-keyboard-inset));
   transform: translateX(-50%);
-  width: fit-content;
+  width: min(
+    48rem,
+    max(18rem, calc(var(--session-popover-content-width, 0px) + 7.75rem)),
+    calc(100vw - 1.5rem)
+  );
   max-width: min(48rem, calc(100vw - 1.5rem));
   max-height: min(32rem, calc(100dvh - 11rem - env(safe-area-inset-bottom, 0px) - var(--chat-keyboard-inset)));
   padding: 0;
@@ -2152,6 +2155,16 @@ html[data-appearance="light"] .session-popover {
   transform: translateX(-50%) rotate(45deg);
 }
 
+.session-popover-measure {
+  position: absolute;
+  inset: auto auto 100% 0;
+  visibility: hidden;
+  white-space: nowrap;
+  font-size: 1rem;
+  font-weight: 500;
+  pointer-events: none;
+}
+
 .session-popover-footer,
 .session-sheet-card-row {
   display: flex;
@@ -2163,11 +2176,50 @@ html[data-appearance="light"] .session-popover {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  width: max-content;
+  width: 100%;
   max-width: 100%;
   min-height: 0;
   overflow: auto;
   padding: 8px;
+}
+
+.session-sheet-row {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+.session-sheet-row-actions {
+  position: absolute;
+  inset: 0 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  width: 144px;
+  overflow: hidden;
+}
+
+.session-sheet-row-action {
+  width: 72px;
+  border: 0;
+  border-radius: 0;
+  color: #fff;
+  font-family: "DM Sans", system-ui, -apple-system, sans-serif;
+  font-size: 0.82rem;
+  font-weight: 650;
+  box-shadow: none;
+}
+
+.session-sheet-row-action--rename {
+  background: #6b6f76;
+}
+
+.session-sheet-row-action--delete {
+  display: grid;
+  place-items: center;
+  background: #c7483f;
 }
 
 .session-sheet-card {
@@ -2183,7 +2235,10 @@ html[data-appearance="light"] .session-popover {
   color: var(--session-popup-text);
   transition:
     background 180ms ease,
-    border-color 180ms ease;
+    border-color 180ms ease,
+    transform 180ms ease;
+  touch-action: pan-y;
+  position: relative;
 }
 
 .session-sheet-card-row {
@@ -2233,10 +2288,29 @@ html[data-appearance="light"] .session-popover {
   text-align: left;
   font-size: 1rem;
   font-weight: 500;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.session-sheet-card-edit {
+  min-width: 0;
+  flex: 1 1 auto;
+  height: 34px;
+  border: 1px solid var(--session-popup-filter-border-focus);
+  border-radius: 8px;
+  padding: 0 8px;
+  background: var(--session-popup-filter-bg-focus);
+  color: var(--session-popup-text);
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.session-sheet-card-edit:focus-visible {
+  outline: none;
+  box-shadow: var(--session-popup-filter-shadow-focus);
 }
 
 .session-popover-footer {

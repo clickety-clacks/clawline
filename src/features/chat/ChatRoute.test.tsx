@@ -799,39 +799,80 @@ describe("ChatRoute", () => {
     expect(screen.queryByRole("dialog", { name: "Sessions" })).not.toBeInTheDocument();
   });
 
-  it("opens stream management from the session sheet without changing the route", () => {
-    renderChatRoute("/chat/agent:main:clawline:user_1:main");
+  it("keeps the session popup open for inline rename after Add creates and selects a chat", async () => {
+    const createdStream = {
+      sessionKey: "agent:main:clawline:user_1:new_chat",
+      displayName: "New Chat",
+      kind: "custom",
+      orderIndex: 3,
+      isBuiltIn: false,
+      createdAt: 12,
+      updatedAt: 12,
+      adopted: false
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input instanceof URL ? input : new URL(String(input));
 
-    fireEvent.click(screen.getByRole("button", { name: "Manage streams" }));
-    fireEvent.click(screen.getByRole("button", { name: "Add stream" }));
+        if (url.pathname === "/api/streams" && init?.method === "POST") {
+          return new Response(JSON.stringify({ stream: createdStream }), {
+            headers: { "Content-Type": "application/json" },
+            status: 200
+          });
+        }
 
-    expect(screen.getByRole("heading", { name: "Manage sessions" })).toBeInTheDocument();
-    expect(screen.getByTestId("location")).toHaveTextContent(
-      "/chat/agent:main:clawline:user_1:main"
+        if (url.pathname === "/api/streams") {
+          return new Response(JSON.stringify({ streams: TEST_STREAMS }), {
+            headers: { "Content-Type": "application/json" },
+            status: 200
+          });
+        }
+
+        if (url.pathname === "/api/trackable-sessions") {
+          return new Response(JSON.stringify({ sessions: [] }), {
+            headers: { "Content-Type": "application/json" },
+            status: 200
+          });
+        }
+
+        if (url.pathname.startsWith("/api/streams/")) {
+          return new Response(
+            JSON.stringify({ deletedSessionKey: decodeURIComponent(url.pathname.slice("/api/streams/".length)) }),
+            {
+              headers: { "Content-Type": "application/json" },
+              status: 200
+            }
+          );
+        }
+
+        return new Response(JSON.stringify({ error: { code: "unexpected_path" } }), {
+          headers: { "Content-Type": "application/json" },
+          status: 404
+        });
+      })
     );
-  });
 
-  it("disables untrack for built-in adopted sessions", async () => {
     renderChatRoute("/chat/agent:main:clawline:user_1:main");
 
     fireEvent.click(screen.getByRole("button", { name: "Manage streams" }));
-    fireEvent.click(screen.getByRole("button", { name: "Add stream" }));
-
-    const streamManager = await screen.findByRole("heading", {
-      name: "Manage sessions"
+    fireEvent.change(screen.getByRole("textbox", { name: "Filter chats" }), {
+      target: { value: "zzz" }
     });
-    const streamManagerPanel = streamManager.closest("aside");
-    expect(streamManagerPanel).not.toBeNull();
-    const globalCard = within(streamManagerPanel as HTMLElement)
-      .getByText("agent:main:main")
-      .closest(".stream-manager-card");
-    expect(globalCard).not.toBeNull();
-    expect(
-      within(globalCard as HTMLElement).queryByRole("button", { name: "Untrack" })
-    ).toBeNull();
-    expect(
-      within(globalCard as HTMLElement).getByRole("button", { name: "Delete" })
-    ).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Add chat" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent(
+        "/chat/agent:main:clawline:user_1:new_chat"
+      );
+    });
+    const renameInput = await screen.findByRole("textbox", {
+      name: "Rename New Chat"
+    });
+    expect(screen.getByRole("dialog", { name: "Sessions" })).toBeInTheDocument();
+    expect(renameInput).toHaveFocus();
+    expect(renameInput).toHaveValue("New Chat");
+    expect(screen.getByRole("textbox", { name: "Filter chats" })).toHaveValue("zzz");
   });
 
   it("dismisses source notifications after local stream deletion succeeds", async () => {
@@ -867,19 +908,11 @@ describe("ChatRoute", () => {
     expect(screen.getByText("Delete me after stream removal")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Manage streams" }));
-    fireEvent.click(screen.getByRole("button", { name: "Add stream" }));
-
-    const streamManager = await screen.findByRole("heading", {
-      name: "Manage sessions"
-    });
-    const streamManagerPanel = streamManager.closest("aside");
-    expect(streamManagerPanel).not.toBeNull();
-    const sideCard = within(streamManagerPanel as HTMLElement)
-      .getByText(sideSessionKey)
-      .closest(".stream-manager-card");
-    expect(sideCard).not.toBeNull();
-
-    fireEvent.click(within(sideCard as HTMLElement).getByRole("button", { name: "Delete" }));
+    const sideRow = screen.getByRole("button", { name: /Side Thread/i });
+    fireEvent.pointerDown(sideRow, { clientX: 200, clientY: 20 });
+    fireEvent.pointerMove(sideRow, { clientX: 40, clientY: 22 });
+    fireEvent.pointerUp(sideRow);
+    fireEvent.click(screen.getByRole("button", { name: "Delete Side Thread" }));
 
     await waitFor(() => {
       expect(

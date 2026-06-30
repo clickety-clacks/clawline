@@ -25,7 +25,11 @@ export interface ChatSessionCoordinator {
   openSessionList: () => void;
   openStreamManager: () => void;
   routeSessionExists: boolean;
-  requestSessionSwitch: (sessionKey: string, source: ChatSessionSwitchSource) => void;
+  requestSessionSwitch: (
+    sessionKey: string,
+    source: ChatSessionSwitchSource,
+    options?: { keepSessionListOpen?: boolean }
+  ) => void;
   transition: ChatSessionTransition;
 }
 
@@ -128,8 +132,10 @@ export function useChatSessionCoordinator({
       setSessionListOpen(false);
       setStreamManagerOpen(true);
     },
-    requestSessionSwitch(sessionKey, source) {
-      setSessionListOpen(false);
+    requestSessionSwitch(sessionKey, source, options) {
+      if (!options?.keepSessionListOpen) {
+        setSessionListOpen(false);
+      }
       setStreamManagerOpen(false);
       setTransition((current) => ({
         ...current,

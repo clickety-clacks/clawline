@@ -857,7 +857,7 @@ describe("ChatRoute", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Manage streams" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Filter chats" }), {
-      target: { value: "chat" }
+      target: { value: "zzz" }
     });
     fireEvent.click(screen.getByRole("button", { name: "Add chat" }));
 
@@ -872,7 +872,7 @@ describe("ChatRoute", () => {
     expect(screen.getByRole("dialog", { name: "Sessions" })).toBeInTheDocument();
     expect(renameInput).toHaveFocus();
     expect(renameInput).toHaveValue("New Chat");
-    expect(screen.getByRole("textbox", { name: "Filter chats" })).toHaveValue("chat");
+    expect(screen.getByRole("textbox", { name: "Filter chats" })).toHaveValue("zzz");
   });
 
   it("dismisses source notifications after local stream deletion succeeds", async () => {

@@ -91,6 +91,19 @@ export function SessionListSheet({
       resolveStreamDisplayName(stream).toLowerCase().includes(normalizedQuery)
     );
   }, [filterQuery, streams]);
+  const visibleStreams = useMemo(() => {
+    if (
+      !editingSessionKey ||
+      filteredStreams.some((stream) => stream.sessionKey === editingSessionKey)
+    ) {
+      return filteredStreams;
+    }
+
+    const editingStream = streams.find(
+      (stream) => stream.sessionKey === editingSessionKey
+    );
+    return editingStream ? [...filteredStreams, editingStream] : filteredStreams;
+  }, [editingSessionKey, filteredStreams, streams]);
   const displayNameBySessionKey = useMemo(
     () =>
       Object.fromEntries(
@@ -110,7 +123,7 @@ export function SessionListSheet({
         return;
       }
       let widest = 0;
-      for (const stream of filteredStreams) {
+      for (const stream of visibleStreams) {
         measureElement.textContent = resolveStreamDisplayName(stream);
         widest = Math.max(widest, measureElement.scrollWidth);
       }
@@ -119,7 +132,7 @@ export function SessionListSheet({
 
     measure();
     document.fonts?.ready.then(measure).catch(() => {});
-  }, [filteredStreams, isOpen]);
+  }, [visibleStreams, isOpen]);
 
   useEffect(() => {
     if (!editingSessionKey) {
@@ -158,14 +171,14 @@ export function SessionListSheet({
       >
         <span aria-hidden="true" className="session-popover-measure" ref={measureRef} />
         <div className="session-popover-list" data-testid="session-popover-list">
-          {filteredStreams.length === 0 ? (
+          {visibleStreams.length === 0 ? (
             <p className="stream-empty">
               {streams.length === 0
                 ? "Waiting for provisioned sessions..."
                 : "No chats match the filter."}
             </p>
           ) : (
-            filteredStreams.map((stream) => {
+            visibleStreams.map((stream) => {
               const displayName = resolveStreamDisplayName(stream);
               const isActive = stream.sessionKey === activeSessionKey;
               const dotState =

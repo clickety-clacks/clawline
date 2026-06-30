@@ -127,7 +127,7 @@ describe("SessionListSheet", () => {
       return (
         <SessionListSheet
           activeSessionKey="agent:main:clawline:flynn:new_chat"
-          filterQuery="chat"
+          filterQuery="zzz"
           isOpen={true}
           onClose={onClose}
           onCreateSession={async () => {
@@ -158,7 +158,7 @@ describe("SessionListSheet", () => {
     expect(screen.getByTestId("session-popover")).toBeInTheDocument();
     expect(renameInput).toHaveFocus();
     expect(renameInput).toHaveValue("New Chat");
-    expect(screen.getByRole("textbox", { name: "Filter chats" })).toHaveValue("chat");
+    expect(screen.getByRole("textbox", { name: "Filter chats" })).toHaveValue("zzz");
     expect(onSelectSession).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
   });

@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageList } from "./MessageList";
 import { resetLinkCardMetadataCache } from "./linkCardMetadata";
@@ -247,6 +248,47 @@ function renderMessageListWithProps(input: {
     chatStore,
     renderResult,
     transportStore
+  };
+}
+
+function installMessageListViewport(width: number, height = 640) {
+  const clientWidthDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "clientWidth"
+  );
+  const clientHeightDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "clientHeight"
+  );
+
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+    configurable: true,
+    get() {
+      return this instanceof HTMLElement && this.classList.contains("message-list")
+        ? width
+        : 0;
+    }
+  });
+  Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+    configurable: true,
+    get() {
+      return this instanceof HTMLElement && this.classList.contains("message-list")
+        ? height
+        : 0;
+    }
+  });
+
+  return () => {
+    if (clientWidthDescriptor) {
+      Object.defineProperty(HTMLElement.prototype, "clientWidth", clientWidthDescriptor);
+    } else {
+      Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
+    }
+    if (clientHeightDescriptor) {
+      Object.defineProperty(HTMLElement.prototype, "clientHeight", clientHeightDescriptor);
+    } else {
+      Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
+    }
   };
 }
 
@@ -927,6 +969,57 @@ describe("MessageList rich rendering", () => {
     );
     expect(Number.parseFloat(thirdRow!.style.top) - Number.parseFloat(firstRow!.style.top))
       .toBeLessThanOrEqual(120);
+  });
+
+  it("keeps a right-aligned user bubble inside a constrained transcript row", () => {
+    const restoreViewport = installMessageListViewport(360);
+    try {
+      renderMessageList([
+        {
+          id: "s_constrained_user",
+          role: "user",
+          content:
+            "This right-aligned message should wrap naturally while staying fully inside the visible transcript row.",
+          timestamp: 1_764_201_200_066,
+          streaming: false,
+          sessionKey: "agent:main:clawline:flynn:main",
+          attachments: [],
+          delivery: "server"
+        }
+      ]);
+
+      const bubble = screen.getByTestId("message-s_constrained_user");
+      const row = bubble.closest<HTMLElement>(".message-list-row");
+      const timestamp = bubble.querySelector<HTMLElement>(".message-timestamp");
+
+      expect(row).not.toBeNull();
+      const rowLeft = Number.parseFloat(row!.style.left);
+      const rowWidth = Number.parseFloat(row!.style.width);
+      expect(rowLeft).toBeGreaterThanOrEqual(0);
+      expect(rowWidth).toBeLessThanOrEqual(360);
+      expect(rowLeft + rowWidth).toBeLessThanOrEqual(360);
+      expect(bubble).toHaveClass("message-bubble--user");
+      expect(timestamp?.textContent).toBeTruthy();
+    } finally {
+      restoreViewport();
+    }
+  });
+
+  it("keeps transcript rows and bubble content shrinkable instead of clipped", () => {
+    const styleText = readFileSync("src/app/styles.css", "utf8");
+
+    expect(styleText).toMatch(
+      /\.message-list\s*{[^}]*width: 100%;[^}]*max-width: 100%;[^}]*min-width: 0;/s
+    );
+    expect(styleText).toMatch(
+      /\.message-list-row\s*{[^}]*min-width: 0;[^}]*max-width: 100%;[^}]*overflow-x: visible;/s
+    );
+    expect(styleText).toMatch(
+      /\.message-bubble\s*{[^}]*max-width: 100%;[^}]*min-width: 0;[^}]*min-inline-size: 0;[^}]*max-inline-size: 100%;/s
+    );
+    expect(styleText).toMatch(
+      /\.message-markdown > \*\s*{[^}]*min-width: 0;[^}]*max-width: 100%;/s
+    );
   });
 
   it("renders markdown blocks in source order", () => {

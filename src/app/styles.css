@@ -425,6 +425,9 @@ html[data-appearance="light"] body::before {
 
 .message-list {
   flex: 1 1 auto;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
@@ -441,14 +444,17 @@ html[data-appearance="light"] body::before {
 .message-list-virtual-surface {
   position: relative;
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   min-height: 100%;
   overflow-x: clip;
 }
 
 .message-list-row {
   position: absolute;
+  min-width: 0;
   max-width: 100%;
-  overflow-x: clip;
+  overflow-x: visible;
 }
 
 .message-cluster {
@@ -456,6 +462,8 @@ html[data-appearance="light"] body::before {
   align-items: flex-end;
   gap: 0.7rem;
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .message-cluster--user {
@@ -470,6 +478,7 @@ html[data-appearance="light"] body::before {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
   margin-bottom: 10px;
 }
 
@@ -489,9 +498,12 @@ html[data-appearance="light"] body::before {
   color: var(--color-text-secondary);
   opacity: 0.7;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .message-timestamp {
+  max-width: 100%;
   font-size: 11px;
   color: var(--color-text-dim);
   opacity: 0.78;
@@ -591,6 +603,8 @@ html[data-appearance="light"] body::before {
   width: 100%;
   max-width: 100%;
   min-width: 0;
+  min-inline-size: 0;
+  max-inline-size: 100%;
   display: grid;
   gap: 0.75rem;
   padding: var(--message-bubble-padding-vertical) var(--message-bubble-padding-horizontal);
@@ -887,6 +901,12 @@ html[data-appearance="light"] body::before {
   gap: 0.75rem;
   color: var(--color-text);
   min-width: 0;
+  max-width: 100%;
+}
+
+.message-markdown > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .message-markdown--short {

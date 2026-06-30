@@ -366,7 +366,6 @@ export function SessionListSheet({
       if (!stream) {
         return;
       }
-      onSelectSession(stream.sessionKey);
       beginRename(stream.sessionKey, resolveStreamDisplayName(stream));
     } finally {
       setPendingActionKey(null);

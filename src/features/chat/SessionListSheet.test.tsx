@@ -1,7 +1,25 @@
 import { readFileSync } from "node:fs";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
+import type { StreamRecord } from "../../runtime/chat/chatDomainStore";
 import { parseStreamName, resolveStreamDisplayName, SessionListSheet } from "./SessionListSheet";
+
+function streamRecord(input: {
+  displayName: string;
+  orderIndex?: number;
+  sessionKey: string;
+}): StreamRecord {
+  return {
+    createdAt: 10 + (input.orderIndex ?? 0),
+    displayName: input.displayName,
+    isBuiltIn: false,
+    kind: "chat",
+    orderIndex: input.orderIndex ?? 0,
+    sessionKey: input.sessionKey,
+    updatedAt: 10 + (input.orderIndex ?? 0)
+  };
+}
 
 describe("SessionListSheet", () => {
   it("falls back to a readable name derived from the session key", () => {
@@ -54,17 +72,10 @@ describe("SessionListSheet", () => {
         onSelectSession={vi.fn()}
         provisionedSessionKeys={["agent:main:clawline:flynn:main"]}
         streamDotStateBySessionKey={{}}
-        streams={[
-          {
-            createdAt: 10,
-            displayName: "Main",
-            isBuiltIn: false,
-            kind: "chat",
-            orderIndex: 0,
-            sessionKey: "agent:main:clawline:flynn:main",
-            updatedAt: 10
-          }
-        ]}
+        streams={[streamRecord({
+          displayName: "Main",
+          sessionKey: "agent:main:clawline:flynn:main"
+        })]}
         transportPhase="live"
         unreadBySessionKey={{}}
       />
@@ -94,5 +105,61 @@ describe("SessionListSheet", () => {
 
     fireEvent.click(renameButton);
     expect(screen.getByRole("textbox", { name: "Rename Main" })).toBeInTheDocument();
+  });
+
+  it("keeps the popup open and focuses inline rename after Add creates and selects a chat", async () => {
+    const onClose = vi.fn();
+    const onSelectSession = vi.fn();
+    const createdStream = streamRecord({
+      displayName: "New Chat",
+      orderIndex: 1,
+      sessionKey: "agent:main:clawline:flynn:new_chat"
+    });
+
+    function Harness() {
+      const [streams, setStreams] = useState([
+        streamRecord({
+          displayName: "Main",
+          sessionKey: "agent:main:clawline:flynn:main"
+        })
+      ]);
+
+      return (
+        <SessionListSheet
+          activeSessionKey="agent:main:clawline:flynn:new_chat"
+          filterQuery="chat"
+          isOpen={true}
+          onClose={onClose}
+          onCreateSession={async () => {
+            setStreams((current) => [...current, createdStream]);
+            return createdStream;
+          }}
+          onDeleteSession={vi.fn()}
+          onFilterQueryChange={vi.fn()}
+          onRenameSession={vi.fn()}
+          onSelectSession={onSelectSession}
+          provisionedSessionKeys={[
+            "agent:main:clawline:flynn:main",
+            "agent:main:clawline:flynn:new_chat"
+          ]}
+          streamDotStateBySessionKey={{}}
+          streams={streams}
+          transportPhase="live"
+          unreadBySessionKey={{}}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add chat" }));
+
+    const renameInput = await screen.findByRole("textbox", { name: "Rename New Chat" });
+    expect(screen.getByTestId("session-popover")).toBeInTheDocument();
+    expect(renameInput).toHaveFocus();
+    expect(renameInput).toHaveValue("New Chat");
+    expect(screen.getByRole("textbox", { name: "Filter chats" })).toHaveValue("chat");
+    expect(onSelectSession).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

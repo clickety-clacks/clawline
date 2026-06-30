@@ -208,10 +208,13 @@ export function ChatRoute() {
     transportState.phase
   ]);
 
-  const handleSelectSession = (sessionKey: string, source: ChatSessionSwitchSource) => {
-    coordinator.requestSessionSwitch(sessionKey, source);
-    navigate(`/chat/${sessionKey}`);
-  };
+  const handleSelectSession = useCallback(
+    (sessionKey: string, source: ChatSessionSwitchSource) => {
+      coordinator.requestSessionSwitch(sessionKey, source);
+      navigate(`/chat/${sessionKey}`);
+    },
+    [coordinator, navigate]
+  );
   const interactionCoordinator = useChatSessionInteractionCoordinator({
     activeSessionKey,
     onSelectSession: handleSelectSession,
@@ -291,7 +294,12 @@ export function ChatRoute() {
     chatStore.upsertStream(response.stream);
     handleSelectSession(response.stream.sessionKey, "popup");
     return response.stream;
-  }, [authState.session?.serverUrl, authState.session?.token, chatStore]);
+  }, [
+    authState.session?.serverUrl,
+    authState.session?.token,
+    chatStore,
+    handleSelectSession
+  ]);
   const renameSessionFromPopup = useCallback(
     async (sessionKey: string, displayName: string) => {
       const token = authState.session?.token;

@@ -6984,6 +6984,134 @@ enum FooterActionHitTesting {
     }
 }
 
+
+struct MessageFlowRowLayoutEngine {
+    struct Item: Equatable {
+        var index: Int
+        var size: CGSize
+    }
+
+    struct LaidOutItem: Equatable {
+        var index: Int
+        var frame: CGRect
+    }
+
+    struct Result: Equatable {
+        var items: [LaidOutItem]
+        var contentSize: CGSize
+    }
+
+    static func layout(
+        items: [Item],
+        contentWidth: CGFloat,
+        sectionInset: UIEdgeInsets,
+        minimumInteritemSpacing: CGFloat,
+        rowSpacing: (_ previousItem: Int, _ nextItem: Int) -> CGFloat
+    ) -> Result {
+        guard !items.isEmpty, contentWidth > 0 else {
+            return Result(items: [], contentSize: .zero)
+        }
+
+        let maxX = contentWidth - sectionInset.right
+        var laidOutItems: [LaidOutItem] = []
+        laidOutItems.reserveCapacity(items.count)
+        var x = sectionInset.left
+        var y = sectionInset.top
+        var rowHeight: CGFloat = 0
+        var pendingRowSpacingAfterItem: Int?
+        var currentRowLastItem: Int?
+
+        for item in items {
+            let fullRowItem = isFullRowItem(
+                width: item.size.width,
+                contentWidth: contentWidth,
+                sectionInset: sectionInset
+            )
+
+            if let previousItem = pendingRowSpacingAfterItem {
+                y += rowSpacing(previousItem, item.index)
+                pendingRowSpacingAfterItem = nil
+            }
+
+            if fullRowItem, x > sectionInset.left {
+                x = sectionInset.left
+                y += rowHeight + rowSpacing(currentRowLastItem ?? max(0, item.index - 1), item.index)
+                rowHeight = 0
+                currentRowLastItem = nil
+            }
+
+            if !fullRowItem, x + item.size.width > maxX, x > sectionInset.left {
+                x = sectionInset.left
+                y += rowHeight + rowSpacing(currentRowLastItem ?? max(0, item.index - 1), item.index)
+                rowHeight = 0
+                currentRowLastItem = nil
+            }
+
+            let frame = CGRect(x: x, y: y, width: item.size.width, height: item.size.height)
+            laidOutItems.append(LaidOutItem(index: item.index, frame: frame))
+
+            if fullRowItem {
+                x = sectionInset.left
+                y = frame.maxY
+                rowHeight = 0
+                pendingRowSpacingAfterItem = item.index
+                currentRowLastItem = nil
+            } else {
+                x += item.size.width + minimumInteritemSpacing
+                rowHeight = max(rowHeight, item.size.height)
+                currentRowLastItem = item.index
+            }
+        }
+
+        return Result(
+            items: laidOutItems,
+            contentSize: CGSize(width: contentWidth, height: y + rowHeight + sectionInset.bottom)
+        )
+    }
+
+    static func applyItemHeightChange(
+        frames: [Int: CGRect],
+        contentHeight: CGFloat,
+        index: Int,
+        delta: CGFloat
+    ) -> (frames: [Int: CGRect], contentHeight: CGFloat)? {
+        guard abs(delta) > 0.5 else {
+            return (frames, contentHeight)
+        }
+        guard let oldFrame = frames[index] else { return nil }
+
+        let rowMinY = oldFrame.minY
+        let rowFrames = frames.values.filter { abs($0.minY - rowMinY) <= 0.5 }
+        let oldRowHeight = rowFrames.map(\.height).max() ?? oldFrame.height
+        let newHeight = max(1, oldFrame.height + delta)
+        var updatedFrames = frames
+        updatedFrames[index] = CGRect(x: oldFrame.minX, y: oldFrame.minY, width: oldFrame.width, height: newHeight)
+        let newRowHeight = updatedFrames.values
+            .filter { abs($0.minY - rowMinY) <= 0.5 }
+            .map(\.height)
+            .max() ?? newHeight
+        let rowDelta = newRowHeight - oldRowHeight
+        guard abs(rowDelta) > 0.5 else {
+            return (updatedFrames, contentHeight)
+        }
+
+        for (itemIndex, frame) in updatedFrames where itemIndex != index && frame.minY > rowMinY + 0.5 {
+            updatedFrames[itemIndex] = CGRect(
+                x: frame.minX,
+                y: frame.minY + rowDelta,
+                width: frame.width,
+                height: frame.height
+            )
+        }
+        return (updatedFrames, contentHeight + rowDelta)
+    }
+
+    static func isFullRowItem(width: CGFloat, contentWidth: CGFloat, sectionInset: UIEdgeInsets) -> Bool {
+        let availableRowWidth = max(0, contentWidth - sectionInset.left - sectionInset.right)
+        return width >= availableRowWidth - 0.5
+    }
+}
+
 private final class MessageFlowLayout: UICollectionViewFlowLayout {
     var rowSpacingProvider: ((Int, Int) -> CGFloat)?
     var rowSpacingFingerprintProvider: (() -> Int)?
@@ -7012,11 +7140,6 @@ private final class MessageFlowLayout: UICollectionViewFlowLayout {
         let minimumInteritemSpacing: CGFloat
         let minimumLineSpacing: CGFloat
         let rowSpacingFingerprint: Int
-    }
-
-    private func isFullRowItem(_ width: CGFloat, contentWidth: CGFloat) -> Bool {
-        let availableRowWidth = max(0, contentWidth - sectionInset.left - sectionInset.right)
-        return width >= availableRowWidth - 0.5
     }
 
     override func prepare() {
@@ -7087,57 +7210,33 @@ private final class MessageFlowLayout: UICollectionViewFlowLayout {
             return
         }
 
-        let maxX = contentWidth - sectionInset.right
-        var x = sectionInset.left
-        var y = sectionInset.top
-        var rowHeight: CGFloat = 0
-        var pendingRowSpacingAfterItem: Int?
-        var currentRowLastItem: Int?
-
+        var layoutItems: [MessageFlowRowLayoutEngine.Item] = []
+        layoutItems.reserveCapacity(itemCount)
         for item in 0 ..< itemCount {
             let indexPath = IndexPath(item: item, section: 0)
             let size = (collectionView.delegate as? UICollectionViewDelegateFlowLayout)?
                 .collectionView?(collectionView, layout: self, sizeForItemAt: indexPath) ?? itemSize
-            let fullRowItem = isFullRowItem(size.width, contentWidth: contentWidth)
-
-            if let previousItem = pendingRowSpacingAfterItem {
-                y += rowSpacing(afterItem: previousItem, beforeItem: item)
-                pendingRowSpacingAfterItem = nil
-            }
-
-            if fullRowItem, x > sectionInset.left {
-                x = sectionInset.left
-                y += rowHeight + rowSpacing(afterItem: currentRowLastItem ?? max(0, item - 1), beforeItem: item)
-                rowHeight = 0
-                currentRowLastItem = nil
-            }
-
-            if !fullRowItem, x + size.width > maxX, x > sectionInset.left {
-                x = sectionInset.left
-                y += rowHeight + rowSpacing(afterItem: currentRowLastItem ?? max(0, item - 1), beforeItem: item)
-                rowHeight = 0
-                currentRowLastItem = nil
-            }
-
-            let frame = CGRect(x: x, y: y, width: size.width, height: size.height)
-            let attributes = UICollectionViewLayoutAttributes(forCellWith: indexPath)
-            attributes.frame = frame
-            cachedAttributes[indexPath] = attributes
-
-            if fullRowItem {
-                x = sectionInset.left
-                y = frame.maxY
-                rowHeight = 0
-                pendingRowSpacingAfterItem = item
-                currentRowLastItem = nil
-            } else {
-                x += size.width + minimumInteritemSpacing
-                rowHeight = max(rowHeight, size.height)
-                currentRowLastItem = item
-            }
+            layoutItems.append(MessageFlowRowLayoutEngine.Item(index: item, size: size))
         }
 
-        cachedContentSize = CGSize(width: contentWidth, height: y + rowHeight + sectionInset.bottom)
+        let layoutResult = MessageFlowRowLayoutEngine.layout(
+            items: layoutItems,
+            contentWidth: contentWidth,
+            sectionInset: sectionInset,
+            minimumInteritemSpacing: minimumInteritemSpacing,
+            rowSpacing: { [weak self] previousItem, nextItem in
+                self?.rowSpacing(afterItem: previousItem, beforeItem: nextItem) ?? self?.minimumLineSpacing ?? 0
+            }
+        )
+
+        for laidOutItem in layoutResult.items {
+            let indexPath = IndexPath(item: laidOutItem.index, section: 0)
+            let attributes = UICollectionViewLayoutAttributes(forCellWith: indexPath)
+            attributes.frame = laidOutItem.frame
+            cachedAttributes[indexPath] = attributes
+        }
+
+        cachedContentSize = layoutResult.contentSize
         cachedLayoutSignature = signature
         needsRebuild = false
         pendingInvalidation = .none
@@ -7167,8 +7266,8 @@ private final class MessageFlowLayout: UICollectionViewFlowLayout {
         let newIndexPath = IndexPath(item: newItemIndex, section: 0)
         let size = (collectionView.delegate as? UICollectionViewDelegateFlowLayout)?
             .collectionView?(collectionView, layout: self, sizeForItemAt: newIndexPath) ?? itemSize
-        if isFullRowItem(size.width, contentWidth: signature.contentWidth) ||
-            isFullRowItem(previousAttributes.frame.width, contentWidth: signature.contentWidth) {
+        if MessageFlowRowLayoutEngine.isFullRowItem(width: size.width, contentWidth: signature.contentWidth, sectionInset: sectionInset) ||
+            MessageFlowRowLayoutEngine.isFullRowItem(width: previousAttributes.frame.width, contentWidth: signature.contentWidth, sectionInset: sectionInset) {
             return false
         }
         let maxX = signature.contentWidth - sectionInset.right
@@ -7201,26 +7300,17 @@ private final class MessageFlowLayout: UICollectionViewFlowLayout {
     }
 
     private func applyItemHeightChange(index: Int, delta: CGFloat) -> Bool {
-        guard abs(delta) > 0.5 else { return true }
-        let indexPath = IndexPath(item: index, section: 0)
-        guard let attributes = cachedAttributes[indexPath] else { return false }
-
-        let oldFrame = attributes.frame
-        let rowMinY = oldFrame.minY
-        let rowAttributes = cachedAttributes.values.filter { abs($0.frame.minY - rowMinY) <= 0.5 }
-        let oldRowHeight = rowAttributes.map(\.frame.height).max() ?? oldFrame.height
-        let newHeight = max(1, oldFrame.height + delta)
-        attributes.frame = CGRect(x: oldFrame.minX, y: oldFrame.minY, width: oldFrame.width, height: newHeight)
-        let newRowHeight = rowAttributes.map(\.frame.height).max() ?? newHeight
-        let rowDelta = newRowHeight - oldRowHeight
-        guard abs(rowDelta) > 0.5 else { return true }
-
-        for entry in cachedAttributes where entry.key != indexPath && entry.value.frame.minY > rowMinY + 0.5 {
-            var frame = entry.value.frame
-            frame.origin.y += rowDelta
-            entry.value.frame = frame
+        let framesByItem = Dictionary(uniqueKeysWithValues: cachedAttributes.map { ($0.key.item, $0.value.frame) })
+        guard let update = MessageFlowRowLayoutEngine.applyItemHeightChange(
+            frames: framesByItem,
+            contentHeight: cachedContentSize.height,
+            index: index,
+            delta: delta
+        ) else { return false }
+        for (item, frame) in update.frames {
+            cachedAttributes[IndexPath(item: item, section: 0)]?.frame = frame
         }
-        cachedContentSize.height += rowDelta
+        cachedContentSize.height = update.contentHeight
         return true
     }
 

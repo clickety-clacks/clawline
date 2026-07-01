@@ -13,6 +13,8 @@
 - SwiftUI may perform multiple internal passes, but the **external layout must converge**.
 - Collection view layout is the only owner of placement; SwiftUI does not reposition items.
 - Horizontal placement honors the flow rules (row wrapping); vertical gaps come only from row spacing.
+- Row height is owned by the collection layout: each row advances by the tallest measured/rendered bubble in that row plus the configured row spacing and section padding.
+- Bubble height is owned by the bubble content measurement: shorter bubbles in a row keep their own measured height and must not stretch to fill a taller peer's row height.
 - Bubble visual bounds **must match** the layout bounds (no invisible trailing space).
 - Padding is **only** the standard flow gap, applied evenly horizontally and vertically.
 - Overlaps are never allowed.

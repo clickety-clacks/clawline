@@ -1028,6 +1028,93 @@ struct BubbleScrollTests {
         #expect(mediumWidth == 88)
     }
 
+    @Test("T1193: collection row height is tallest bubble plus row spacing")
+    func t1193CollectionRowHeightUsesTallestBubbleAndSpacing() {
+        let sectionInset = UIEdgeInsets(top: 11, left: 7, bottom: 13, right: 7)
+        let items = [
+            MessageFlowRowLayoutEngine.Item(index: 0, size: CGSize(width: 90, height: 44)),
+            MessageFlowRowLayoutEngine.Item(index: 1, size: CGSize(width: 120, height: 96)),
+            MessageFlowRowLayoutEngine.Item(index: 2, size: CGSize(width: 140, height: 58)),
+            MessageFlowRowLayoutEngine.Item(index: 3, size: CGSize(width: 120, height: 71))
+        ]
+        let layout = MessageFlowRowLayoutEngine.layout(
+            items: items,
+            contentWidth: 300,
+            sectionInset: sectionInset,
+            minimumInteritemSpacing: 8,
+            rowSpacing: { previous, next in previous == 1 && next == 2 ? 17 : 12 }
+        )
+        let frames = Dictionary(uniqueKeysWithValues: layout.items.map { ($0.index, $0.frame) })
+
+        #expect(frames[0]?.minY == sectionInset.top)
+        #expect(frames[1]?.minY == sectionInset.top)
+        #expect(frames[0]?.height == 44)
+        #expect(frames[1]?.height == 96)
+        #expect(frames[2]?.minY == sectionInset.top + 96 + 17)
+        #expect(frames[3]?.minY == sectionInset.top + 96 + 17)
+        #expect(frames[2]?.height == 58)
+        #expect(frames[3]?.height == 71)
+        #expect(layout.contentSize.height == sectionInset.top + 96 + 17 + 71 + sectionInset.bottom)
+    }
+
+    @Test("T1193: shorter peer bubbles are not stretched to row height")
+    func t1193ShorterPeerBubblesKeepContentOwnedHeights() {
+        let items = [
+            MessageFlowRowLayoutEngine.Item(index: 0, size: CGSize(width: 82, height: 36)),
+            MessageFlowRowLayoutEngine.Item(index: 1, size: CGSize(width: 82, height: 112)),
+            MessageFlowRowLayoutEngine.Item(index: 2, size: CGSize(width: 82, height: 49))
+        ]
+        let layout = MessageFlowRowLayoutEngine.layout(
+            items: items,
+            contentWidth: 320,
+            sectionInset: .zero,
+            minimumInteritemSpacing: 6,
+            rowSpacing: { _, _ in 10 }
+        )
+        let heights = Dictionary(uniqueKeysWithValues: layout.items.map { ($0.index, $0.frame.height) })
+
+        #expect(heights[0] == 36)
+        #expect(heights[1] == 112)
+        #expect(heights[2] == 49)
+        #expect(layout.contentSize.height == 112)
+    }
+
+    @Test("T1193: cached item-height reflow shifts later rows by row-owned tallest-height delta")
+    func t1193CachedHeightReflowMovesLaterRowsWithoutStretchingShorterPeers() {
+        let initial = MessageFlowRowLayoutEngine.layout(
+            items: [
+                MessageFlowRowLayoutEngine.Item(index: 0, size: CGSize(width: 120, height: 50)),
+                MessageFlowRowLayoutEngine.Item(index: 1, size: CGSize(width: 120, height: 70)),
+                MessageFlowRowLayoutEngine.Item(index: 2, size: CGSize(width: 120, height: 40)),
+                MessageFlowRowLayoutEngine.Item(index: 3, size: CGSize(width: 120, height: 60))
+            ],
+            contentWidth: 280,
+            sectionInset: UIEdgeInsets(top: 5, left: 5, bottom: 5, right: 5),
+            minimumInteritemSpacing: 6,
+            rowSpacing: { _, _ in 9 }
+        )
+        let initialFrames = Dictionary(uniqueKeysWithValues: initial.items.map { ($0.index, $0.frame) })
+        guard let reflow = MessageFlowRowLayoutEngine.applyItemHeightChange(
+            frames: initialFrames,
+            contentHeight: initial.contentSize.height,
+            index: 0,
+            delta: 35
+        ) else {
+            Issue.record("Expected cached reflow update for T1193 row height delta")
+            return
+        }
+
+        #expect(reflow.frames[0]?.height == 85)
+        #expect(reflow.frames[1]?.height == 70)
+        #expect(reflow.frames[0]?.minY == initialFrames[0]?.minY)
+        #expect(reflow.frames[1]?.minY == initialFrames[1]?.minY)
+        #expect(reflow.frames[2]?.minY == (initialFrames[2]?.minY ?? 0) + 15)
+        #expect(reflow.frames[3]?.minY == (initialFrames[3]?.minY ?? 0) + 15)
+        #expect(reflow.frames[2]?.height == initialFrames[2]?.height)
+        #expect(reflow.frames[3]?.height == initialFrames[3]?.height)
+        #expect(reflow.contentHeight == initial.contentSize.height + 15)
+    }
+
     @Test("T330: UIKit fitting target can override fixed bubble width")
     @MainActor
     func fittingTargetCanOverrideFixedBubbleWidth() {

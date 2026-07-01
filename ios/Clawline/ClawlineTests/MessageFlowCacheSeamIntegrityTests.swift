@@ -97,7 +97,7 @@ struct MessageFlowCacheSeamIntegrityTests {
             "Full-row items should advance layout to the next row after placement."
         )
         #expect(
-            contents.contains("if isFullRowItem(size.width, contentWidth: signature.contentWidth) ||\n            isFullRowItem(previousAttributes.frame.width, contentWidth: signature.contentWidth) {"),
+            contents.contains("if MessageFlowRowLayoutEngine.isFullRowItem(width: size.width, contentWidth: signature.contentWidth, sectionInset: sectionInset) ||\n            MessageFlowRowLayoutEngine.isFullRowItem(width: previousAttributes.frame.width, contentWidth: signature.contentWidth, sectionInset: sectionInset) {"),
             "Incremental append should fall back to a rebuild when a full-row item is involved."
         )
     }
@@ -136,7 +136,11 @@ struct MessageFlowCacheSeamIntegrityTests {
         )
         #expect(
             contents.contains("MessageBubbleGeometry.adjacentMessageRowSpacing(metrics: metrics)"),
-            "T1485 proof: compact row gap comes from the shared bubble geometry invariant."
+            "T1485 proof: message row gap comes from the shared bubble geometry invariant."
+        )
+        #expect(
+            contents.contains("static func shouldApplyBubbleSizingV2Remeasure(isNearBottom _: Bool, isScrollAtRest: Bool) -> Bool"),
+            "T1193 proof: V2 remeasure flushing should be controlled by a testable first-pass cache policy."
         )
     }
 }

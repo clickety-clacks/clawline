@@ -71,7 +71,7 @@ enum MessageBubbleGeometry {
     }
 
     static func adjacentMessageRowSpacing(metrics: ChatFlowTheme.Metrics) -> CGFloat {
-        floor(min(metrics.containerPadding, metrics.flowGap) / 4)
+        metrics.containerPadding
     }
 
     static func typingHeight(

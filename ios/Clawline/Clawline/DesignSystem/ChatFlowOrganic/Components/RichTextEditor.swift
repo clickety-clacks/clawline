@@ -459,11 +459,18 @@ struct RichTextEditor: UIViewRepresentable {
         private var heightRetryPending = false
         private var lastHeightMeasurement: HeightMeasurement?
         private var lastSkippedHeightTextLength: Int?
+        private var pendingCaretVisibilityRequest: CaretVisibilityRequest?
 
         private struct HeightMeasurement {
             var width: CGFloat
             var textLength: Int
             var isScrollEnabled: Bool
+        }
+
+        private struct CaretVisibilityRequest: Equatable {
+            var selectedRange: NSRange
+            var textLength: Int
+            var width: CGFloat
         }
 
         init(parent: RichTextEditor) {
@@ -652,9 +659,11 @@ struct RichTextEditor: UIViewRepresentable {
                 ])
                 if abs(parent.calculatedHeight - clamped) > 0.5 {
                     emitHeight(clamped)
+                    pendingCaretVisibilityRequest = nil
                 }
                 if !textView.isScrollEnabled {
                     textView.isScrollEnabled = true
+                    pendingCaretVisibilityRequest = nil
                 }
                 if allowAutoScroll {
                     ensureCaretVisible(in: textView)
@@ -686,8 +695,13 @@ struct RichTextEditor: UIViewRepresentable {
             if abs(parent.calculatedHeight - clamped) > 0.5 {
                 PromptEditorBridgeTelemetry.record(.editorHeightEmitted, ["value": clamped])
                 emitHeight(clamped)
+                pendingCaretVisibilityRequest = nil
             }
-            textView.isScrollEnabled = size.height > maxHeight
+            let shouldScroll = size.height > maxHeight
+            if textView.isScrollEnabled != shouldScroll {
+                textView.isScrollEnabled = shouldScroll
+                pendingCaretVisibilityRequest = nil
+            }
             lastHeightMeasurement = HeightMeasurement(
                 width: referenceWidth,
                 textLength: textLength,
@@ -723,6 +737,7 @@ struct RichTextEditor: UIViewRepresentable {
 
         func invalidateHeightMeasurementFastPath() {
             lastSkippedHeightTextLength = nil
+            pendingCaretVisibilityRequest = nil
         }
 
         static func shouldCycleFirstResponder(
@@ -759,8 +774,19 @@ struct RichTextEditor: UIViewRepresentable {
         private func ensureCaretVisible(in textView: UITextView) {
             guard textView.isScrollEnabled else { return }
             let range = textView.selectedRange
-            DispatchQueue.main.async {
+            let request = CaretVisibilityRequest(
+                selectedRange: range,
+                textLength: textView.textStorage.length,
+                width: textView.bounds.width
+            )
+            guard pendingCaretVisibilityRequest != request else { return }
+            pendingCaretVisibilityRequest = request
+            DispatchQueue.main.async { [weak self, weak textView] in
+                guard let textView else { return }
                 textView.scrollRangeToVisible(range)
+                if self?.pendingCaretVisibilityRequest == request {
+                    self?.pendingCaretVisibilityRequest = nil
+                }
             }
         }
 
@@ -789,7 +815,15 @@ struct RichTextEditor: UIViewRepresentable {
 
         func ensureTypingAttributes(on textView: UITextView) {
             var attributes = textView.typingAttributes
-            attributes[.font] = UIFont.clawline(.bodyText)
+            let baseFont = UIFont.clawline(.bodyText)
+            let existingFont = attributes[.font] as? UIFont
+            let existingColor = attributes[.foregroundColor] as? UIColor
+            if existingFont?.pointSize == baseFont.pointSize,
+               existingFont?.fontName == baseFont.fontName,
+               existingColor?.isEqual(parent.textColor) == true {
+                return
+            }
+            attributes[.font] = baseFont
             attributes[.foregroundColor] = parent.textColor
             textView.typingAttributes = attributes
         }

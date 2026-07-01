@@ -106,7 +106,8 @@ struct NotificationBatchCommitCoordinator {
         reachedTruncationBoundary: Bool,
         committedSnapshot: [String: CrossChatNotificationBubble],
         isEligible: (String) -> Bool,
-        isEntryUnread: (String, CrossChatAssistantNotificationEntry) -> Bool = { _, _ in true }
+        isEntryUnread: (String, CrossChatAssistantNotificationEntry) -> Bool = { _, _ in true },
+        onSuppressedEntries: (String, [CrossChatAssistantNotificationEntry]) -> Void = { _, _ in }
     ) -> [String: CrossChatNotificationBubble]? {
         guard let batch = pendingBatchByEpoch[epoch] else { return nil }
         guard reachedTruncationBoundary || !batch.waitsForTruncationBoundary else { return nil }
@@ -114,11 +115,21 @@ struct NotificationBatchCommitCoordinator {
 
         var reconciledBySourceChatId = committedSnapshot
         for bubble in batch.bubblesBySourceChatId.values {
-            guard isEligible(bubble.sourceChatId) else { continue }
+            let completedEntries = bubble.entries.filter { !$0.streaming }
+            guard isEligible(bubble.sourceChatId) else {
+                onSuppressedEntries(bubble.sourceChatId, completedEntries)
+                continue
+            }
             let dismissalSequence = batch.dismissalSequenceBySourceChatId[bubble.sourceChatId] ?? 0
-            let finalEntries = bubble.entries.filter {
-                !$0.streaming
-                    && $0.notificationSequence > dismissalSequence
+            let suppressedEntries = completedEntries.filter {
+                $0.notificationSequence <= dismissalSequence
+                    || !isEntryUnread(bubble.sourceChatId, $0)
+            }
+            if !suppressedEntries.isEmpty {
+                onSuppressedEntries(bubble.sourceChatId, suppressedEntries)
+            }
+            let finalEntries = completedEntries.filter {
+                $0.notificationSequence > dismissalSequence
                     && isEntryUnread(bubble.sourceChatId, $0)
             }
             guard !finalEntries.isEmpty else { continue }
@@ -375,6 +386,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private(set) var streamTailStateBySession: [String: StreamTailState] = [:]
     private(set) var crossChatNotificationBubblesBySourceChatId: [String: CrossChatNotificationBubble] = [:]
     private var notificationBatchCommitCoordinator = NotificationBatchCommitCoordinator()
+    private var suppressedCrossChatNotificationEntryKeysBySourceChatId: [String: Set<String>] = [:]
     var crossChatNotificationDismissAnimator: CrossChatNotificationDismissAnimator?
     private var unavailableCrossChatNotificationSourceIds: Set<String> = []
     private var syntheticSessionKeys: Set<String> = []
@@ -1616,7 +1628,8 @@ final class ChatViewModel: ChatViewModelHosting {
         if markSourceRead {
             markSessionRead(sourceChatId, preferServerTail: true)
         }
-        if crossChatNotificationBubblesBySourceChatId[sourceChatId] != nil {
+        if let bubble = crossChatNotificationBubblesBySourceChatId[sourceChatId] {
+            recordSuppressedCrossChatNotificationEntries(bubble.entries, sourceChatId: sourceChatId)
             notificationBatchCommitCoordinator.recordDismissal(sourceChatIds: [sourceChatId])
         }
         animateCrossChatNotificationDismissal {
@@ -1629,10 +1642,49 @@ final class ChatViewModel: ChatViewModelHosting {
         for sourceChatId in committedSourceChatIds {
             markSessionRead(sourceChatId, preferServerTail: true)
         }
+        for bubble in crossChatNotificationBubblesBySourceChatId.values {
+            recordSuppressedCrossChatNotificationEntries(bubble.entries, sourceChatId: bubble.sourceChatId)
+        }
         notificationBatchCommitCoordinator.recordDismissal(sourceChatIds: committedSourceChatIds)
         animateCrossChatNotificationDismissal {
             self.crossChatNotificationBubblesBySourceChatId.removeAll()
         }
+    }
+
+    private func recordSuppressedCrossChatNotificationEntries(
+        _ entries: [CrossChatAssistantNotificationEntry],
+        sourceChatId: String
+    ) {
+        let keys = entries
+            .filter { !$0.id.isEmpty }
+            .map { suppressedCrossChatNotificationEntryKey(id: $0.id, content: $0.content) }
+        guard !keys.isEmpty else { return }
+        suppressedCrossChatNotificationEntryKeysBySourceChatId[sourceChatId, default: []].formUnion(keys)
+        persistSuppressedCrossChatNotificationEntryKeys(for: sourceChatId)
+    }
+
+    private func recordSuppressedCrossChatNotificationEntry(_ message: Message) {
+        guard !message.id.isEmpty else { return }
+        let key = suppressedCrossChatNotificationEntryKey(id: message.id, content: message.content)
+        suppressedCrossChatNotificationEntryKeysBySourceChatId[message.sessionKey, default: []].insert(key)
+        persistSuppressedCrossChatNotificationEntryKeys(for: message.sessionKey)
+    }
+
+    private func hasSuppressedCrossChatNotificationEntry(_ message: Message) -> Bool {
+        restoreSuppressedCrossChatNotificationEntryKeysIfNeeded(for: message.sessionKey)
+        let key = suppressedCrossChatNotificationEntryKey(id: message.id, content: message.content)
+        return suppressedCrossChatNotificationEntryKeysBySourceChatId[message.sessionKey]?.contains(key) == true
+    }
+
+    private func markSuppressedCrossChatNotificationEntryReadIfNeeded(_ message: Message) {
+        guard !message.id.isEmpty else { return }
+        lastReadMessageIdBySession[message.sessionKey] = message.id
+        persistLastReadMessageId(message.id, for: message.sessionKey)
+        recomputeStreamDotState(for: message.sessionKey)
+    }
+
+    private func suppressedCrossChatNotificationEntryKey(id: String, content: String) -> String {
+        "\(id.count):\(id)\(content)"
     }
 
 #if DEBUG
@@ -2306,6 +2358,7 @@ final class ChatViewModel: ChatViewModelHosting {
         forceReReadGenerationBySession.removeAll()
         restoredStreamMetadataForUserId = nil
         crossChatNotificationBubblesBySourceChatId.removeAll()
+        suppressedCrossChatNotificationEntryKeysBySourceChatId.removeAll()
         unavailableCrossChatNotificationSourceIds.removeAll()
         resetSessionProvisioningState(clearPendingSend: true)
         clearMessageCache()
@@ -2578,6 +2631,13 @@ final class ChatViewModel: ChatViewModelHosting {
         batchEpoch: Int?,
         notificationSequence: UInt64? = nil
     ) {
+        guard message.role == .assistant else { return }
+        guard !hasSuppressedCrossChatNotificationEntry(message) else {
+            if !message.streaming {
+                markSuppressedCrossChatNotificationEntryReadIfNeeded(message)
+            }
+            return
+        }
         let title = stream(for: message.sessionKey)?.displayName
             ?? message.sender
             ?? message.sessionKey
@@ -2595,8 +2655,18 @@ final class ChatViewModel: ChatViewModelHosting {
             notificationBatchCommitCoordinator.collectPendingCandidate(candidate, epoch: batchEpoch)
             return
         }
-        guard isUnreadCrossChatAssistantNotificationCandidate(candidate) else { return }
-        guard isEligibleForCrossChatAssistantNotification(sourceChatId: message.sessionKey) else { return }
+        guard isUnreadCrossChatAssistantNotificationCandidate(candidate) else {
+            if !message.streaming {
+                recordSuppressedCrossChatNotificationEntry(message)
+            }
+            return
+        }
+        guard isEligibleForCrossChatAssistantNotification(sourceChatId: message.sessionKey) else {
+            if !message.streaming {
+                recordSuppressedCrossChatNotificationEntry(message)
+            }
+            return
+        }
         notificationBatchCommitCoordinator.applyLiveCandidate(
             candidate,
             to: &crossChatNotificationBubblesBySourceChatId
@@ -2621,6 +2691,9 @@ final class ChatViewModel: ChatViewModelHosting {
             },
             isEntryUnread: { [weak self] sourceChatId, entry in
                 self?.isUnreadCrossChatAssistantNotificationEntry(entry, sourceChatId: sourceChatId) ?? false
+            },
+            onSuppressedEntries: { [weak self] sourceChatId, entries in
+                self?.recordSuppressedCrossChatNotificationEntries(entries, sourceChatId: sourceChatId)
             }
         ) else {
             return
@@ -2642,7 +2715,11 @@ final class ChatViewModel: ChatViewModelHosting {
         _ entry: CrossChatAssistantNotificationEntry,
         sourceChatId: String
     ) -> Bool {
-        isUnreadCrossChatAssistantNotificationMessage(messageId: entry.id, sourceChatId: sourceChatId)
+        isUnreadCrossChatAssistantNotificationMessage(
+            messageId: entry.id,
+            content: entry.content,
+            sourceChatId: sourceChatId
+        )
     }
 
     private func isUnreadCrossChatAssistantNotificationCandidate(
@@ -2651,22 +2728,30 @@ final class ChatViewModel: ChatViewModelHosting {
         guard candidate.role == .assistant, !candidate.streaming else { return false }
         return isUnreadCrossChatAssistantNotificationMessage(
             messageId: candidate.messageId,
+            content: candidate.content,
             sourceChatId: candidate.sourceChatId
         )
     }
 
-    private func isUnreadCrossChatAssistantNotificationMessage(messageId: String, sourceChatId: String) -> Bool {
+    private func isUnreadCrossChatAssistantNotificationMessage(
+        messageId: String,
+        content: String,
+        sourceChatId: String
+    ) -> Bool {
         if let tailState = streamTailStateBySession[sourceChatId] {
             if tailState.lastMessageId == messageId {
                 guard tailState.lastMessageRole == .assistant else { return false }
-                guard lastReadMessageIdBySession[sourceChatId] != tailState.lastMessageId else { return false }
             }
         }
         guard let lastReadMessageId = lastReadMessageIdBySession[sourceChatId],
               !lastReadMessageId.isEmpty else {
             return true
         }
-        guard messageId != lastReadMessageId else { return false }
+        if messageId == lastReadMessageId {
+            let key = suppressedCrossChatNotificationEntryKey(id: messageId, content: content)
+            let suppressedKeys = suppressedCrossChatNotificationEntryKeysBySourceChatId[sourceChatId] ?? []
+            return !suppressedKeys.isEmpty && !suppressedKeys.contains(key)
+        }
         let messages = sessionMessages[sourceChatId] ?? []
         guard let candidateIndex = messages.firstIndex(where: { $0.id == messageId }) else {
             return true
@@ -4490,6 +4575,15 @@ final class ChatViewModel: ChatViewModelHosting {
         return components.joined(separator: ".") + "."
     }
 
+    private func suppressedCrossChatNotificationEntryDefaultsKey(for sessionKey: String) -> String {
+        var components = ["clawline.suppressedCrossChatNotificationEntryKeys"]
+        if let userId = auth.currentUserId, !userId.isEmpty {
+            components.append(userId)
+        }
+        components.append(sessionKey)
+        return components.joined(separator: ".")
+    }
+
     private func persistedLastReadSessionKeys() -> Set<String> {
         let prefix = lastReadMessageDefaultsPrefix()
         return Set(
@@ -4515,6 +4609,23 @@ final class ChatViewModel: ChatViewModelHosting {
         if let stored = streamDefaults.string(forKey: lastReadMessageDefaultsKey(for: sessionKey)) {
             lastReadMessageIdBySession[sessionKey] = stored
         }
+    }
+
+    private func persistSuppressedCrossChatNotificationEntryKeys(for sessionKey: String) {
+        let key = suppressedCrossChatNotificationEntryDefaultsKey(for: sessionKey)
+        let keys = suppressedCrossChatNotificationEntryKeysBySourceChatId[sessionKey] ?? []
+        if keys.isEmpty {
+            streamDefaults.removeObject(forKey: key)
+        } else {
+            streamDefaults.set(Array(keys), forKey: key)
+        }
+    }
+
+    private func restoreSuppressedCrossChatNotificationEntryKeysIfNeeded(for sessionKey: String) {
+        guard suppressedCrossChatNotificationEntryKeysBySourceChatId[sessionKey] == nil else { return }
+        let key = suppressedCrossChatNotificationEntryDefaultsKey(for: sessionKey)
+        guard let keys = streamDefaults.stringArray(forKey: key), !keys.isEmpty else { return }
+        suppressedCrossChatNotificationEntryKeysBySourceChatId[sessionKey] = Set(keys)
     }
 
     private func messageCacheDirectoryURL() -> URL? {

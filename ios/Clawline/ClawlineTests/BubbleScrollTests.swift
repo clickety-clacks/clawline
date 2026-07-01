@@ -784,6 +784,118 @@ struct BubbleScrollTests {
         #expect(bodyStack.spacing == 6)
     }
 
+    @Test("T1193: Ansible normal text bubble uses the available internal width")
+    @MainActor
+    func ansibleNormalTextBubbleUsesAvailableInternalWidth() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
+        let message = Message(
+            id: "t1193-ansible-narrow-column",
+            role: .assistant,
+            content: "TARS task registry is repaired: 7 corrupt June 19 rows were normalized, 4 stale June 28 running rows were marked lost, and the restore warning is cleared.",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:flynn:main"
+        )
+        let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 390, height: 1))
+
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: MessageFlowRules.sizeClass(for: presentation),
+            metrics: metrics,
+            maxWidth: 366,
+            truncationHeightOverride: 1000,
+            bubbleSizingV2: nil,
+            showsHeader: true,
+            paddingScale: 1,
+            minWidthOverride: nil,
+            maxWidthOverride: nil,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+        let measured = bubble.systemLayoutSizeFitting(
+            CGSize(width: 366, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        bubble.frame = CGRect(origin: .zero, size: measured)
+        bubble.layoutIfNeeded()
+
+        let geometry = bubble.renderedGeometryForTests(in: bubble)
+        guard let body = textViews(in: bubble).first(where: {
+            $0.attributedText.string.contains("TARS task registry")
+        }) else {
+            Issue.record("Expected Ansible transcript body text view")
+            return
+        }
+
+        let expectedContentWidth = geometry.bubbleFrame.width - (metrics.bubblePaddingHorizontal * 2)
+        #expect(geometry.bubbleFrame.width > 330)
+        #expect(body.bounds.width >= expectedContentWidth - 2)
+        #expect(body.bounds.width > 300)
+    }
+
+    @Test("T1193: Tall reused cell frame does not create blank internal bubble space")
+    @MainActor
+    func tallReusedCellFrameDoesNotCreateBlankInternalBubbleSpace() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
+        let message = Message(
+            id: "t1193-ansible-blank-internal-space",
+            role: .assistant,
+            content: "Cron job led-ticker art failed: run python3 www/ticker/generate_june30.py failed",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:flynn:main"
+        )
+        let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 366, height: 760))
+
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: MessageFlowRules.sizeClass(for: presentation),
+            metrics: metrics,
+            maxWidth: 366,
+            truncationHeightOverride: 1000,
+            bubbleSizingV2: nil,
+            showsHeader: true,
+            paddingScale: 1,
+            minWidthOverride: nil,
+            maxWidthOverride: nil,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+        bubble.setNeedsLayout()
+        bubble.layoutIfNeeded()
+
+        let geometry = bubble.renderedGeometryForTests(in: bubble)
+        guard let body = textViews(in: bubble).first(where: {
+            $0.attributedText.string.contains("Cron job")
+        }) else {
+            Issue.record("Expected Ansible transcript body text view")
+            return
+        }
+        let textFrame = renderedGlyphFrame(for: body, in: bubble)
+        let gapBeforeBody = textFrame.minY - geometry.contentFrame.minY
+        let bottomChrome = geometry.bubbleFrame.maxY - textFrame.maxY
+
+        #expect(geometry.bubbleFrame.height < 220)
+        #expect(geometry.dynamicContentFrame.height < 140)
+        #expect(gapBeforeBody < 80)
+        #expect(bottomChrome <= metrics.bubblePaddingBottom + 12)
+    }
+
     @Test("T1193: Rendered text bubble bottom chrome is tighter than top chrome")
     @MainActor
     func renderedTextBubbleBottomChromeIsTighterThanTopChrome() {

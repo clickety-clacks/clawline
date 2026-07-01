@@ -3004,12 +3004,18 @@ final class ChatViewModel: ChatViewModelHosting {
             didAppendNewMessage = false
         } else {
             let insertionIndex = TranscriptReplyAdjacencyOrdering.insertionIndex(for: message, in: messageList)
-                ?? messageList.endIndex
+                ?? Self.chronologicalInsertionIndex(for: message, in: messageList)
             messageList.insert(message, at: insertionIndex)
             didAppendNewMessage = true
         }
         applyMessagesWrite(messageList, for: sessionKey)
         return didAppendNewMessage
+    }
+
+    private static func chronologicalInsertionIndex(for message: Message, in messages: [Message]) -> Int {
+        messages.firstIndex { existing in
+            message.timestamp < existing.timestamp
+        } ?? messages.endIndex
     }
 
     private func remove(sessionKey: String, messageId: String, reason: String) {

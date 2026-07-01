@@ -3105,9 +3105,22 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     private func snapshotItemsWithDateSeparators(from messages: [Message]) -> [String] {
+        let result = Self.snapshotDateSeparatorItems(
+            from: messages,
+            now: Date(),
+            calendar: .autoupdatingCurrent
+        )
+        dateSeparatorTextByItemId = result.separatorTextByItemID
+        return result.items
+    }
+
+    static func snapshotDateSeparatorItems(
+        from messages: [Message],
+        now: Date,
+        calendar: Calendar
+    ) -> (items: [String], separatorTextByItemID: [String: String]) {
         guard !messages.isEmpty else {
-            dateSeparatorTextByItemId = [:]
-            return []
+            return ([], [:])
         }
 
         var items: [String] = []
@@ -3115,8 +3128,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
         var separatorTextByItemID: [String: String] = [:]
         var previousDayStart: Date?
-        let calendar = Calendar.autoupdatingCurrent
-        let now = Date()
 
         for message in messages {
             let dayStart = ChatDateLabelCalendar.startOfDay(for: message.timestamp, calendar: calendar)
@@ -3129,8 +3140,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             items.append(message.id)
         }
 
-        dateSeparatorTextByItemId = separatorTextByItemID
-        return items
+        return (items, separatorTextByItemID)
     }
 
     private static func dateSeparatorText(for day: Date, now: Date) -> String {

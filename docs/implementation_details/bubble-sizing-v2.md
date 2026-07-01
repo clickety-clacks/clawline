@@ -6,8 +6,6 @@
 ## `BubbleLayoutPlan` is computed once and shared between `sizeForItem` and `cell.configure`
 The same `BubbleLayoutPlan` instance drives both the sizing pass (offscreen) and the actual render configuration. Views apply decisions; they do not re-derive `isWide`, `maxWidth`, `heightCap`, or outer scroll enablement independently. Any code that re-derives these in a view creates divergence between measured size and rendered layout.
 
-The collection row may be taller than one bubble when another bubble in the same row is taller. That row height must not feed back into bubble measurement or chrome sizing. `sizeForItem` owns the bubble's measured width/height; `MessageFlowLayout` owns row placement and row advancement. A shorter bubble must keep its measured content-derived height even when sharing a row with a taller peer.
-
 ## The "two caps" become an explicit `heightCapMode` enum — not an implicit override presence check
 The current code distinguishes "screen-aware cap" from "design-system cap" by checking whether a `truncationHeightOverride` is present. The new model makes this explicit: `heightCapMode: .designSystem | .screenAware`. Code that detects cap type by nil-checking an override parameter is the old pattern.
 

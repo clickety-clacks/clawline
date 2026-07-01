@@ -43,8 +43,9 @@ struct StreamManagerSheet: View {
     @State private var selectedStreamSessionKey: String?
     @State private var didActivateSelection = false
     @State private var isSearchFieldFocusEnabled = false
+    @State private var localSearchFocusRequestID = 0
+    @State private var isSearchFieldFocused = false
     @FocusState private var focusedEditor: EditorMode?
-    @FocusState private var isSearchFieldFocused: Bool
 
     private enum EditorMode: Hashable {
         case renaming(String)
@@ -129,6 +130,16 @@ struct StreamManagerSheet: View {
 
     private var selectorShortcutsAvailable: Bool {
         resolvedHardwareKeyboardShortcutsAvailable
+    }
+
+    private var shouldRenderSearchTextField: Bool {
+        isSearchFieldFocusEnabled
+            || StreamPopupSearchPresentationFocusPolicy
+                .shouldRenderSearchTextFieldOnInitialPresentation(searchFocusRequestID: searchFocusRequestID)
+    }
+
+    private var activeSearchFocusRequestID: Int? {
+        searchFocusRequestID ?? (localSearchFocusRequestID > 0 ? localSearchFocusRequestID : nil)
     }
 
     private var selectableShortcutSessionKeys: [String] {
@@ -425,35 +436,25 @@ struct StreamManagerSheet: View {
 
     @ViewBuilder
     private var searchField: some View {
-        if isSearchFieldFocusEnabled {
-            TextField("Filter…", text: $searchQuery)
-                .font(.clawline(.uiLabel))
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .submitLabel(.go)
-                .focused($isSearchFieldFocused)
-                .onSubmit {
+        if shouldRenderSearchTextField {
+            StreamSelectorSearchField(
+                text: $searchQuery,
+                focusRequestID: activeSearchFocusRequestID,
+                isFocused: $isSearchFieldFocused,
+                onMoveSelection: { step in
+                    moveSelection(step: step)
+                },
+                onSubmit: {
                     selectHighlightedStream()
+                },
+                onDigit: { input in
+                    handleSelectorShortcutDigit(input)
                 }
-                .onKeyPress(.upArrow) {
-                    moveSelection(step: -1)
-                    return .handled
-                }
-                .onKeyPress(.downArrow) {
-                    moveSelection(step: 1)
-                    return .handled
-                }
-                .onKeyPress(.return) {
-                    selectHighlightedStream()
-                    return .handled
-                }
-                .onKeyPress(characters: .decimalDigits) { keyPress in
-                    handleSelectorShortcutKeyPress(keyPress)
-                }
+            )
         } else {
             Button {
                 isSearchFieldFocusEnabled = true
-                focusSearchField()
+                localSearchFocusRequestID &+= 1
             } label: {
                 Text("Filter…")
                     .font(.clawline(.uiLabel))
@@ -658,16 +659,15 @@ struct StreamManagerSheet: View {
 
     private func focusSearchField() {
         isSearchFieldFocusEnabled = true
-        Task { @MainActor in
-            await Task.yield()
-            isSearchFieldFocused = true
-            syncSelectionWithFilteredStreams()
-        }
+        localSearchFocusRequestID &+= 1
+        syncSelectionWithFilteredStreams()
     }
 
     private func handleSearchFocusRequest(_ requestID: Int?) {
         guard requestID != nil else { return }
-        focusSearchField()
+        isSearchFieldFocusEnabled = true
+        localSearchFocusRequestID = requestID ?? localSearchFocusRequestID
+        syncSelectionWithFilteredStreams()
         onConsumeSearchFocusRequest()
     }
 
@@ -724,6 +724,22 @@ struct StreamManagerSheet: View {
         }
         NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: intent)
         return .handled
+    }
+
+    private func handleSelectorShortcutDigit(_ characters: String) -> Bool {
+        guard let intent = StreamSelectorShortcutActivation.intent(
+            characters: characters,
+            modifiers: []
+        ),
+              case .notificationAssignedOpen(let slot) = intent,
+              StreamSelectorShortcutMap.sessionKey(
+                forSlot: slot,
+                selectableSessionKeys: selectableShortcutSessionKeys
+              ) != nil else {
+            return false
+        }
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: intent)
+        return true
     }
 
     private func publishShortcutOwnership() {
@@ -924,6 +940,158 @@ enum StreamSelectorShortcutKeyCommands {
                 modifierFlags: .command,
                 intent: .notificationAssignedOpen(slot)
             )
+        }
+    }
+}
+
+private struct StreamSelectorSearchField: UIViewRepresentable {
+    @Binding var text: String
+    let focusRequestID: Int?
+    @Binding var isFocused: Bool
+    let onMoveSelection: (Int) -> Void
+    let onSubmit: () -> Void
+    let onDigit: (String) -> Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, isFocused: $isFocused)
+    }
+
+    func makeUIView(context: Context) -> SearchTextField {
+        let textField = SearchTextField()
+        textField.delegate = context.coordinator
+        textField.borderStyle = .none
+        textField.backgroundColor = .clear
+        textField.font = .clawline(.uiLabel)
+        textField.placeholder = "Filter..."
+        textField.autocapitalizationType = .none
+        textField.autocorrectionType = .no
+        textField.returnKeyType = .go
+        textField.clearButtonMode = .never
+        textField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        textField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        textField.addTarget(context.coordinator, action: #selector(Coordinator.textDidChange(_:)), for: .editingChanged)
+        context.coordinator.configure(textField)
+        return textField
+    }
+
+    func updateUIView(_ uiView: SearchTextField, context: Context) {
+        context.coordinator.text = $text
+        context.coordinator.isFocused = $isFocused
+        context.coordinator.configure(uiView)
+        uiView.onMoveSelection = onMoveSelection
+        uiView.onSubmit = onSubmit
+        uiView.onDigit = onDigit
+        if uiView.text != text {
+            uiView.text = text
+        }
+        uiView.applyFocusRequestIfNeeded(focusRequestID)
+    }
+
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        var text: Binding<String>
+        var isFocused: Binding<Bool>
+
+        init(text: Binding<String>, isFocused: Binding<Bool>) {
+            self.text = text
+            self.isFocused = isFocused
+        }
+
+        func configure(_ textField: SearchTextField) {
+            textField.onFocusChange = { [weak self] focused in
+                self?.isFocused.wrappedValue = focused
+            }
+        }
+
+        @objc func textDidChange(_ sender: UITextField) {
+            text.wrappedValue = sender.text ?? ""
+        }
+
+        func textFieldDidBeginEditing(_ textField: UITextField) {
+            isFocused.wrappedValue = true
+        }
+
+        func textFieldDidEndEditing(_ textField: UITextField) {
+            isFocused.wrappedValue = false
+        }
+
+        func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+            (textField as? SearchTextField)?.onSubmit?()
+            return false
+        }
+    }
+
+    final class SearchTextField: UITextField {
+        var onMoveSelection: ((Int) -> Void)?
+        var onSubmit: (() -> Void)?
+        var onDigit: ((String) -> Bool)?
+        var onFocusChange: ((Bool) -> Void)?
+        private var appliedFocusRequestID: Int?
+
+        override var keyCommands: [UIKeyCommand]? {
+            let commands: [UIKeyCommand] = [
+                UIKeyCommand(input: UIKeyCommand.inputUpArrow, modifierFlags: [], action: #selector(moveUp)),
+                UIKeyCommand(input: UIKeyCommand.inputDownArrow, modifierFlags: [], action: #selector(moveDown)),
+                UIKeyCommand(input: "\r", modifierFlags: [], action: #selector(submit))
+            ]
+            return commands
+        }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            applyPendingFocusRequestIfPossible()
+        }
+
+        override func becomeFirstResponder() -> Bool {
+            let becameFirstResponder = super.becomeFirstResponder()
+            if becameFirstResponder {
+                onFocusChange?(true)
+            }
+            return becameFirstResponder
+        }
+
+        override func resignFirstResponder() -> Bool {
+            let resigned = super.resignFirstResponder()
+            if resigned {
+                onFocusChange?(false)
+            }
+            return resigned
+        }
+
+        func applyFocusRequestIfNeeded(_ requestID: Int?) {
+            guard let requestID else { return }
+            let shouldApply = appliedFocusRequestID != requestID || (window != nil && !isFirstResponder)
+            appliedFocusRequestID = requestID
+            guard shouldApply, window != nil else { return }
+            _ = becomeFirstResponder()
+        }
+
+        private func applyPendingFocusRequestIfPossible() {
+            guard appliedFocusRequestID != nil, window != nil, !isFirstResponder else { return }
+            _ = becomeFirstResponder()
+        }
+
+        @objc private func moveUp() {
+            onMoveSelection?(-1)
+        }
+
+        @objc private func moveDown() {
+            onMoveSelection?(1)
+        }
+
+        @objc private func submit() {
+            onSubmit?()
+        }
+
+        override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+            guard let press = presses.first,
+                  presses.count == 1,
+                  let input = press.key?.charactersIgnoringModifiers,
+                  input.count == 1,
+                  input.rangeOfCharacter(from: .decimalDigits) != nil,
+                  onDigit?(input) == true else {
+                super.pressesBegan(presses, with: event)
+                return
+            }
         }
     }
 }

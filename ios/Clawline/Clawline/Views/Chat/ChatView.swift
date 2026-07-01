@@ -299,6 +299,10 @@ enum StreamPopupFocusHandoff {
         isSoftwareKeyboardVisible
     }
 
+    static func isSoftwareKeyboardVisible(keyboardHeight: CGFloat, safeAreaBottom: CGFloat) -> Bool {
+        max(0, keyboardHeight - safeAreaBottom) > 0.5
+    }
+
     static func shouldRestoreComposerOnClose(
         didDisplaceComposerFocus: Bool,
         isSoftwareKeyboardVisible: Bool
@@ -307,9 +311,13 @@ enum StreamPopupFocusHandoff {
     }
 
     static func shouldRestoreComposerOnCloseAfterTrackedKeyboardState(
-        didDisplaceComposerFocus: Bool
+        didDisplaceComposerFocus: Bool,
+        isSoftwareKeyboardVisible: Bool
     ) -> Bool {
-        didDisplaceComposerFocus
+        shouldRestoreComposerOnClose(
+            didDisplaceComposerFocus: didDisplaceComposerFocus,
+            isSoftwareKeyboardVisible: isSoftwareKeyboardVisible
+        )
     }
 
     static func closeActions(
@@ -318,8 +326,12 @@ enum StreamPopupFocusHandoff {
     ) -> [CloseAction] {
         guard shouldRestoreComposerFocus else { return [.closePopup] }
         return preserveComposerFocusDuringDismissal
-            ? [.requestComposerFocusBeforeDismissal, .closePopup, .requestComposerFocusAfterDismissal]
+            ? [.requestComposerFocusBeforeDismissal, .closePopup]
             : [.closePopup, .requestComposerFocusAfterDismissal]
+    }
+
+    static func shouldClosePopupForComposerFocusRequest(isStreamPopupPresented: Bool) -> Bool {
+        isStreamPopupPresented
     }
 }
 
@@ -482,8 +494,25 @@ struct ChatView: View {
 #endif
     }
 
+    @MainActor
+    private static func currentKeyWindowSafeAreaBottom() -> CGFloat {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first { $0.isKeyWindow }?
+            .safeAreaInsets
+            .bottom ?? 0
+    }
+
     private var isKeyboardVisible: Bool {
-        keyboardHeight > 0.5
+        currentSoftwareKeyboardVisibility
+    }
+
+    private var currentSoftwareKeyboardVisibility: Bool {
+        StreamPopupFocusHandoff.isSoftwareKeyboardVisible(
+            keyboardHeight: keyboardHeight,
+            safeAreaBottom: Self.currentKeyWindowSafeAreaBottom()
+        )
     }
 
     private var fontScaleChangeSequence: Int {
@@ -1150,7 +1179,10 @@ struct ChatView: View {
             layoutFrozen: false
         )
         let keyboardVisibleHeight = max(0, keyboardHeight - geometry.safeAreaInsets.bottom)
-        let isKeyboardVisible = keyboardVisibleHeight > 0.5
+        let isKeyboardVisible = StreamPopupFocusHandoff.isSoftwareKeyboardVisible(
+            keyboardHeight: keyboardHeight,
+            safeAreaBottom: geometry.safeAreaInsets.bottom
+        )
         let effectiveStreams = viewModel.orderedStreams
         let effectiveSessionKeys = effectiveStreams.map(\.sessionKey)
         let sendButtonConnectionState = viewModel.sendButtonConnectionState
@@ -1585,7 +1617,7 @@ struct ChatView: View {
         }
         .onChange(of: keyboardHeight) { _, height in
             layoutRevision &+= 1
-            reconcileStreamPopupKeyboardVisibility(isVisible: height > 0.5)
+            reconcileStreamPopupKeyboardVisibility(isVisible: currentSoftwareKeyboardVisibility)
         }
         .onChange(of: keyboardAnimationDuration) { _, _ in layoutRevision &+= 1 }
         .onChange(of: keyboardAnimationCurve) { _, _ in layoutRevision &+= 1 }
@@ -2386,7 +2418,11 @@ struct ChatView: View {
                     scheduleInputFocusChange(focused)
                 },
                 onRequestFocus: {
-                    focusRequestID &+= 1
+                    if StreamPopupFocusHandoff.shouldClosePopupForComposerFocusRequest(isStreamPopupPresented: streamPopupRouteController.isPopupPresented) {
+                        closeStreamPopup(preserveComposerFocusDuringDismissal: true)
+                    } else {
+                        focusRequestID &+= 1
+                    }
                 },
                 onTextEditActivity: {
                     reconcileResolvedMentionAttachment()
@@ -3184,7 +3220,7 @@ struct ChatView: View {
 
     @MainActor
     private func openStreamPopupFromKeyboardCommand() {
-        openStreamPopup(focusSearch: true)
+        openStreamPopupForCurrentKeyboardState()
     }
 
     @MainActor
@@ -3204,7 +3240,8 @@ struct ChatView: View {
     ) {
         let shouldRestoreComposer = restoreComposerFocusIfNeeded
             && StreamPopupFocusHandoff.shouldRestoreComposerOnCloseAfterTrackedKeyboardState(
-                didDisplaceComposerFocus: shouldRestoreFocusAfterStreamPopup
+                didDisplaceComposerFocus: shouldRestoreFocusAfterStreamPopup,
+                isSoftwareKeyboardVisible: isKeyboardVisible
             )
         shouldRestoreFocusAfterStreamPopup = false
         streamPopupKeyboardDismissalTask?.cancel()

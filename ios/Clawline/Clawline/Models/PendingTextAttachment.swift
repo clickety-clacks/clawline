@@ -195,14 +195,22 @@ extension MessageReferenceTextAttachment {
 
 enum MessageReferenceMarkdownDisplay {
     static func renderableMarkdown(_ text: String) -> String {
-        "\(text)\(closingEmphasisSuffix(for: text))"
+        "\(text)\(closingMarkdownSuffix(for: text))"
     }
 
-    private static func closingEmphasisSuffix(for text: String) -> String {
+    private static func closingMarkdownSuffix(for text: String) -> String {
         var stack: [String] = []
         var index = text.startIndex
         while index < text.endIndex {
-            if text[index...].hasPrefix("**") || text[index...].hasPrefix("__") {
+            if text[index...].hasPrefix("==") {
+                let delimiter = String(text[index...].prefix(2))
+                if stack.last == delimiter {
+                    stack.removeLast()
+                } else if isMarkDelimiterCandidate(in: text, at: index) || isTruncatedMarkDelimiterCandidate(in: text, at: index) {
+                    stack.append(delimiter)
+                }
+                index = text.index(index, offsetBy: 2)
+            } else if text[index...].hasPrefix("**") || text[index...].hasPrefix("__") {
                 let delimiter = String(text[index...].prefix(2))
                 if stack.last == delimiter {
                     stack.removeLast()
@@ -223,5 +231,28 @@ enum MessageReferenceMarkdownDisplay {
             }
         }
         return stack.reversed().joined()
+    }
+
+    private static func isMarkDelimiterCandidate(in text: String, at index: String.Index) -> Bool {
+        let after = text.index(index, offsetBy: 2)
+        guard after < text.endIndex,
+              !text[after].isWhitespace,
+              text[after] != "=" else {
+            return false
+        }
+        guard index > text.startIndex else { return true }
+        let before = text.index(before: index)
+        return text[before].isWhitespace || text[before].isPunctuation
+    }
+
+    private static func isTruncatedMarkDelimiterCandidate(in text: String, at index: String.Index) -> Bool {
+        guard text.count >= PendingMessageReference.previewLimit || text.hasSuffix("…") else { return false }
+        let after = text.index(index, offsetBy: 2)
+        guard after < text.endIndex,
+              !text[after].isWhitespace,
+              text[after] != "=" else {
+            return false
+        }
+        return true
     }
 }

@@ -2794,7 +2794,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
                 inkColor: UIColor.label,
                 lineSpacing: 1,
                 stripDetectedURLs: false,
-                isDark: traitCollection.userInterfaceStyle == .dark
+                isDark: explicitIsDarkOverride ?? (traitCollection.userInterfaceStyle == .dark)
             )
             replyIndicatorTextView.attributedText = content.firstAttributedText ?? NSAttributedString(
                 string: label,

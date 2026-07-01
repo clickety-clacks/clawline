@@ -312,6 +312,138 @@ struct MessageBubbleMetadataTests {
         }
     }
 
+    @Test("T1198: outgoing reply chip renders mark highlights without delimiters")
+    func outgoingReplyChipRendersMarkHighlightsWithoutDelimiters() {
+        let referenced = Message(
+            id: "s_mark_reference",
+            role: .assistant,
+            content: "==Root cause:== reply bubble markdown path",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal",
+            clientMessageId: "c_mark_reference"
+        )
+        let bubble = configuredUserReplyBubble(
+            prompt: "Ok",
+            replyReference: PendingMessageReference(message: referenced),
+            maxWidth: 320
+        )
+
+        let rendered = bubble.debugMetadataStateForTests().replyIndicatorRenderedText
+
+        #expect(rendered?.string == "Root cause: reply bubble markdown path")
+        #expect(rendered?.string.contains("==") == false)
+        if let rendered {
+            guard let color = rgb("Root cause:", in: rendered) else {
+                Issue.record("Expected highlighted reply chip text color")
+                return
+            }
+            #expect(color == (158, 62, 28))
+        }
+    }
+
+    @Test("T1198: truncated reply chip mark highlight does not leak delimiters")
+    func truncatedReplyChipMarkHighlightDoesNotLeakDelimiters() {
+        let highlightedPreview = Array(repeating: "highlight", count: 40).joined(separator: " ")
+        let referenced = Message(
+            id: "s_truncated_mark_reference",
+            role: .assistant,
+            content: "==Root cause reply chip label should truncate inside the highlighted span before the delimiter closes \(highlightedPreview)==",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal",
+            clientMessageId: "c_truncated_mark_reference"
+        )
+        let replyReference = PendingMessageReference(message: referenced)
+        let bubble = configuredUserReplyBubble(
+            prompt: "Ok",
+            replyReference: replyReference,
+            maxWidth: 320
+        )
+
+        let rendered = bubble.debugMetadataStateForTests().replyIndicatorRenderedText
+
+        #expect(replyReference.preview.count == PendingMessageReference.previewLimit)
+        #expect(replyReference.preview.hasPrefix("=="))
+        #expect(replyReference.preview.dropFirst(2).contains("==") == false)
+        #expect(replyReference.tokenLabel.contains("=="))
+        #expect(replyReference.tokenLabel.contains("…"))
+        #expect(rendered?.string.hasPrefix("Root cause reply chip label") == true)
+        #expect(rendered?.string.contains("==") == false)
+        if let rendered {
+            guard let color = rgb("Root cause", in: rendered) else {
+                Issue.record("Expected highlighted reply chip text color")
+                return
+            }
+            #expect(color == (158, 62, 28))
+        }
+    }
+
+    @Test("T1198: adjacent truncated reply chip mark highlight does not leak delimiters")
+    func adjacentTruncatedReplyChipMarkHighlightDoesNotLeakDelimiters() {
+        let highlightedPreview = Array(repeating: "highlight", count: 40).joined(separator: " ")
+        let referenced = Message(
+            id: "s_adjacent_truncated_mark_reference",
+            role: .assistant,
+            content: "alpha==highlight should render even when adjacent to prior text \(highlightedPreview)==",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal",
+            clientMessageId: "c_adjacent_truncated_mark_reference"
+        )
+        let replyReference = PendingMessageReference(message: referenced)
+        let bubble = configuredUserReplyBubble(
+            prompt: "Ok",
+            replyReference: replyReference,
+            maxWidth: 320
+        )
+
+        let rendered = bubble.debugMetadataStateForTests().replyIndicatorRenderedText
+
+        #expect(replyReference.preview.count == PendingMessageReference.previewLimit)
+        #expect(replyReference.preview.contains("alpha==highlight"))
+        #expect(replyReference.preview.dropFirst("alpha==".count).contains("==") == false)
+        #expect(rendered?.string.hasPrefix("alphahighlight should render") == true)
+        #expect(rendered?.string.contains("==") == false)
+        if let rendered {
+            guard let color = rgb("highlight", in: rendered) else {
+                Issue.record("Expected highlighted reply chip text color")
+                return
+            }
+            #expect(color == (158, 62, 28))
+        }
+    }
+
+    @Test("T1198: outgoing reply chip preserves ordinary equality text")
+    func outgoingReplyChipPreservesOrdinaryEqualityText() {
+        let referenced = Message(
+            id: "s_equality_reference",
+            role: .assistant,
+            content: "x == y",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal",
+            clientMessageId: "c_equality_reference"
+        )
+        let bubble = configuredUserReplyBubble(
+            prompt: "Ok",
+            replyReference: PendingMessageReference(message: referenced),
+            maxWidth: 320
+        )
+
+        let rendered = bubble.debugMetadataStateForTests().replyIndicatorRenderedText
+
+        #expect(rendered?.string == "x == y")
+    }
+
     @Test("T1166: long markdown reply preview truncates after rendering")
     func longMarkdownReplyPreviewTruncatesAfterRendering() {
         let referenced = Message(
@@ -792,5 +924,23 @@ struct MessageBubbleMetadataTests {
             return false
         }
         return font.fontDescriptor.symbolicTraits.contains(.traitBold)
+    }
+
+    private func rgb(_ substring: String, in attributed: NSAttributedString) -> (Int, Int, Int)? {
+        let range = (attributed.string as NSString).range(of: substring)
+        guard range.location != NSNotFound,
+              let color = attributed.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? UIColor else {
+            return nil
+        }
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        guard color.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return nil }
+        return (
+            Int(round(red * 255)),
+            Int(round(green * 255)),
+            Int(round(blue * 255))
+        )
     }
 }

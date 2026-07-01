@@ -3775,6 +3775,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
     private var messageSessionKey: String = ""
     private var messageSnippet: String = ""
     private var lastMismatch: (bounds: CGRect, bubble: CGRect)?
+    private var onRequestLayout: ((String) -> Void)?
     private var flashOverlayView: UIView?
 
     override init(frame: CGRect) {
@@ -3827,6 +3828,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
             guard let self, self.messageId == requestedId, self.messageSessionKey == message.sessionKey else { return }
             onRequestLayout?(requestedId)
         }
+        self.onRequestLayout = guardedRequestLayout
         containerView.configure(
             message: message,
             presentation: presentation,
@@ -3864,6 +3866,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
         messageSessionKey = ""
         messageSnippet = ""
         lastMismatch = nil
+        onRequestLayout = nil
     }
 
     func flashUnreadAnchorHighlight(isUnreadTap: Bool) {
@@ -3967,10 +3970,16 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
         let boundsDesc = String(describing: bounds)
         let bubbleDesc = String(describing: bubbleInCell)
         let id = messageId
+        let sessionKey = messageSessionKey
         let snippet = messageSnippet
+        let requestLayout = onRequestLayout
         Self.logger.info("UIKit bubble mismatch id=\(id) snippet=\"\(snippet)\"")
         Self.logger.info("UIKit bubble mismatch bounds=\(boundsDesc)")
         Self.logger.info("UIKit bubble mismatch bubble=\(bubbleDesc)")
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.messageId == id, self.messageSessionKey == sessionKey else { return }
+            requestLayout?(id)
+        }
     }
 }
 

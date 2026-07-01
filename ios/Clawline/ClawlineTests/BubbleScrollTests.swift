@@ -896,6 +896,139 @@ struct BubbleScrollTests {
         #expect(bottomChrome <= metrics.bubblePaddingBottom + 12)
     }
 
+    @Test("T1193: live cell mismatch requests production remeasurement")
+    @MainActor
+    func liveCellMismatchRequestsProductionRemeasurement() async {
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
+        let message = Message(
+            id: "t1193-live-cell-mismatch",
+            role: .assistant,
+            content: "A compact Ansible transcript bubble should not let a stale tall cell remain the row height owner.",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:flynn:s_111df227"
+        )
+        let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+        let cell = MessageBubbleUIKitCell(frame: CGRect(x: 0, y: 0, width: 366, height: 420))
+        cell.contentView.frame = cell.bounds
+
+        var requestedIds: [String] = []
+        cell.configure(
+            message: message,
+            presentation: presentation,
+            sendIndicatorState: nil,
+            isCompact: true,
+            maxWidth: 366,
+            bubbleHeightPolicy: nil,
+            truncationHeightOverride: 1000,
+            bubbleSizingV2: nil,
+            showsHeader: true,
+            isDark: false,
+            terminalConnectionPool: nil,
+            webBubbleCoordinator: nil,
+            salientHighlightService: nil,
+            onRequestExpand: nil,
+            onRequestLayout: { requestedIds.append($0) },
+            onInteractiveCallback: nil,
+            onInsertIntoPrompt: nil,
+            onReferenceMessage: nil,
+            onResend: nil
+        )
+        cell.setNeedsLayout()
+        cell.layoutIfNeeded()
+        await Task.yield()
+
+        let geometry = renderedBubbleView(in: cell)?.renderedGeometryForTests(in: cell.contentView)
+        #expect(geometry?.bubbleFrame.height ?? cell.bounds.height < cell.bounds.height - 100)
+        #expect(requestedIds == [message.id])
+    }
+
+    @Test("T1193: stale cell mismatch does not request layout after session reuse")
+    @MainActor
+    func staleCellMismatchDoesNotRequestLayoutAfterSessionReuse() async {
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
+        let messageId = "t1193-live-cell-reuse-mismatch"
+        let originalMessage = Message(
+            id: messageId,
+            role: .assistant,
+            content: "A stale oversized frame from one transcript must not request layout after cell reuse.",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:flynn:s_original"
+        )
+        let reusedMessage = Message(
+            id: messageId,
+            role: .assistant,
+            content: "The same message id in another session owns a different guarded layout callback.",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:flynn:s_reused"
+        )
+        let cell = MessageBubbleUIKitCell(frame: CGRect(x: 0, y: 0, width: 366, height: 420))
+        cell.contentView.frame = cell.bounds
+
+        var originalRequestedIds: [String] = []
+        let originalPresentation = buildPresentation(originalMessage, metrics: metrics, enableLinkPreviews: false)
+        cell.configure(
+            message: originalMessage,
+            presentation: originalPresentation,
+            sendIndicatorState: nil,
+            isCompact: true,
+            maxWidth: 366,
+            bubbleHeightPolicy: nil,
+            truncationHeightOverride: 1000,
+            bubbleSizingV2: nil,
+            showsHeader: true,
+            isDark: false,
+            terminalConnectionPool: nil,
+            webBubbleCoordinator: nil,
+            salientHighlightService: nil,
+            onRequestExpand: nil,
+            onRequestLayout: { originalRequestedIds.append($0) },
+            onInteractiveCallback: nil,
+            onInsertIntoPrompt: nil,
+            onReferenceMessage: nil,
+            onResend: nil
+        )
+        cell.setNeedsLayout()
+        cell.layoutIfNeeded()
+
+        var reusedRequestedIds: [String] = []
+        let reusedPresentation = buildPresentation(reusedMessage, metrics: metrics, enableLinkPreviews: false)
+        cell.prepareForReuse()
+        cell.configure(
+            message: reusedMessage,
+            presentation: reusedPresentation,
+            sendIndicatorState: nil,
+            isCompact: true,
+            maxWidth: 366,
+            bubbleHeightPolicy: nil,
+            truncationHeightOverride: 1000,
+            bubbleSizingV2: nil,
+            showsHeader: true,
+            isDark: false,
+            terminalConnectionPool: nil,
+            webBubbleCoordinator: nil,
+            salientHighlightService: nil,
+            onRequestExpand: nil,
+            onRequestLayout: { reusedRequestedIds.append($0) },
+            onInteractiveCallback: nil,
+            onInsertIntoPrompt: nil,
+            onReferenceMessage: nil,
+            onResend: nil
+        )
+        await Task.yield()
+
+        #expect(originalRequestedIds.isEmpty)
+        #expect(reusedRequestedIds.isEmpty)
+    }
+
     @Test("T1193: Rendered text bubble bottom chrome is tighter than top chrome")
     @MainActor
     func renderedTextBubbleBottomChromeIsTighterThanTopChrome() {
@@ -2186,4 +2319,12 @@ struct BubbleScrollTests {
             hasSingleURL: presentation.hasSingleURL
         )
     }
+}
+
+private func renderedBubbleView(in view: UIView) -> MessageBubbleUIKitView? {
+    if let bubble = view as? MessageBubbleUIKitView { return bubble }
+    for subview in view.subviews {
+        if let found = renderedBubbleView(in: subview) { return found }
+    }
+    return nil
 }

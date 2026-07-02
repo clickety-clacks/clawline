@@ -191,6 +191,23 @@ enum BubbleSizingV2 {
         return hasher.finalize()
     }
 
+    static func layoutFingerprintSeed(plan: Plan,
+                                      showsHeader: Bool,
+                                      hasFailureBadge: Bool) -> Int {
+        var hasher = Hasher()
+        hasher.combine(plan.sizeClass)
+        hasher.combine(plan.isSingleLinkPreview)
+        hasher.combine(plan.isWide)
+        hasher.combine(plan.maxWidth)
+        hasher.combine(plan.minWidth)
+        hasher.combine(plan.heightPolicy.cacheFingerprint)
+        hasher.combine(plan.allowsOuterScroll)
+        hasher.combine(plan.linkPreviewURL?.absoluteString ?? "")
+        hasher.combine(showsHeader)
+        hasher.combine(hasFailureBadge)
+        return hasher.finalize()
+    }
+
     static func finalOuterScrollViewportHeight(
         plan: Plan,
         measuredContentHeight: CGFloat,

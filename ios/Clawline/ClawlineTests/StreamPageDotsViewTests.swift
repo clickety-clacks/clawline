@@ -68,11 +68,20 @@ struct StreamPageDotsViewTests {
         #expect(visibleCount == 11)
     }
 
-    @Test("Spatial hover affordance doubles only for Spatial hover")
-    func spatialHoverAffordanceDoublesOnlyForSpatialHover() {
-        #expect(StreamPageDotsView.spatialHoverScale(isHovering: true, isSpatial: true) == 2)
-        #expect(StreamPageDotsView.spatialHoverScale(isHovering: false, isSpatial: true) == 1)
-        #expect(StreamPageDotsView.spatialHoverScale(isHovering: true, isSpatial: false) == 1)
+    @Test("Spatial focus affordance doubles for Spatial gaze focus")
+    func spatialFocusAffordanceDoublesOnlyForSpatialFocus() {
+        #expect(StreamPageDotsView.spatialAffordanceScale(isFocused: true, isSpatial: true) == 2)
+        #expect(StreamPageDotsView.spatialAffordanceScale(isFocused: false, isSpatial: true) == 1)
+        #expect(StreamPageDotsView.spatialAffordanceScale(isFocused: true, isSpatial: false) == 1)
+    }
+
+    @Test("Spatial focus affordance expands the hit frame")
+    func spatialFocusAffordanceExpandsHitFrame() {
+        let resting = CGSize(width: 124, height: 44)
+        let expanded = StreamPageDotsView.spatialAffordanceHitFrame(size: resting, scale: 2)
+
+        #expect(expanded.width == 248)
+        #expect(expanded.height == 88)
     }
 
     @Test("Rendered indicator width matches the visible control width")
@@ -188,16 +197,45 @@ struct StreamPageDotsViewTests {
         let source = try Self.streamPageDotsSource()
         let controlBodySource = try Self.sourceSection(
             source,
-            from: "private var controlBody",
+            from: "private func controlBody",
             to: "private func dockChrome"
         )
 
         #expect(!controlBodySource.contains(".clipShape(Capsule())"))
         #expect(!controlBodySource.contains(".frame(width: controlWidth, height: Self.controlHeight"))
-        #expect(controlBodySource.contains(".frame(width: scrubFieldWidth, height: Self.waveRenderHeight, alignment: .bottom)"))
-        #expect(controlBodySource.contains(".frame(width: scrubFieldWidth, height: Self.minimumHitTargetHeight, alignment: .bottom)"))
+        #expect(controlBodySource.contains(".frame(width: scrubFieldWidth, height: waveRenderHeight, alignment: .bottom)"))
+        #expect(controlBodySource.contains(".frame(width: scrubFieldWidth, height: minimumHitTargetHeight, alignment: .bottom)"))
         #expect(source.contains("unreadEdgeBloomOverlay(capsuleBounds: capsuleBounds)"))
         #expect(source.contains(".blur(radius: Self.unreadEdgeBloomBlurRadius(colorScheme: colorScheme))\n                    .mask(Capsule())"))
+    }
+
+    @Test("T1374 Spatial gaze focus drives the whole control affordance")
+    func spatialGazeFocusDrivesWholeControlAffordance() throws {
+        let source = try Self.streamPageDotsSource()
+        let bodySource = try Self.sourceSection(
+            source,
+            from: "var body: some View",
+            to: "private var isSpatialBuild"
+        )
+        let controlBodySource = try Self.sourceSection(
+            source,
+            from: "private func controlBody",
+            to: "private func dockChrome"
+        )
+        let gestureLayerSource = try Self.sourceSection(
+            source,
+            from: "private func gestureLayer",
+            to: "private func controlBody"
+        )
+
+        #expect(source.contains("@FocusState private var isSpatialGazeFocused"))
+        #expect(source.contains("isSpatialGazeFocused || isSpatialHovering"))
+        #expect(bodySource.contains(".focusable()"))
+        #expect(bodySource.contains(".focused($isSpatialGazeFocused)"))
+        #expect(bodySource.contains(".hoverEffect(.highlight)"))
+        #expect(controlBodySource.contains("baseControlWidth * spatialFocusScale"))
+        #expect(controlBodySource.contains("scrubMetrics.scrubFieldWidth * spatialFocusScale"))
+        #expect(gestureLayerSource.contains("spatialAffordanceHitFrame"))
     }
 
     @Test("T257: scrub start maps touch position through the visible dot window")

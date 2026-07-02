@@ -32,6 +32,7 @@ struct StreamPageDotsView: View {
     @State private var scrubTapSuppressionExpiresAt = Date.distantPast
 #if os(visionOS)
     @State private var isSpatialHovering = false
+    @FocusState private var isSpatialGazeFocused: Bool
 #endif
 
     private static let collapsedMaxVisibleDots = 11
@@ -50,8 +51,12 @@ struct StreamPageDotsView: View {
     static func unreadEdgeBloomOpacity(colorScheme: ColorScheme) -> Double {
         0.40
     }
-    static func spatialHoverScale(isHovering: Bool, isSpatial: Bool) -> CGFloat {
-        isHovering && isSpatial ? 2 : 1
+    static func spatialAffordanceScale(isFocused: Bool, isSpatial: Bool) -> CGFloat {
+        isFocused && isSpatial ? 2 : 1
+    }
+
+    static func spatialAffordanceHitFrame(size: CGSize, scale: CGFloat) -> CGSize {
+        CGSize(width: size.width * scale, height: size.height * scale)
     }
     private static let unreadEdgeBloomSourceSize = CGSize(width: 14, height: 9)
     private static let unreadEdgeBloomBorderClearance: CGFloat = 9
@@ -315,10 +320,14 @@ struct StreamPageDotsView: View {
     }
 
     var body: some View {
-        controlBody
+        let spatialFocusScale = Self.spatialAffordanceScale(
+            isFocused: isSpatialFocused,
+            isSpatial: isSpatialBuild
+        )
+        controlBody(spatialFocusScale: spatialFocusScale)
         .contentShape(Rectangle())
         .overlay(alignment: .bottom) {
-            gestureLayer
+            gestureLayer(spatialFocusScale: spatialFocusScale)
         }
         .onDisappear {
             cancelScrubIfNeeded()
@@ -335,11 +344,29 @@ struct StreamPageDotsView: View {
         .accessibilityValue("Stream \(activeIndex + 1) of \(sessionKeys.count)")
         .accessibilityHint("Tap to open stream manager. Long press and drag to preview streams.")
 #if os(visionOS)
-        .scaleEffect(Self.spatialHoverScale(isHovering: isSpatialHovering, isSpatial: true))
-        .animation(.spring(response: 0.22, dampingFraction: 0.72), value: isSpatialHovering)
+        .focusable()
+        .focused($isSpatialGazeFocused)
+        .hoverEffect(.highlight)
+        .animation(.spring(response: 0.22, dampingFraction: 0.72), value: isSpatialFocused)
         .onHover { isHovering in
             isSpatialHovering = isHovering
         }
+#endif
+    }
+
+    private var isSpatialBuild: Bool {
+#if os(visionOS)
+        true
+#else
+        false
+#endif
+    }
+
+    private var isSpatialFocused: Bool {
+#if os(visionOS)
+        isSpatialGazeFocused || isSpatialHovering
+#else
+        false
 #endif
     }
 
@@ -349,7 +376,11 @@ struct StreamPageDotsView: View {
     }
 
     @ViewBuilder
-    private var gestureLayer: some View {
+    private func gestureLayer(spatialFocusScale: CGFloat) -> some View {
+        let hitFrame = Self.spatialAffordanceHitFrame(
+            size: CGSize(width: scrubMetrics.scrubFieldWidth, height: Self.minimumHitTargetHeight),
+            scale: spatialFocusScale
+        )
 #if canImport(UIKit)
         StreamPageDotsGestureBridge(
             onTap: handleTap,
@@ -358,32 +389,36 @@ struct StreamPageDotsView: View {
             onScrubEnded: endScrub(at:),
             onScrubCancelled: cancelScrub
         )
-        .frame(width: scrubMetrics.scrubFieldWidth, height: Self.minimumHitTargetHeight)
+        .frame(width: hitFrame.width, height: hitFrame.height)
 #else
         Color.clear
             .contentShape(Rectangle())
             .onTapGesture(perform: handleTap)
             .gesture(scrubGesture)
-            .frame(width: scrubMetrics.scrubFieldWidth, height: Self.minimumHitTargetHeight)
+            .frame(width: hitFrame.width, height: hitFrame.height)
 #endif
     }
 
-    private var controlBody: some View {
-        let controlWidth = baseControlWidth
-        let scrubFieldWidth = scrubMetrics.scrubFieldWidth
+    private func controlBody(spatialFocusScale: CGFloat) -> some View {
+        let controlWidth = baseControlWidth * spatialFocusScale
+        let scrubFieldWidth = scrubMetrics.scrubFieldWidth * spatialFocusScale
+        let controlHeight = Self.controlHeight * spatialFocusScale
+        let minimumHitTargetHeight = Self.minimumHitTargetHeight * spatialFocusScale
+        let waveRenderHeight = Self.waveRenderHeight * spatialFocusScale
         return ZStack(alignment: .bottom) {
-            dockChrome(controlWidth: controlWidth)
+            dockChrome(controlWidth: controlWidth, controlHeight: controlHeight)
                 .frame(maxHeight: .infinity, alignment: .bottom)
 
             dotRow
-                .frame(width: scrubFieldWidth, height: Self.waveRenderHeight, alignment: .bottom)
+                .scaleEffect(spatialFocusScale)
+                .frame(width: scrubFieldWidth, height: waveRenderHeight, alignment: .bottom)
                 .frame(maxHeight: .infinity, alignment: .bottom)
         }
-        .frame(width: scrubFieldWidth, height: Self.minimumHitTargetHeight, alignment: .bottom)
+        .frame(width: scrubFieldWidth, height: minimumHitTargetHeight, alignment: .bottom)
     }
 
-    private func dockChrome(controlWidth: CGFloat) -> some View {
-        let capsuleBounds = Self.unreadEdgeBloomCapsuleBounds(capsuleWidth: controlWidth)
+    private func dockChrome(controlWidth: CGFloat, controlHeight: CGFloat = Self.controlHeight) -> some View {
+        let capsuleBounds = CGRect(x: 0, y: 0, width: controlWidth, height: controlHeight)
         return Color.clear
             .frame(width: capsuleBounds.width, height: capsuleBounds.height)
             .background {

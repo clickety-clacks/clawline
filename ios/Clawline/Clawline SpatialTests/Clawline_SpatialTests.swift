@@ -97,9 +97,7 @@ struct Clawline_SpatialTests {
         let boundsHeight: CGFloat = 700
         let topInset: CGFloat = 40
         let bottomInset: CGFloat = 180
-        let footerHeight = SessionMetadataFooterCell.topPadding
-            + SessionMetadataFooterCell.actionRegionHeight
-            + SessionMetadataFooterCell.versionRowHeight
+        let footerHeight = SessionMetadataFooterCell.fadeRevealRange
             + SessionMetadataFooterCell.bottomPadding
 
         #expect(MessageFlowCollectionViewController.excludesFooterRevealRangeAtRestingBottom == false)

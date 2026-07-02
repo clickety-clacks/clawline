@@ -6285,7 +6285,8 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
     static let actionRegionHeight: CGFloat = 44
     static let versionRowHeight: CGFloat = 22
     static let searchRowHeight: CGFloat = 30
-    static let fadeRevealRange: CGFloat = topPadding + actionRegionHeight + versionRowHeight + searchRowHeight
+    static let footerRowSpacing: CGFloat = 4
+    static let fadeRevealRange: CGFloat = topPadding + searchRowHeight + footerRowSpacing + actionRegionHeight + footerRowSpacing + versionRowHeight
     static let testMenuIconPointSize: CGFloat = 11
 
     private let stackView = UIStackView()
@@ -6372,7 +6373,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         stackView.axis = .vertical
         stackView.alignment = .center
         stackView.distribution = .fill
-        stackView.spacing = 0
+        stackView.spacing = Self.footerRowSpacing
         stackView.setContentHuggingPriority(.required, for: .horizontal)
         stackView.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         contentView.addSubview(stackView)
@@ -6383,7 +6384,6 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         controlsStackView.spacing = 2
         controlsStackView.setContentHuggingPriority(.required, for: .horizontal)
         controlsStackView.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
-        stackView.addArrangedSubview(controlsStackView)
 
         versionStackView.axis = .horizontal
         versionStackView.alignment = .center
@@ -6391,7 +6391,6 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         versionStackView.spacing = 4
         versionStackView.setContentHuggingPriority(.required, for: .horizontal)
         versionStackView.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
-        stackView.addArrangedSubview(versionStackView)
 
         searchField.font = Self.footerFont
         searchField.borderStyle = .none
@@ -6399,11 +6398,14 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         searchField.returnKeyType = .search
         searchField.autocorrectionType = .no
         searchField.autocapitalizationType = .none
+        searchField.textAlignment = .center
         searchField.accessibilityLabel = "Search current stream"
         searchField.addTarget(self, action: #selector(searchFieldDidChange), for: .editingChanged)
         searchField.setContentHuggingPriority(.defaultLow, for: .horizontal)
         searchField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         stackView.addArrangedSubview(searchField)
+        stackView.addArrangedSubview(controlsStackView)
+        stackView.addArrangedSubview(versionStackView)
 
         NSLayoutConstraint.activate([
             stackView.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: Self.horizontalPadding),
@@ -6468,7 +6470,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
 
     static func height(for status: SessionStatus?) -> CGFloat {
         guard footerText(for: status) != nil else { return 0 }
-        return ceil(actionRegionHeight + versionRowHeight + searchRowHeight + topPadding + bottomPadding)
+        return ceil(searchRowHeight + footerRowSpacing + actionRegionHeight + footerRowSpacing + versionRowHeight + topPadding + bottomPadding)
     }
 
     static func shouldAppendFooter(after itemIds: [String], status: SessionStatus?) -> Bool {

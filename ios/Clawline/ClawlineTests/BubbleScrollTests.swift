@@ -1289,6 +1289,59 @@ struct BubbleScrollTests {
         #expect(layout.contentSize.height == sectionInset.top + 96 + 17 + 71 + sectionInset.bottom)
     }
 
+    @Test("T1193: compact Cyberbrain message rows keep a stable 24pt visual gap")
+    func compactMessageRowsKeepStableVisualGap() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
+        let rowGap = MessageBubbleGeometry.adjacentMessageRowSpacing(metrics: metrics)
+        let items = [
+            MessageFlowRowLayoutEngine.Item(index: 0, size: CGSize(width: 220, height: 52)),
+            MessageFlowRowLayoutEngine.Item(index: 1, size: CGSize(width: 260, height: 74)),
+            MessageFlowRowLayoutEngine.Item(index: 2, size: CGSize(width: 240, height: 58))
+        ]
+        let layout = MessageFlowRowLayoutEngine.layout(
+            items: items,
+            contentWidth: 320,
+            sectionInset: MessageFlowCollectionViewController.flowSectionInset(
+                containerPadding: metrics.containerPadding,
+                trailingContentInset: 0
+            ),
+            minimumInteritemSpacing: metrics.flowGap,
+            rowSpacing: { _, _ in rowGap }
+        )
+        let frames = Dictionary(uniqueKeysWithValues: layout.items.map { ($0.index, $0.frame) })
+
+        #expect(rowGap == 24)
+        #expect((frames[1]?.minY ?? 0) - (frames[0]?.maxY ?? 0) == rowGap)
+        #expect((frames[2]?.minY ?? 0) - (frames[1]?.maxY ?? 0) == rowGap)
+    }
+
+    @Test("T1193: row composition uses authoritative bubble heights, not partial tight heights")
+    func rowCompositionUsesAuthoritativeBubbleHeights() {
+        let rowGap: CGFloat = 24
+        let sectionInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+        let authoritativeTallHeight: CGFloat = 104
+        let stalePartialHeight: CGFloat = 42
+        let layout = MessageFlowRowLayoutEngine.layout(
+            items: [
+                MessageFlowRowLayoutEngine.Item(index: 0, size: CGSize(width: 120, height: stalePartialHeight)),
+                MessageFlowRowLayoutEngine.Item(index: 1, size: CGSize(width: 120, height: authoritativeTallHeight)),
+                MessageFlowRowLayoutEngine.Item(index: 2, size: CGSize(width: 180, height: 58))
+            ],
+            contentWidth: 300,
+            sectionInset: sectionInset,
+            minimumInteritemSpacing: 12,
+            rowSpacing: { _, _ in rowGap }
+        )
+        let frames = Dictionary(uniqueKeysWithValues: layout.items.map { ($0.index, $0.frame) })
+        let expectedSecondRowY = sectionInset.top + authoritativeTallHeight + rowGap
+
+        #expect(frames[0]?.height == stalePartialHeight)
+        #expect(frames[1]?.height == authoritativeTallHeight)
+        #expect(frames[2]?.minY == expectedSecondRowY)
+        #expect(frames[2]?.minY != sectionInset.top + stalePartialHeight + rowGap)
+        #expect(layout.contentSize.height == expectedSecondRowY + 58 + sectionInset.bottom)
+    }
+
     @Test("T1193: shorter peer bubbles are not stretched to row height")
     func t1193ShorterPeerBubblesKeepContentOwnedHeights() {
         let items = [

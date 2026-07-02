@@ -125,6 +125,10 @@ struct MessageFlowCacheSeamIntegrityTests {
             "Pair-specific spacing must participate in the layout cache signature."
         )
         #expect(
+            contents.contains("let size = (collectionView.delegate as? UICollectionViewDelegateFlowLayout)?\n                .collectionView?(collectionView, layout: self, sizeForItemAt: indexPath) ?? itemSize\n            layoutItems.append(MessageFlowRowLayoutEngine.Item(index: item, size: size))"),
+            "Full row composition must use delegate sizeForItem output, not a stale or partial cell frame."
+        )
+        #expect(
             contents.contains("guard isNormalMessageItem(at: previousIndex),\n              isNormalMessageItem(at: nextIndex) else"),
             "Only normal message-to-message adjacency should use compact T1484 spacing."
         )

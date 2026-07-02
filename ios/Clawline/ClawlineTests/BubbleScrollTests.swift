@@ -633,6 +633,105 @@ struct BubbleScrollTests {
         #expect(initial != loadedPreview)
     }
 
+    @Test("T1193: BubbleSizingV2 geometry key tracks visible layout inputs")
+    @MainActor
+    func bubbleSizingV2GeometryKeyTracksVisibleLayoutInputs() throws {
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
+        let env = BubbleSizingV2.Environment(
+            containerWidth: 396,
+            containerHeight: 760,
+            singleLinkContainerHeight: 760,
+            topInset: 20,
+            bottomInset: 120,
+            truncationBottomInset: 120,
+            isVisionOS: false,
+            metricsFingerprint: BubbleSizingV2.metricsFingerprint(metrics: metrics, traitCollection: UITraitCollection())
+        )
+        let policy = BubbleSizingV2.BubbleHeightPolicy.resolve(
+            metrics: metrics,
+            env: env,
+            isSingleLinkPreview: true,
+            prefersScreenAwareHeightCap: true,
+            allowsOuterScroll: false
+        )
+        let url = try #require(URL(string: "https://example.com/preview"))
+        let basePlan = BubbleSizingV2.Plan(
+            messageId: "m",
+            presentationFingerprint: 44,
+            sizeClass: .long,
+            isSingleLinkPreview: true,
+            isWide: false,
+            maxWidth: 320,
+            minWidth: 80,
+            heightPolicy: policy,
+            allowsOuterScroll: false,
+            linkPreviewURL: url
+        )
+        let baseSeed = BubbleSizingV2.layoutFingerprintSeed(
+            plan: basePlan,
+            showsHeader: true,
+            hasFailureBadge: false
+        )
+        let baseKey = policy.measurementCacheKey(
+            sessionKey: "s",
+            messageId: "m",
+            presentationFingerprint: basePlan.presentationFingerprint,
+            layoutFingerprintSeed: baseSeed,
+            env: env,
+            linkPreviewStateVersion: 0
+        )
+
+        func key(plan: BubbleSizingV2.Plan = basePlan,
+                 showsHeader: Bool = true,
+                 hasFailureBadge: Bool = false,
+                 linkPreviewStateVersion: Int = 0) -> BubbleSizingV2.CacheKey {
+            let seed = BubbleSizingV2.layoutFingerprintSeed(
+                plan: plan,
+                showsHeader: showsHeader,
+                hasFailureBadge: hasFailureBadge
+            )
+            return plan.heightPolicy.measurementCacheKey(
+                sessionKey: "s",
+                messageId: "m",
+                presentationFingerprint: plan.presentationFingerprint,
+                layoutFingerprintSeed: seed,
+                env: env,
+                linkPreviewStateVersion: linkPreviewStateVersion
+            )
+        }
+
+        let widerPlan = BubbleSizingV2.Plan(
+            messageId: basePlan.messageId,
+            presentationFingerprint: basePlan.presentationFingerprint,
+            sizeClass: basePlan.sizeClass,
+            isSingleLinkPreview: basePlan.isSingleLinkPreview,
+            isWide: basePlan.isWide,
+            maxWidth: 340,
+            minWidth: basePlan.minWidth,
+            heightPolicy: basePlan.heightPolicy,
+            allowsOuterScroll: basePlan.allowsOuterScroll,
+            linkPreviewURL: basePlan.linkPreviewURL
+        )
+        let differentPreviewPlan = BubbleSizingV2.Plan(
+            messageId: basePlan.messageId,
+            presentationFingerprint: basePlan.presentationFingerprint,
+            sizeClass: basePlan.sizeClass,
+            isSingleLinkPreview: basePlan.isSingleLinkPreview,
+            isWide: basePlan.isWide,
+            maxWidth: basePlan.maxWidth,
+            minWidth: basePlan.minWidth,
+            heightPolicy: basePlan.heightPolicy,
+            allowsOuterScroll: basePlan.allowsOuterScroll,
+            linkPreviewURL: try #require(URL(string: "https://example.com/other"))
+        )
+
+        #expect(baseKey != key(showsHeader: false))
+        #expect(baseKey != key(hasFailureBadge: true))
+        #expect(baseKey != key(plan: widerPlan))
+        #expect(baseKey != key(plan: differentPreviewPlan))
+        #expect(baseKey != key(linkPreviewStateVersion: 1))
+    }
+
     @Test("T1193/T149: Same message id in a different session resets stale inner bubble offset")
     @MainActor
     func sessionAwareReuseResetsOffsetForSameMessageId() {

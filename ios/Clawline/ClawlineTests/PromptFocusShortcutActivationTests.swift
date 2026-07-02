@@ -1718,6 +1718,34 @@ struct PromptFocusShortcutActivationTests {
         )
     }
 
+    @Test("Prompt focus shortcut requires Spatial target ownership when gated")
+    func promptFocusShortcutRequiresSpatialTargetOwnershipWhenGated() {
+        #expect(
+            PromptFocusShortcutActivation.action(
+                isShortcutEnabled: true,
+                isAlreadyFirstResponder: false,
+                requiresExplicitTargetOwnership: true,
+                hasExplicitTargetOwnership: false,
+                currentFirstResponderIsTextInput: false,
+                currentFirstResponderOwnsTerminalInput: false,
+                currentFirstResponderOwnsEmbeddedScroll: false,
+                canRetryAfterTextInput: true
+            ) == .skip
+        )
+        #expect(
+            PromptFocusShortcutActivation.action(
+                isShortcutEnabled: true,
+                isAlreadyFirstResponder: false,
+                requiresExplicitTargetOwnership: true,
+                hasExplicitTargetOwnership: true,
+                currentFirstResponderIsTextInput: false,
+                currentFirstResponderOwnsTerminalInput: false,
+                currentFirstResponderOwnsEmbeddedScroll: false,
+                canRetryAfterTextInput: true
+            ) == .activate
+        )
+    }
+
     @Test("Prompt focus shortcut retries after Esc text input handoff")
     func promptFocusShortcutRetriesAfterEscTextInputHandoff() {
         #expect(

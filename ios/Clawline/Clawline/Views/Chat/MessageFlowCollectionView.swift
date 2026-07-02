@@ -407,6 +407,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var currentSendIndicatorRevision: Int = 0
     private let bubbleSizingV2Enabled = BubbleSizingV2.isEnabled
     private let bubbleSizingV2MeasurementCache = BubbleSizingV2.LRUCache<BubbleSizingV2.CacheKey, BubbleSizingV2.Measurement>(maxEntries: 800)
+    private let bubbleSizingV2LayoutStateCache = BubbleSizingV2.LRUCache<BubbleSizingV2.CacheKey, BubbleSizingV2.LayoutState>(maxEntries: 800)
     private let bubbleSizingV2LinkPreviewHeightCache = BubbleSizingV2.LinkPreviewHeightCache()
     private struct ScrollSnapshot: Equatable {
         var atBottom: Bool
@@ -1227,6 +1228,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     private func clearAllBubbleV2State() {
         bubbleSizingV2MeasurementCache.removeAll()
+        bubbleSizingV2LayoutStateCache.removeAll()
         bubbleSizingV2KeysByMessageId.removeAll()
         bubbleSizingV2LinkPreviewStateVersionByMessageId.removeAll()
     }
@@ -1247,6 +1249,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         bubbleSizingV2MeasurementCache.value(forKey: key)
     }
 
+    private func bubbleV2LayoutState(for key: BubbleSizingV2.CacheKey) -> BubbleSizingV2.LayoutState? {
+        bubbleSizingV2LayoutStateCache.value(forKey: key)
+    }
+
     private func recordBubbleV2Measurement(_ measurement: BubbleSizingV2.Measurement,
                                            key: BubbleSizingV2.CacheKey,
                                            messageId: String)
@@ -1255,10 +1261,19 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         bubbleSizingV2KeysByMessageId[messageId, default: []].insert(key)
     }
 
+    private func recordBubbleV2LayoutState(_ layoutState: BubbleSizingV2.LayoutState,
+                                           key: BubbleSizingV2.CacheKey,
+                                           messageId: String)
+    {
+        bubbleSizingV2LayoutStateCache.setValue(layoutState, forKey: key)
+        recordBubbleV2Measurement(layoutState.measurement, key: key, messageId: messageId)
+    }
+
     private func removeBubbleV2Measurements(for messageId: String) {
         guard let keys = bubbleSizingV2KeysByMessageId.removeValue(forKey: messageId) else { return }
         for key in keys {
             bubbleSizingV2MeasurementCache.removeValue(forKey: key)
+            bubbleSizingV2LayoutStateCache.removeValue(forKey: key)
         }
     }
 
@@ -4172,26 +4187,18 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             let replyReference = viewModel.replyReference(for: message)
             let isShowingOnlyUserMessages = self.readState(for: message.sessionKey).isShowingOnlyUserMessages
             if self.bubbleSizingV2Enabled {
-                let plan = self.bubbleSizingV2Plan(
+                let state = self.authoritativeBubbleSizingV2LayoutState(
                     message: message,
                     presentation: presentation,
                     metrics: metrics,
                     env: env,
-                    showsHeader: !hideHeader
-                )
-                let state = self.bubbleSizingV2LayoutState(
-                    message: message,
-                    presentation: presentation,
-                    metrics: metrics,
-                    env: env,
-                    plan: plan,
                     sendIndicatorState: sendIndicatorState,
                     showsHeader: !hideHeader
                 )
                 layoutStateV2 = state
                 configureWidth = state.measurement.measuredBubbleWidth
                 truncationHeightOverrideV1 = nil
-                bubbleHeightPolicyForConfigure = plan.heightPolicy
+                bubbleHeightPolicyForConfigure = state.plan.heightPolicy
             } else {
                 layoutStateV2 = nil
                 // Use cached size width for consistent sizing with measurement
@@ -4739,19 +4746,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             let presentation = viewModel.presentation(for: message, metrics: metrics)
             let hideHeader = shouldHideHeader(for: message, presentation: presentation)
             let sendIndicatorState = viewModel.sendIndicatorState(for: message.id)
-            let plan = bubbleSizingV2Plan(
+            let layoutState = authoritativeBubbleSizingV2LayoutState(
                 message: message,
                 presentation: presentation,
                 metrics: metrics,
                 env: env,
-                showsHeader: !hideHeader
-            )
-            let layoutState = bubbleSizingV2LayoutState(
-                message: message,
-                presentation: presentation,
-                metrics: metrics,
-                env: env,
-                plan: plan,
                 sendIndicatorState: sendIndicatorState,
                 showsHeader: !hideHeader
             )
@@ -4979,6 +4978,30 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         return plan.heightPolicy.linkPreviewViewportMaxHeight
     }
 
+    private func authoritativeBubbleSizingV2LayoutState(message: Message,
+                                                        presentation: MessagePresentation,
+                                                        metrics: ChatFlowTheme.Metrics,
+                                                        env: BubbleSizingV2.Environment,
+                                                        sendIndicatorState: MessageSendIndicatorState?,
+                                                        showsHeader: Bool) -> BubbleSizingV2.LayoutState {
+        let plan = bubbleSizingV2Plan(
+            message: message,
+            presentation: presentation,
+            metrics: metrics,
+            env: env,
+            showsHeader: showsHeader
+        )
+        return bubbleSizingV2LayoutState(
+            message: message,
+            presentation: presentation,
+            metrics: metrics,
+            env: env,
+            plan: plan,
+            sendIndicatorState: sendIndicatorState,
+            showsHeader: showsHeader
+        )
+    }
+
     private func bubbleSizingV2LayoutState(message: Message,
                                           presentation: MessagePresentation,
                                           metrics: ChatFlowTheme.Metrics,
@@ -5000,15 +5023,20 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             env: env,
             linkPreviewStateVersion: initialLinkVersion
         )
-        if let cached = bubbleV2Measurement(for: key) {
-            return bubbleSizingV2MakeLayoutState(
+        if let cached = bubbleV2LayoutState(for: key) {
+            return cached
+        }
+        if let cachedMeasurement = bubbleV2Measurement(for: key) {
+            let layoutState = bubbleSizingV2MakeLayoutState(
                 message: message,
                 presentation: presentation,
                 metrics: metrics,
                 env: env,
                 plan: plan,
-                measurement: cached
+                measurement: cachedMeasurement
             )
+            recordBubbleV2LayoutState(layoutState, key: key, messageId: message.id)
+            return layoutState
         }
 
         let measured = bubbleSizingV2Measure(
@@ -5020,7 +5048,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             sendIndicatorState: sendIndicatorState,
             showsHeader: showsHeader
         )
-        recordBubbleV2Measurement(measured.measurement, key: key, messageId: message.id)
+        recordBubbleV2LayoutState(measured, key: key, messageId: message.id)
         return measured
     }
 
@@ -6991,7 +7019,6 @@ enum FooterActionHitTesting {
         }
     }
 }
-
 
 struct MessageFlowRowLayoutEngine {
     struct Item: Equatable {

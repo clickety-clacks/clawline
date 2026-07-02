@@ -12,6 +12,9 @@
 - Width/height changes are allowed **only** for content changes or device width changes; internal measurement jitter must be **debounced**.
 - SwiftUI may perform multiple internal passes, but the **external layout must converge**.
 - Collection view layout is the only owner of placement; SwiftUI does not reposition items.
+- `sizeForItem` and visible cell rendering must consume the same authoritative geometry answer for a message/environment. Visible cells must not run a second sizing algorithm and silently "self-heal" release layouts after scroll.
+- Async content changes that can alter geometry, such as link previews, images, salient spans, truncation, or rich-content chrome, must be represented as explicit content/geometry version changes in the sizing key.
+- During active scrolling, async geometry changes must be coalesced. Link-bearing and other async-rich bubbles may resize after scrolling settles, but the resize must be a deliberate versioned geometry commit, not repeated live remeasurement that causes scroll flapping.
 - Horizontal placement honors the flow rules (row wrapping); vertical gaps come only from row spacing.
 - Bubble visual bounds **must match** the layout bounds (no invisible trailing space).
 - Padding is **only** the standard flow gap, applied evenly horizontally and vertically.
@@ -29,6 +32,7 @@
 - Debounce measurement-driven invalidations:
   - Cells re-measure in `layoutSubviews` and only invalidate when deltas exceed ~1pt.
   - Mismatch reports update the cache and call `invalidateLayout`.
+  - Mismatch reporting is a diagnostic/safety net. It must not become the normal path that makes visible cells disagree with first-pass/offscreen sizing.
 - Width changes (rotation / bounds changes) clear cached sizes by re-running `updateLayout()` and reconfiguring items.
 
 ## Open items / to verify

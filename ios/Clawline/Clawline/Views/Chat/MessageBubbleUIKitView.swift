@@ -71,7 +71,7 @@ enum MessageBubbleGeometry {
     }
 
     static func adjacentMessageRowSpacing(metrics: ChatFlowTheme.Metrics) -> CGFloat {
-        max(metrics.containerPadding, 24)
+        metrics.containerPadding
     }
 
     static func typingHeight(
@@ -645,6 +645,10 @@ final class MessageBubbleUIKitContainerView: UIView {
 
     func bubbleFrameInContainer() -> CGRect {
         bubbleView.renderedBubbleFrame(in: self)
+    }
+
+    func renderedGeometryForTests(in view: UIView) -> MessageBubbleRenderedGeometry {
+        bubbleView.renderedGeometryForTests(in: view)
     }
 }
 
@@ -3769,12 +3773,17 @@ private extension UIViewController {
 final class MessageBubbleUIKitCell: UICollectionViewCell {
     static let reuseIdentifier = "MessageBubbleUIKitCell"
     private static let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "FlowLayout")
+    private static var t1193RowBoundsDebugEnabled: Bool {
+        ProcessInfo.processInfo.arguments.contains("--t1193-row-bounds-debug")
+            || ProcessInfo.processInfo.environment["CLAWLINE_T1193_ROW_BOUNDS_DEBUG"] == "1"
+    }
 
     private let containerView = MessageBubbleUIKitContainerView()
     private var messageId: String = ""
     private var messageSessionKey: String = ""
     private var messageSnippet: String = ""
     private var lastMismatch: (bounds: CGRect, bubble: CGRect)?
+    private var lastDebugGeometry: (bounds: CGRect, bubble: CGRect, content: CGRect, body: CGRect)?
     private var onRequestLayout: ((String) -> Void)?
     private var flashOverlayView: UIView?
 
@@ -3782,6 +3791,11 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
         super.init(frame: frame)
         contentView.backgroundColor = .clear
         backgroundColor = .clear
+        if Self.t1193RowBoundsDebugEnabled {
+            contentView.layer.borderColor = UIColor.systemRed.cgColor
+            contentView.layer.borderWidth = 2
+            contentView.layer.zPosition = 999
+        }
 
         containerView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(containerView)
@@ -3866,6 +3880,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
         messageSessionKey = ""
         messageSnippet = ""
         lastMismatch = nil
+        lastDebugGeometry = nil
         onRequestLayout = nil
     }
 
@@ -3946,6 +3961,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        emitT1193RowBoundsDebugIfNeeded()
         let bubbleFrame = containerView.bubbleFrameInContainer()
         let bubbleInCell = containerView.convert(bubbleFrame, to: contentView)
         let bounds = contentView.bounds
@@ -3972,14 +3988,34 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
         let id = messageId
         let sessionKey = messageSessionKey
         let snippet = messageSnippet
-        let requestLayout = onRequestLayout
-        Self.logger.info("UIKit bubble mismatch id=\(id) snippet=\"\(snippet)\"")
+        Self.logger.info("UIKit bubble mismatch id=\(id) session=\(sessionKey) snippet=\"\(snippet)\"")
         Self.logger.info("UIKit bubble mismatch bounds=\(boundsDesc)")
         Self.logger.info("UIKit bubble mismatch bubble=\(bubbleDesc)")
-        DispatchQueue.main.async { [weak self] in
-            guard let self, self.messageId == id, self.messageSessionKey == sessionKey else { return }
-            requestLayout?(id)
+    }
+
+    private func emitT1193RowBoundsDebugIfNeeded() {
+        guard Self.t1193RowBoundsDebugEnabled else { return }
+        let geometry = containerView.renderedGeometryForTests(in: contentView)
+        let bounds = contentView.bounds
+        containerView.layer.borderColor = UIColor.systemYellow.cgColor
+        containerView.layer.borderWidth = 1
+        let current = (
+            bounds: bounds,
+            bubble: geometry.bubbleFrame,
+            content: geometry.contentFrame,
+            body: geometry.bodyFrame
+        )
+        if let lastDebugGeometry,
+           abs(lastDebugGeometry.bounds.width - current.bounds.width) < 1,
+           abs(lastDebugGeometry.bounds.height - current.bounds.height) < 1,
+           abs(lastDebugGeometry.bubble.minY - current.bubble.minY) < 1,
+           abs(lastDebugGeometry.bubble.height - current.bubble.height) < 1,
+           abs(lastDebugGeometry.content.height - current.content.height) < 1,
+           abs(lastDebugGeometry.body.height - current.body.height) < 1 {
+            return
         }
+        lastDebugGeometry = current
+        Self.logger.info("T1193 row bounds id=\(self.messageId) row=\(String(describing: bounds)) bubble=\(String(describing: geometry.bubbleFrame)) content=\(String(describing: geometry.contentFrame)) body=\(String(describing: geometry.bodyFrame)) snippet=\"\(self.messageSnippet)\"")
     }
 }
 

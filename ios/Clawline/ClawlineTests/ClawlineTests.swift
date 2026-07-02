@@ -246,14 +246,14 @@ struct ClawlineTests {
 
         #expect(
             MessageBubbleGeometry.adjacentMessageRowSpacing(metrics: compactMetrics)
-                == max(compactMetrics.containerPadding, 24)
+                == compactMetrics.containerPadding
         )
         #expect(
             MessageBubbleGeometry.adjacentMessageRowSpacing(metrics: regularMetrics)
-                == max(regularMetrics.containerPadding, 24)
+                == regularMetrics.containerPadding
         )
-        #expect(MessageBubbleGeometry.adjacentMessageRowSpacing(metrics: compactMetrics) >= 24)
-        #expect(MessageBubbleGeometry.adjacentMessageRowSpacing(metrics: regularMetrics) >= 24)
+        #expect(MessageBubbleGeometry.adjacentMessageRowSpacing(metrics: compactMetrics) == 12)
+        #expect(MessageBubbleGeometry.adjacentMessageRowSpacing(metrics: regularMetrics) == 24)
     }
 
     @Test("T1485: normal bubble bottom blank space is only owned chrome inset")

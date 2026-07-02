@@ -995,9 +995,9 @@ struct BubbleScrollTests {
         #expect(bottomChrome <= metrics.bubblePaddingBottom + 12)
     }
 
-    @Test("T1193: live cell mismatch requests production remeasurement")
+    @Test("T1193: live cell mismatch is diagnostic, not production remeasurement")
     @MainActor
-    func liveCellMismatchRequestsProductionRemeasurement() async {
+    func liveCellMismatchDoesNotRequestProductionRemeasurement() async {
         let metrics = ChatFlowTheme.Metrics(isCompact: true)
         let message = Message(
             id: "t1193-live-cell-mismatch",
@@ -1041,7 +1041,7 @@ struct BubbleScrollTests {
 
         let geometry = renderedBubbleView(in: cell)?.renderedGeometryForTests(in: cell.contentView)
         #expect(geometry?.bubbleFrame.height ?? cell.bounds.height < cell.bounds.height - 100)
-        #expect(requestedIds == [message.id])
+        #expect(requestedIds.isEmpty)
     }
 
     @Test("T1193: stale cell mismatch does not request layout after session reuse")
@@ -1234,6 +1234,107 @@ struct BubbleScrollTests {
         #expect(measured.height < 150)
     }
 
+    @Test("T1193: two-line user BubbleSizingV2 bubble contains all rendered text")
+    @MainActor
+    func twoLineUserBubbleSizingV2ContainsRenderedText() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
+        let message = Message(
+            id: "t1193-two-line-user",
+            role: .user,
+            content: "E2E smoke shrdlu-ui-e2e-1782938516501. Reply only: shrdlu-ui-e2e-1782938516501-reply",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:flynn:s_111df227"
+        )
+        let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+        let sizeClass = MessageFlowRules.sizeClass(for: presentation)
+        let env = BubbleSizingV2.Environment(
+            containerWidth: 366,
+            containerHeight: 640,
+            singleLinkContainerHeight: 640,
+            topInset: 0,
+            bottomInset: 0,
+            truncationBottomInset: 0,
+            isVisionOS: false,
+            metricsFingerprint: BubbleSizingV2.metricsFingerprint(metrics: metrics, traitCollection: UITraitCollection())
+        )
+        let heightPolicy = BubbleSizingV2.BubbleHeightPolicy.resolve(
+            metrics: metrics,
+            env: env,
+            isSingleLinkPreview: false,
+            prefersScreenAwareHeightCap: false,
+            allowsOuterScroll: false
+        )
+        let plan = BubbleSizingV2.Plan(
+            messageId: message.id,
+            presentationFingerprint: 1,
+            sizeClass: sizeClass,
+            isSingleLinkPreview: false,
+            isWide: false,
+            maxWidth: 366,
+            minWidth: 40,
+            heightPolicy: heightPolicy,
+            allowsOuterScroll: false,
+            linkPreviewURL: nil
+        )
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 366, height: 1))
+        let provisional = BubbleSizingV2.LayoutState(
+            plan: plan,
+            measurement: BubbleSizingV2.Measurement(
+                measuredCellSize: .zero,
+                measuredBubbleWidth: 366,
+                contentHeight: 0,
+                chromeHeight: 0,
+                outerScrollEnabled: false,
+                outerScrollViewportHeight: heightPolicy.heightCap,
+                isFinal: true
+            ),
+            linkPreviewCacheKey: nil,
+            linkPreviewEstimatedHeight: nil,
+            linkPreviewMinHeight: 40,
+            linkPreviewMaxHeight: heightPolicy.heightCap
+        )
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: sizeClass,
+            metrics: metrics,
+            maxWidth: 366,
+            bubbleHeightPolicy: heightPolicy,
+            bubbleSizingV2: provisional,
+            showsHeader: true,
+            paddingScale: 1,
+            minWidthOverride: nil,
+            maxWidthOverride: nil,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+        let measured = bubble.systemLayoutSizeFitting(
+            CGSize(width: 366, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        bubble.frame = CGRect(origin: .zero, size: measured)
+        bubble.layoutIfNeeded()
+
+        let geometry = bubble.renderedGeometryForTests(in: bubble)
+        guard let body = textViews(in: bubble).first(where: {
+            $0.attributedText.string.contains("Reply only")
+        }) else {
+            Issue.record("Expected two-line user body text view")
+            return
+        }
+        let textFrame = renderedGlyphFrame(for: body, in: bubble)
+
+        #expect(textFrame.maxY <= geometry.bubbleFrame.maxY - metrics.bubblePaddingBottom + 1)
+        #expect(measured.height >= textFrame.height + metrics.bubblePaddingTop + metrics.bubblePaddingBottom)
+    }
+
     @Test("BubbleSizingV2 live short-bubble remeasure keeps plan min width below legacy floor")
     func bubbleSizingV2LiveRemeasureUsesPlanMinWidth() {
         let abovePlanMin = MessageFlowCollectionViewController.enforcedLiveMeasuredWidth(
@@ -1289,8 +1390,8 @@ struct BubbleScrollTests {
         #expect(layout.contentSize.height == sectionInset.top + 96 + 17 + 71 + sectionInset.bottom)
     }
 
-    @Test("T1193: compact Cyberbrain message rows keep a stable 24pt visual gap")
-    func compactMessageRowsKeepStableVisualGap() {
+    @Test("T1193: compact Cyberbrain message rows use documented container padding gap")
+    func compactMessageRowsUseDocumentedContainerPaddingGap() {
         let metrics = ChatFlowTheme.Metrics(isCompact: true)
         let rowGap = MessageBubbleGeometry.adjacentMessageRowSpacing(metrics: metrics)
         let items = [
@@ -1310,7 +1411,8 @@ struct BubbleScrollTests {
         )
         let frames = Dictionary(uniqueKeysWithValues: layout.items.map { ($0.index, $0.frame) })
 
-        #expect(rowGap == 24)
+        #expect(rowGap == metrics.containerPadding)
+        #expect(rowGap == 12)
         #expect((frames[1]?.minY ?? 0) - (frames[0]?.maxY ?? 0) == rowGap)
         #expect((frames[2]?.minY ?? 0) - (frames[1]?.maxY ?? 0) == rowGap)
     }

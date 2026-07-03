@@ -594,10 +594,55 @@ struct StreamPageDotsViewTests {
         #expect(routeController.route == .closed)
     }
 
-    @Test("T1136 stream popup search focus follows software keyboard visibility")
-    func streamPopupSearchFocusFollowsSoftwareKeyboardVisibility() {
-        #expect(StreamPopupFocusHandoff.shouldFocusSearchOnOpen(isSoftwareKeyboardVisible: true))
-        #expect(StreamPopupFocusHandoff.shouldFocusSearchOnOpen(isSoftwareKeyboardVisible: false) == false)
+    @Test("R1136-ARCH-01: popup search focus follows platform-aware policy on open")
+    func streamPopupSearchFocusFollowsPlatformAwarePolicy() {
+        // R1 / R2: iOS software-keyboard handoff rule — focus the filter when
+        // the software keyboard is already visible so opening does not bounce.
+        #expect(
+            StreamPopupFocusPolicy.shouldFocusSearchOnOpen(
+                isSoftwareKeyboardVisible: true,
+                isHardwareKeyboardAvailable: false
+            )
+        )
+        // R1: Mac/Catalyst regression — hardware-keyboard platforms must
+        // autofocus the filter even when no software keyboard is visible.
+        #expect(
+            StreamPopupFocusPolicy.shouldFocusSearchOnOpen(
+                isSoftwareKeyboardVisible: false,
+                isHardwareKeyboardAvailable: true
+            )
+        )
+        // R1136-03 narrow iOS behavior preserved — do not summon the software
+        // keyboard solely for the filter on a touch-only target.
+        #expect(
+            StreamPopupFocusPolicy.shouldFocusSearchOnOpen(
+                isSoftwareKeyboardVisible: false,
+                isHardwareKeyboardAvailable: false
+            ) == false
+        )
+        // Already-visible keyboard plus hardware keyboard still focuses search.
+        #expect(
+            StreamPopupFocusPolicy.shouldFocusSearchOnOpen(
+                isSoftwareKeyboardVisible: true,
+                isHardwareKeyboardAvailable: true
+            )
+        )
+    }
+
+    @Test("R1136-ARCH-01: OpenFocusTarget enum distinguishes autofocus from no-focus")
+    func openFocusTargetEnumDistinguishesAutofocusFromNoFocus() {
+        #expect(
+            StreamPopupFocusPolicy.focusTargetOnOpen(
+                isSoftwareKeyboardVisible: false,
+                isHardwareKeyboardAvailable: true
+            ) == .searchField
+        )
+        #expect(
+            StreamPopupFocusPolicy.focusTargetOnOpen(
+                isSoftwareKeyboardVisible: false,
+                isHardwareKeyboardAvailable: false
+            ) == .idle
+        )
     }
 
     @Test("T1136 software keyboard visibility is safe-area compensated")
@@ -628,50 +673,6 @@ struct StreamPageDotsViewTests {
         )
     }
 
-    @Test("T1136 stream popup restores composer only for displaced focus while keyboard remains visible")
-    func streamPopupRestoresComposerOnlyForDisplacedFocusWhileKeyboardVisible() {
-        #expect(
-            StreamPopupFocusHandoff.shouldRestoreComposerOnClose(
-                didDisplaceComposerFocus: true,
-                isSoftwareKeyboardVisible: true
-            )
-        )
-        #expect(
-            StreamPopupFocusHandoff.shouldRestoreComposerOnClose(
-                didDisplaceComposerFocus: true,
-                isSoftwareKeyboardVisible: false
-            ) == false
-        )
-        #expect(
-            StreamPopupFocusHandoff.shouldRestoreComposerOnClose(
-                didDisplaceComposerFocus: false,
-                isSoftwareKeyboardVisible: true
-            ) == false
-        )
-    }
-
-    @Test("T1136 tracked popup close restores composer from presentation flag")
-    func streamPopupTrackedCloseRestoresComposerFromPresentationFlag() {
-        #expect(
-            StreamPopupFocusHandoff.shouldRestoreComposerOnCloseAfterTrackedKeyboardState(
-                didDisplaceComposerFocus: true,
-                isSoftwareKeyboardVisible: true
-            )
-        )
-        #expect(
-            StreamPopupFocusHandoff.shouldRestoreComposerOnCloseAfterTrackedKeyboardState(
-                didDisplaceComposerFocus: false,
-                isSoftwareKeyboardVisible: true
-            ) == false
-        )
-        #expect(
-            StreamPopupFocusHandoff.shouldRestoreComposerOnCloseAfterTrackedKeyboardState(
-                didDisplaceComposerFocus: true,
-                isSoftwareKeyboardVisible: false
-            ) == false
-        )
-    }
-
     @Test("T1146 stream switch preserves only pre-existing software keyboard state")
     func streamSwitchRestoresComposerOnlyWhenKeyboardWasAlreadyUp() {
         #expect(
@@ -683,52 +684,6 @@ struct StreamPageDotsViewTests {
             StreamSwitchKeyboardFocusPolicy.shouldRestoreComposerAfterSwitch(
                 wasSoftwareKeyboardVisible: false
             ) == false
-        )
-    }
-
-    @Test("T1136 popup close requests composer focus after popup dismissal")
-    func streamPopupCloseRequestsComposerFocusAfterDismissal() {
-        #expect(
-            StreamPopupFocusHandoff.closeActions(shouldRestoreComposerFocus: true) == [
-                .closePopup,
-                .requestComposerFocusAfterDismissal
-            ]
-        )
-        #expect(
-            StreamPopupFocusHandoff.closeActions(shouldRestoreComposerFocus: false) == [
-                .closePopup
-            ]
-        )
-    }
-
-    @Test("T1136 dots-indicator popup close preserves composer focus during dismissal")
-    func streamPopupDotsIndicatorClosePreservesComposerFocusDuringDismissal() {
-        #expect(
-            StreamPopupFocusHandoff.closeActions(
-                shouldRestoreComposerFocus: true,
-                preserveComposerFocusDuringDismissal: true
-            ) == [
-                .requestComposerFocusBeforeDismissal,
-                .closePopup
-            ]
-        )
-        #expect(
-            StreamPopupFocusHandoff.closeActions(
-                shouldRestoreComposerFocus: false,
-                preserveComposerFocusDuringDismissal: true
-            ) == [
-                .closePopup
-            ]
-        )
-    }
-
-    @Test("T1136 composer focus request closes popup before focusing composer")
-    func composerFocusRequestClosesOpenStreamPopup() {
-        #expect(
-            StreamPopupFocusHandoff.shouldClosePopupForComposerFocusRequest(isStreamPopupPresented: true)
-        )
-        #expect(
-            StreamPopupFocusHandoff.shouldClosePopupForComposerFocusRequest(isStreamPopupPresented: false) == false
         )
     }
 

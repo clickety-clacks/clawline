@@ -27,10 +27,24 @@ struct StreamManagerSheet: View {
     let searchFocusRequestID: Int?
     let maxAvailableHeight: CGFloat
     let maxAvailableWidth: CGFloat
+    /// Active popup presentation identity from the focus coordinator.
+    /// Carries R1136-ARCH-05 identity into child focus reports so the parent
+    /// can decide policy without children holding long-lived focus counters.
+    let presentationID: UInt
+    /// True only while the popup focus coordinator permits the shortcut
+    /// key-command bridge to take first responder. Drives R1136-ARCH-06 / E6:
+    /// the hidden bridge must stand down during dismissal and composer
+    /// restoration so it cannot opportunistically grab first responder.
+    let isShortcutOwnershipActive: Bool
     let onSelectStream: (String) -> Void
     let onRequestTrackPicker: () -> Void
     let onConsumeSearchFocusRequest: () -> Void
     let onShortcutOwnershipChange: ([String]) -> Void
+    /// R1136-ARCH-06: child focus reporting. StreamManagerSheet reports actual
+    /// search-focus applied/resigned events back to the focus coordinator with
+    /// the active presentation ID. Children report; the parent decides policy.
+    let onSearchFocusApplied: (UInt) -> Void
+    let onSearchFocusResigned: (UInt) -> Void
 
     @State private var draftName = ""
     @State private var searchQuery = ""
@@ -294,23 +308,17 @@ struct StreamManagerSheet: View {
         .background {
             selectorShortcutKeyCommandBridge
         }
-        .onAppear {
-            refreshShortcutAvailabilityAndPublish()
-            syncSelectionWithFilteredStreams()
-            handleInitialSearchFocus(searchFocusRequestID)
-        }
-        .onDisappear {
-            onShortcutOwnershipChange([])
-            resetInlineEditing()
-            searchQuery = ""
-            isSearchFieldFocused = false
-            isSearchFieldFocusEnabled = false
-            selectedStreamSessionKey = nil
-            didActivateSelection = false
-        }
-        .onChange(of: searchFocusRequestID) { _, requestID in
-            handleSearchFocusRequest(requestID)
-        }
+        .modifier(
+            StreamManagerSheetLifecycleModifier(
+                searchFocusRequestID: searchFocusRequestID,
+                isSearchFieldFocused: isSearchFieldFocused,
+                presentationID: presentationID,
+                onAppear: { [self] in handleAppearance() },
+                onDisappear: { [self] in handleDisappearance() },
+                onSearchFocusRequestIDChange: { [self] requestID in handleSearchFocusRequest(requestID) },
+                onSearchFocusChange: { [self] focused in reportSearchFocus(focused) }
+            )
+        )
         .onChange(of: searchQuery) { _, _ in
             syncSelectionWithFilteredStreams()
             publishShortcutOwnership()
@@ -426,7 +434,8 @@ struct StreamManagerSheet: View {
     private var selectorShortcutKeyCommandBridge: some View {
         StreamSelectorShortcutKeyCommandBridge(
             selectableSessionKeys: selectorShortcutsAvailable ? selectableShortcutSessionKeys : [],
-            isSearchFieldFocused: isSearchFieldFocused
+            isSearchFieldFocused: isSearchFieldFocused,
+            isShortcutOwnershipActive: isShortcutOwnershipActive
         )
         .frame(width: 1, height: 1)
         .opacity(0.001)
@@ -681,6 +690,40 @@ struct StreamManagerSheet: View {
         handleSearchFocusRequest(requestID)
     }
 
+    private func handleAppearance() {
+        refreshShortcutAvailabilityAndPublish()
+        syncSelectionWithFilteredStreams()
+        handleInitialSearchFocus(searchFocusRequestID)
+    }
+
+    private func handleDisappearance() {
+        onShortcutOwnershipChange([])
+        // R1136-ARCH-06: report focus resign on teardown so the parent's
+        // transaction reflects actual search-field state, not a stale
+        // acknowledgement that outlives the popup.
+        if isSearchFieldFocused {
+            onSearchFocusResigned(presentationID)
+        }
+        resetInlineEditing()
+        searchQuery = ""
+        isSearchFieldFocused = false
+        isSearchFieldFocusEnabled = false
+        selectedStreamSessionKey = nil
+        didActivateSelection = false
+    }
+
+    /// R1136-ARCH-06: child focus reporting. StreamManagerSheet reports actual
+    /// search-focus applied/resigned events to the parent focus coordinator
+    /// with the active presentation ID. Children report; the parent decides
+    /// policy (e.g., whether the shortcut bridge may take first responder).
+    private func reportSearchFocus(_ focused: Bool) {
+        if focused {
+            onSearchFocusApplied(presentationID)
+        } else {
+            onSearchFocusResigned(presentationID)
+        }
+    }
+
     private func syncSelectionWithFilteredStreams() {
         selectedStreamSessionKey = StreamSelectorLayout.resolvedSelection(
             preferredSessionKey: selectedStreamSessionKey,
@@ -821,6 +864,32 @@ struct StreamManagerSheet: View {
             .allowsHitTesting(false)
     }
 
+}
+
+/// Extracts the focus/lifecycle modifiers from `StreamManagerSheet.body` so the
+/// body's view tree stays under the SwiftUI type-checker's complexity budget.
+/// Carries the popup presentation identity (`R1136-ARCH-05`) into the search
+/// focus reports so the parent focus coordinator can decide policy.
+private struct StreamManagerSheetLifecycleModifier: ViewModifier {
+    let searchFocusRequestID: Int?
+    let isSearchFieldFocused: Bool
+    let presentationID: UInt
+    let onAppear: () -> Void
+    let onDisappear: () -> Void
+    let onSearchFocusRequestIDChange: (Int?) -> Void
+    let onSearchFocusChange: (Bool) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear(perform: onAppear)
+            .onDisappear(perform: onDisappear)
+            .onChange(of: searchFocusRequestID) { _, requestID in
+                onSearchFocusRequestIDChange(requestID)
+            }
+            .onChange(of: isSearchFieldFocused) { _, focused in
+                onSearchFocusChange(focused)
+            }
+    }
 }
 
 struct StreamPopupRowStatusDotIdentity: Hashable {
@@ -1099,24 +1168,33 @@ private struct StreamSelectorSearchField: UIViewRepresentable {
 private struct StreamSelectorShortcutKeyCommandBridge: UIViewRepresentable {
     let selectableSessionKeys: [String]
     let isSearchFieldFocused: Bool
+    /// R1136-ARCH-06 / E6: parent-owned permit. The hidden key-command bridge
+    /// may only take first responder when the popup focus coordinator says
+    /// selector shortcuts own input AND the search field is not currently
+    /// focused. During dismissal and composer restoration this is false, so
+    /// the bridge cannot opportunistically grab first responder.
+    let isShortcutOwnershipActive: Bool
 
     func makeUIView(context: Context) -> KeyCommandView {
         let view = KeyCommandView()
         view.selectableSessionKeys = selectableSessionKeys
         view.isSearchFieldFocused = isSearchFieldFocused
+        view.isShortcutOwnershipActive = isShortcutOwnershipActive
         return view
     }
 
     func updateUIView(_ uiView: KeyCommandView, context: Context) {
         uiView.selectableSessionKeys = selectableSessionKeys
         uiView.isSearchFieldFocused = isSearchFieldFocused
+        uiView.isShortcutOwnershipActive = isShortcutOwnershipActive
         uiView.refreshKeyCommandsIfNeeded()
-        uiView.activateIfSearchFieldInactive()
+        uiView.activateIfEligible()
     }
 
     final class KeyCommandView: UIView {
         var selectableSessionKeys: [String] = []
         var isSearchFieldFocused = false
+        var isShortcutOwnershipActive = false
         private var keyCommandSignature: [String] = []
 
         override var canBecomeFirstResponder: Bool { true }
@@ -1135,13 +1213,20 @@ private struct StreamSelectorShortcutKeyCommandBridge: UIViewRepresentable {
 
         override func didMoveToWindow() {
             super.didMoveToWindow()
-            activateIfSearchFieldInactive()
+            activateIfEligible()
         }
 
-        func activateIfSearchFieldInactive() {
-            guard !isSearchFieldFocused else { return }
+        func activateIfEligible() {
+            // R1136-ARCH-06 / E6: subordinate activation. The bridge must not
+            // become first responder unless the parent coordinator permits it
+            // AND the search field is not currently focused. This stops the
+            // hidden responder from stealing focus from the search field or
+            // composer during dismissal and composer restoration.
+            guard isShortcutOwnershipActive, !isSearchFieldFocused else { return }
             DispatchQueue.main.async { [weak self] in
-                guard let self, !self.isSearchFieldFocused else { return }
+                guard let self,
+                      self.isShortcutOwnershipActive,
+                      !self.isSearchFieldFocused else { return }
                 self.becomeFirstResponder()
             }
         }

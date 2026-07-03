@@ -132,6 +132,12 @@ struct StreamManagerSheet: View {
         resolvedHardwareKeyboardShortcutsAvailable
     }
 
+    private var selectorShortcutBridgeShouldOwnFirstResponder: Bool {
+        selectorShortcutsAvailable
+            && searchFocusRequestID == nil
+            && !isSearchFieldFocused
+    }
+
     private var shouldRenderSearchTextField: Bool {
         isSearchFieldFocusEnabled
             || StreamPopupSearchPresentationFocusPolicy
@@ -426,7 +432,8 @@ struct StreamManagerSheet: View {
     private var selectorShortcutKeyCommandBridge: some View {
         StreamSelectorShortcutKeyCommandBridge(
             selectableSessionKeys: selectorShortcutsAvailable ? selectableShortcutSessionKeys : [],
-            isSearchFieldFocused: isSearchFieldFocused
+            isSearchFieldFocused: isSearchFieldFocused,
+            shouldOwnFirstResponder: selectorShortcutBridgeShouldOwnFirstResponder
         )
         .frame(width: 1, height: 1)
         .opacity(0.001)
@@ -1099,24 +1106,28 @@ private struct StreamSelectorSearchField: UIViewRepresentable {
 private struct StreamSelectorShortcutKeyCommandBridge: UIViewRepresentable {
     let selectableSessionKeys: [String]
     let isSearchFieldFocused: Bool
+    let shouldOwnFirstResponder: Bool
 
     func makeUIView(context: Context) -> KeyCommandView {
         let view = KeyCommandView()
         view.selectableSessionKeys = selectableSessionKeys
         view.isSearchFieldFocused = isSearchFieldFocused
+        view.shouldOwnFirstResponder = shouldOwnFirstResponder
         return view
     }
 
     func updateUIView(_ uiView: KeyCommandView, context: Context) {
         uiView.selectableSessionKeys = selectableSessionKeys
         uiView.isSearchFieldFocused = isSearchFieldFocused
+        uiView.shouldOwnFirstResponder = shouldOwnFirstResponder
         uiView.refreshKeyCommandsIfNeeded()
-        uiView.activateIfSearchFieldInactive()
+        uiView.reconcileFirstResponderOwnership()
     }
 
     final class KeyCommandView: UIView {
         var selectableSessionKeys: [String] = []
         var isSearchFieldFocused = false
+        var shouldOwnFirstResponder = false
         private var keyCommandSignature: [String] = []
 
         override var canBecomeFirstResponder: Bool { true }
@@ -1135,13 +1146,20 @@ private struct StreamSelectorShortcutKeyCommandBridge: UIViewRepresentable {
 
         override func didMoveToWindow() {
             super.didMoveToWindow()
-            activateIfSearchFieldInactive()
+            reconcileFirstResponderOwnership()
         }
 
-        func activateIfSearchFieldInactive() {
-            guard !isSearchFieldFocused else { return }
+        func reconcileFirstResponderOwnership() {
+            guard shouldOwnFirstResponder, !isSearchFieldFocused else {
+                if isFirstResponder {
+                    resignFirstResponder()
+                }
+                return
+            }
             DispatchQueue.main.async { [weak self] in
-                guard let self, !self.isSearchFieldFocused else { return }
+                guard let self,
+                      self.shouldOwnFirstResponder,
+                      !self.isSearchFieldFocused else { return }
                 self.becomeFirstResponder()
             }
         }

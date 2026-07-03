@@ -566,7 +566,7 @@ struct StreamPageDotsViewTests {
 
         routeController.openPopup(focusSearch: false)
 
-        #expect(routeController.route == .popup(searchFocus: .none))
+        #expect(routeController.currentPopupPresentationID != nil)
         #expect(routeController.isPopupPresented)
         #expect(routeController.popupSearchFocusRequestID == nil)
 
@@ -575,12 +575,12 @@ struct StreamPageDotsViewTests {
 
         #expect(initialSearchFocusRequestID != nil)
         if let initialSearchFocusRequestID {
-            #expect(routeController.route == .popup(searchFocus: .request(id: initialSearchFocusRequestID)))
+            #expect(routeController.popupSearchFocusRequestID == initialSearchFocusRequestID)
         }
 
         routeController.consumeSearchFocusRequest()
 
-        #expect(routeController.route == .popup(searchFocus: .none))
+        #expect(routeController.isPopupPresented)
         #expect(routeController.popupSearchFocusRequestID == nil)
 
         routeController.presentTrackPicker()
@@ -598,6 +598,32 @@ struct StreamPageDotsViewTests {
     func streamPopupSearchFocusFollowsSoftwareKeyboardVisibility() {
         #expect(StreamPopupFocusHandoff.shouldFocusSearchOnOpen(isSoftwareKeyboardVisible: true))
         #expect(StreamPopupFocusHandoff.shouldFocusSearchOnOpen(isSoftwareKeyboardVisible: false) == false)
+        #expect(
+            StreamPopupFocusHandoff.shouldFocusSearchOnOpen(
+                isSoftwareKeyboardVisible: false,
+                platformPolicy: .selectorAutofocus
+            )
+        )
+        #expect(
+            StreamPopupFocusHandoff.shouldFocusSearchOnOpen(
+                isSoftwareKeyboardVisible: false,
+                platformPolicy: .softwareKeyboardOnly
+            ) == false
+        )
+    }
+
+    @Test("T1136 dots tap cannot reopen while popup close suppression is active")
+    func streamPopupDotsTapCannotReopenWhileCloseSuppressionIsActive() {
+        #expect(
+            StreamPopupFocusHandoff.shouldOpenFromDotsTap(
+                isSuppressingReopenFromClosingPresentation: false
+            )
+        )
+        #expect(
+            StreamPopupFocusHandoff.shouldOpenFromDotsTap(
+                isSuppressingReopenFromClosingPresentation: true
+            ) == false
+        )
     }
 
     @Test("T1136 software keyboard visibility is safe-area compensated")

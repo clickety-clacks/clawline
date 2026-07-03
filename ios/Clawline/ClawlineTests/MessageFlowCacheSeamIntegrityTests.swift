@@ -146,6 +146,43 @@ struct MessageFlowCacheSeamIntegrityTests {
         )
     }
 
+    @Test("T1465: row flow keeps ordinary bubbles content-shaped")
+    func rowFlowKeepsOrdinaryBubblesContentShaped() throws {
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // ClawlineTests
+            .deletingLastPathComponent() // Clawline
+            .appendingPathComponent("Clawline/Views/Chat")
+        let flowContents = try String(
+            contentsOf: sourceRoot.appendingPathComponent("MessageFlowCollectionView.swift"),
+            encoding: .utf8
+        )
+        let bubbleContents = try String(
+            contentsOf: sourceRoot.appendingPathComponent("MessageBubbleUIKitView.swift"),
+            encoding: .utf8
+        )
+
+        #expect(
+            flowContents.contains("case .medium:\n                return 80"),
+            "Medium bubbles must not use a percentage-of-row minimum width; flow packing owns row capacity."
+        )
+        #expect(
+            !flowContents.contains("env.containerWidth * 0.25"),
+            "Ordinary bubble width floors must not be derived from row width."
+        )
+        #expect(
+            !flowContents.contains("itemForcesOwnRowProvider"),
+            "Normal bubbles must not bypass flow packing through a row-forcing hook."
+        )
+        #expect(
+            bubbleContents.contains("override var intrinsicContentSize: CGSize {\n        super.intrinsicContentSize\n    }"),
+            "BubbleTextView should report UIKit's fitted size instead of a separate TextKit usedRect authority."
+        )
+        #expect(
+            !bubbleContents.contains("tightFittingSize(for:"),
+            "Bubble text sizing must not reintroduce a second fitting authority."
+        )
+    }
+
     @Test("T1193: V2 sizing and visible cells consume one authoritative layout state")
     func bubbleSizingV2SizingAndRenderingShareAuthoritativeLayoutState() throws {
         let sourceURL = URL(fileURLWithPath: #filePath)

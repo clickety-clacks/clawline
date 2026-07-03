@@ -1,5 +1,12 @@
 # Bubble Sizing V2 — Non-Obvious Details
 
+## Direction after the T1465 layout recovery
+BubbleSizingV2 is not a second layout authority. It may choose a size class, content width cap, height cap, cache key, and scroll policy, but ordinary message bubbles must still report UIKit-fitted content sizes and let `MessageFlowRowLayoutEngine` decide row packing.
+
+Do not reintroduce a custom `UITextView` `usedRect` fitting path for ordinary bubble text. The recovered layout uses UIKit's own `intrinsicContentSize` and `sizeThatFits` for `BubbleTextView`; a separate TextKit measurement path made rendered bubble size and row composition disagree.
+
+Do not make `.medium` bubbles reserve a percentage of the row. The recovered invariant is a fixed 80pt minimum for `.medium`, not `max(containerWidth * 0.25, 80)`. Row capacity belongs to the flow row engine; width floors should protect readable content, not enforce row ownership.
+
 ## Cached measurements must never force a bubble narrower than `minWidth`
 `applyMeasuredSize` clamps only to `maxWidth` — no min width floor. A bad measurement (e.g., from an off-screen sizing pass with wrong constraints) can "stick" because the cache prefers cached width. This produces thin/squished bubbles that are hard to reproduce. The fix: `minWidth` is an explicit field in `BubbleLayoutPlan` and all measurements are rejected below this floor.
 

@@ -4939,7 +4939,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             case .short:
                 return 40
             case .medium:
-                return max(env.containerWidth * 0.25, 80)
+                return 80
             case .long:
                 return 80
             }

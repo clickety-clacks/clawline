@@ -462,11 +462,7 @@ private final class BubbleTextView: UITextView {
     }
 
     override var intrinsicContentSize: CGSize {
-        let fittingWidth = bounds.width > 1 ? bounds.width : textContainer.size.width
-        guard fittingWidth > 1 else {
-            return super.intrinsicContentSize
-        }
-        return tightFittingSize(for: fittingWidth)
+        super.intrinsicContentSize
     }
 
     override var attributedText: NSAttributedString! {
@@ -478,24 +474,7 @@ private final class BubbleTextView: UITextView {
     }
 
     override func sizeThatFits(_ size: CGSize) -> CGSize {
-        guard size.width > 1 else {
-            return super.sizeThatFits(size)
-        }
-        return tightFittingSize(for: size.width)
-    }
-
-    private func tightFittingSize(for width: CGFloat) -> CGSize {
-        let targetSize = CGSize(
-            width: max(1, width - textContainerInset.left - textContainerInset.right),
-            height: .greatestFiniteMagnitude
-        )
-        textContainer.size = targetSize
-        layoutManager.ensureLayout(for: textContainer)
-        let usedRect = layoutManager.usedRect(for: textContainer)
-        return CGSize(
-            width: ceil(usedRect.width + textContainerInset.left + textContainerInset.right),
-            height: ceil(usedRect.height + textContainerInset.top + textContainerInset.bottom)
-        )
+        super.sizeThatFits(size)
     }
 }
 

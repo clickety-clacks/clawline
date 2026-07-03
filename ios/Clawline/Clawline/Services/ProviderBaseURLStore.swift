@@ -29,6 +29,30 @@ enum ProviderBaseURLStore {
 
 }
 
+enum ProviderHTTPURLPolicy {
+    static func appVisibleBaseURL(from baseURL: URL) -> URL {
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
+              components.scheme?.lowercased() == "http" else {
+            return baseURL
+        }
+
+        let host = components.host?.lowercased()
+        let knownTARSHosts: Set<String> = [
+            "100.85.66.60",
+            "tars",
+            "tars.tail4105e8.ts.net"
+        ]
+        guard let host, knownTARSHosts.contains(host) else {
+            return baseURL
+        }
+
+        components.scheme = "https"
+        components.host = "tars.tail4105e8.ts.net"
+        components.port = 19443
+        return components.url ?? baseURL
+    }
+}
+
 struct ProviderTLSPolicy: Equatable {
     let trustSelfSignedCertificates: Bool
     let pinnedLeafCertificateSHA256: String?

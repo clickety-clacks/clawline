@@ -29,9 +29,10 @@ final class UploadService: UploadServicing {
 
     func upload(data: Data, mimeType: String, filename: String?) async throws -> String {
         try Task.checkCancellation()
-        guard let baseURL = baseURLProvider() else {
+        guard let storedBaseURL = baseURLProvider() else {
             throw AttachmentError.missingBaseURL
         }
+        let baseURL = ProviderHTTPURLPolicy.appVisibleBaseURL(from: storedBaseURL)
         guard let token = auth.token else {
             throw AttachmentError.missingAuth
         }
@@ -99,9 +100,10 @@ final class UploadService: UploadServicing {
 
     func download(assetId: String) async throws -> Data {
         try Task.checkCancellation()
-        guard let baseURL = baseURLProvider() else {
+        guard let storedBaseURL = baseURLProvider() else {
             throw AttachmentError.missingBaseURL
         }
+        let baseURL = ProviderHTTPURLPolicy.appVisibleBaseURL(from: storedBaseURL)
         guard let token = auth.token else {
             throw AttachmentError.missingAuth
         }

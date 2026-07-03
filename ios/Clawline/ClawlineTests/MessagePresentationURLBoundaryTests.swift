@@ -135,6 +135,28 @@ struct MessagePresentationURLBoundaryTests {
         #expect(!presentation.hasTextualContent)
     }
 
+    @Test("Asset-backed image attachment renders from data without remote image URL")
+    func assetBackedImageAttachmentRendersFromDataWithoutRemoteImageURL() throws {
+        let attachment = Clawline.Attachment(
+            id: "asset_attachment",
+            type: .image,
+            mimeType: "image/png",
+            data: try #require(Data(base64Encoded: Self.onePixelPNGBase64)),
+            assetId: "asset_grouped_1",
+            filename: "group.png"
+        )
+        let presentation = buildPresentation(content: "", attachments: [attachment])
+        let rendered = try #require(singleImageAttachment(in: presentation))
+
+        #expect(rendered.data == attachment.data)
+        #expect(rendered.assetId == "asset_grouped_1")
+        #expect(!presentation.parts.contains(where: { part in
+            if case .remoteImage = part { return true }
+            return false
+        }))
+        #expect(presentation.detectedURLs.isEmpty)
+    }
+
     @Test("Invalid inline image data URL content remains textual")
     func invalidInlineImageDataURLContentRemainsTextual() {
         let invalidImageURL = "data:image/png;base64,not-an-image"

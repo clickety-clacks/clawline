@@ -36,7 +36,7 @@ final class UploadService: UploadServicing {
             throw AttachmentError.missingAuth
         }
 
-        var request = URLRequest(url: baseURL.appendingPathComponent("upload"))
+        var request = URLRequest(url: ProviderHTTPURLResolver.uploadURL(from: baseURL))
         request.httpMethod = "POST"
         let boundary = "Boundary-" + UUID().uuidString
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
@@ -106,7 +106,7 @@ final class UploadService: UploadServicing {
             throw AttachmentError.missingAuth
         }
 
-        let downloadURL = try makeDownloadURL(baseURL: baseURL, assetId: assetId)
+        let downloadURL = try ProviderHTTPURLResolver.downloadURL(from: baseURL, assetId: assetId)
         logger.info("asset download url=\(downloadURL.absoluteString, privacy: .public)")
 
         var request = URLRequest(url: downloadURL)
@@ -181,30 +181,6 @@ final class UploadService: UploadServicing {
         let trimmed = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return makeDefaultFilename(for: mimeType) }
         return trimmed
-    }
-
-    private func makeDownloadURL(baseURL: URL, assetId: String) throws -> URL {
-        guard !assetId.isEmpty else {
-            throw AttachmentError.invalidData
-        }
-        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
-            throw AttachmentError.invalidData
-        }
-        guard let encodedAssetId = encodePathComponent(assetId) else {
-            throw AttachmentError.invalidData
-        }
-        let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
-        components.path = "\(basePath)/download/\(encodedAssetId)"
-        guard let url = components.url else {
-            throw AttachmentError.invalidData
-        }
-        return url
-    }
-
-    private func encodePathComponent(_ value: String) -> String? {
-        var allowed = CharacterSet.urlPathAllowed
-        allowed.remove(charactersIn: "/")
-        return value.addingPercentEncoding(withAllowedCharacters: allowed)
     }
 
     private func summarizeResponseBody(_ data: Data, maxLength: Int = 512) -> String {

@@ -1816,7 +1816,7 @@ struct BubbleScrollTests {
         #expect(abs(scroll.contentOffset.y) < 0.5)
     }
 
-    @Test("T048: Single-link previews keep fixed full-height viewport using the available-height cap")
+    @Test("T048: Single-link previews keep fixed 75% viewport using the available-height cap")
     @MainActor
     func linkPreviewCapsHoldOnLargeContainerInputs() {
         let metrics = ChatFlowTheme.Metrics(isCompact: false)
@@ -1845,7 +1845,7 @@ struct BubbleScrollTests {
             sizeClass: sizeClass,
             metrics: metrics,
             maxWidth: 1200,
-            truncationHeightOverride: 900,
+            truncationHeightOverride: 675,
             bubbleSizingV2: nil,
             showsHeader: true,
             paddingScale: 1,
@@ -1878,7 +1878,7 @@ struct BubbleScrollTests {
             Issue.record("Expected LinkPreviewView in bubble content")
             return
         }
-        let expectedPreviewMaxHeight = 900 - (metrics.bubblePaddingTop + metrics.bubblePaddingBottom)
+        let expectedPreviewMaxHeight = 675 - (metrics.bubblePaddingTop + metrics.bubblePaddingBottom)
         let previewMeasured = preview.sizeThatFits(
             CGSize(width: referenceWidthCap, height: .greatestFiniteMagnitude)
         )
@@ -1908,6 +1908,7 @@ struct BubbleScrollTests {
         )
 
         let expectedPreviewMaxHeight = policy.heightCap - (metrics.bubblePaddingTop + metrics.bubblePaddingBottom)
+        #expect(abs(policy.heightCap - 639) <= 0.5)
         #expect(abs(policy.linkPreviewViewportMaxHeight - expectedPreviewMaxHeight) <= 1)
     }
 
@@ -1922,15 +1923,29 @@ struct BubbleScrollTests {
         #expect(abs(cap - 1198) <= 0.5)
     }
 
-    @Test("T060: Single-link cap tracks full container height for large iPad/vision viewports")
-    func singleLinkCapUsesFullContainerHeight() {
-        let cap = BubbleSizingV2.availableHeightCap(
+    @Test("T060: Single-link cap uses 75% of available height for large viewports")
+    func singleLinkCapUsesSeventyFivePercentAvailableHeight() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let env = BubbleSizingV2.Environment(
+            containerWidth: 1200,
             containerHeight: 1600,
+            singleLinkContainerHeight: 1600,
             topInset: 20,
             bottomInset: 160,
-            flowPadding: 12
+            truncationBottomInset: 0,
+            isVisionOS: false,
+            metricsFingerprint: BubbleSizingV2.metricsFingerprint(metrics: metrics, traitCollection: UITraitCollection())
         )
-        #expect(abs(cap - 1396) <= 0.5)
+
+        let policy = BubbleSizingV2.BubbleHeightPolicy.resolve(
+            metrics: metrics,
+            env: env,
+            isSingleLinkPreview: true,
+            prefersScreenAwareHeightCap: true,
+            allowsOuterScroll: false
+        )
+
+        #expect(abs(policy.heightCap - 1029) <= 0.5)
     }
 
     @Test("T032: Salient highlight style-only updates avoid layout reflow callbacks")

@@ -78,6 +78,7 @@ struct PairingView: View {
                 .padding(.bottom, concentricPadding)
             }
         }
+        .pairingConstellationBackground(isActive: scenePhase == .active)
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             viewModel.retryPendingIfNeeded()

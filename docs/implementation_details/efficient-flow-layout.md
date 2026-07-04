@@ -1,12 +1,5 @@
 # Efficient Flow Layout — Non-Obvious Details
 
-## Direction after the T1465 layout recovery
-The current direction is not an unfinished migration away from the original bubble flow. It is the corrected architecture: bubbles report content-shaped sizes, and `MessageFlowRowLayoutEngine` is the only authority for row packing.
-
-Ordinary message bubbles must not force their own rows through a message-classification hook. Only items whose measured width consumes the available row, such as true full-row content, should occupy a dedicated row. If a future feature needs dedicated-row behavior, encode it as measured size or a narrowly named full-row item type, not as a blanket "normal message owns row" rule.
-
-Row layout must use the delegate's measured item sizes, place every item that fits in the current row, and set row height to the tallest item in that row. Shorter peer bubbles keep their own content height; they are not stretched to match the row.
-
 ## Why optimization work cannot start before mutation seam is consolidated (hard gate)
 All six separate size caches must be routed through the seam before ANY optimization work (y-shift path, etc.) begins. The spec is explicit: "No optimization work may begin until the mutation seam is fully consolidated and verified." Skipping ahead recreates the split-mutation problem that causes defensive full-rebuild invalidation. The seam steps 1-3 gate step 4.
 

@@ -594,22 +594,36 @@ struct StreamPageDotsViewTests {
         #expect(routeController.route == .closed)
     }
 
-    @Test("T1136 stream popup search focus follows software keyboard visibility")
-    func streamPopupSearchFocusFollowsSoftwareKeyboardVisibility() {
-        #expect(StreamPopupFocusHandoff.shouldFocusSearchOnOpen(isSoftwareKeyboardVisible: true))
-        #expect(StreamPopupFocusHandoff.shouldFocusSearchOnOpen(isSoftwareKeyboardVisible: false) == false)
+    @Test("T1136 stream popup search focus follows input availability")
+    func streamPopupSearchFocusFollowsInputAvailability() {
         #expect(
             StreamPopupFocusHandoff.shouldFocusSearchOnOpen(
-                isSoftwareKeyboardVisible: false,
-                platformPolicy: .selectorAutofocus
+                isSoftwareKeyboardVisible: true,
+                isHardwareKeyboardAttached: false
             )
         )
         #expect(
             StreamPopupFocusHandoff.shouldFocusSearchOnOpen(
                 isSoftwareKeyboardVisible: false,
-                platformPolicy: .softwareKeyboardOnly
+                isHardwareKeyboardAttached: true
+            )
+        )
+        #expect(
+            StreamPopupFocusHandoff.shouldFocusSearchOnOpen(
+                isSoftwareKeyboardVisible: false,
+                isHardwareKeyboardAttached: false
             ) == false
         )
+    }
+
+    @Test("T1136 hardware keyboard availability follows platform input")
+    func hardwareKeyboardAvailabilityFollowsPlatformInput() {
+        #expect(HardwareKeyboardAvailability.current(coalescedKeyboardPresent: true))
+#if targetEnvironment(macCatalyst)
+        #expect(HardwareKeyboardAvailability.current(coalescedKeyboardPresent: false))
+#else
+        #expect(HardwareKeyboardAvailability.current(coalescedKeyboardPresent: false) == false)
+#endif
     }
 
     @Test("T1136 dots tap cannot reopen while popup close suppression is active")

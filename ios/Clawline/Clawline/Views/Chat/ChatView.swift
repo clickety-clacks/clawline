@@ -40,6 +40,28 @@ enum CrossChatShortcutLabelAvailability {
     }
 }
 
+enum HardwareKeyboardAvailability {
+    static var current: Bool {
+#if targetEnvironment(macCatalyst)
+        true
+#elseif (os(iOS) || os(visionOS)) && canImport(GameController)
+        current(coalescedKeyboardPresent: GCKeyboard.coalesced != nil)
+#else
+        false
+#endif
+    }
+
+    static func current(coalescedKeyboardPresent: Bool) -> Bool {
+#if targetEnvironment(macCatalyst)
+        true
+#elseif (os(iOS) || os(visionOS)) && canImport(GameController)
+        coalescedKeyboardPresent
+#else
+        false
+#endif
+    }
+}
+
 #if DEBUG
 @MainActor
 private final class T099OnDisappearProbeStore {
@@ -314,11 +336,6 @@ final class StreamPopupRouteController {
 }
 
 enum StreamPopupFocusHandoff {
-    enum OpenPlatformPolicy: Equatable {
-        case softwareKeyboardOnly
-        case selectorAutofocus
-    }
-
     enum CloseAction: Equatable {
         case requestComposerFocusBeforeDismissal
         case closePopup
@@ -327,18 +344,9 @@ enum StreamPopupFocusHandoff {
 
     static func shouldFocusSearchOnOpen(
         isSoftwareKeyboardVisible: Bool,
-        platformPolicy: OpenPlatformPolicy
+        isHardwareKeyboardAttached: Bool
     ) -> Bool {
-        switch platformPolicy {
-        case .softwareKeyboardOnly:
-            return isSoftwareKeyboardVisible
-        case .selectorAutofocus:
-            return true
-        }
-    }
-
-    static func shouldFocusSearchOnOpen(isSoftwareKeyboardVisible: Bool) -> Bool {
-        isSoftwareKeyboardVisible
+        isSoftwareKeyboardVisible || isHardwareKeyboardAttached
     }
 
     static func isSoftwareKeyboardVisible(keyboardHeight: CGFloat, safeAreaBottom: CGFloat) -> Bool {
@@ -567,12 +575,8 @@ struct ChatView: View {
         )
     }
 
-    private var streamPopupOpenPlatformPolicy: StreamPopupFocusHandoff.OpenPlatformPolicy {
-#if targetEnvironment(macCatalyst)
-        .selectorAutofocus
-#else
-        .softwareKeyboardOnly
-#endif
+    private var currentHardwareKeyboardAvailability: Bool {
+        HardwareKeyboardAvailability.current
     }
 
     private var fontScaleChangeSequence: Int {
@@ -3325,7 +3329,7 @@ struct ChatView: View {
         openStreamPopup(
             focusSearch: StreamPopupFocusHandoff.shouldFocusSearchOnOpen(
                 isSoftwareKeyboardVisible: isKeyboardVisible,
-                platformPolicy: streamPopupOpenPlatformPolicy
+                isHardwareKeyboardAttached: currentHardwareKeyboardAvailability
             )
         )
     }

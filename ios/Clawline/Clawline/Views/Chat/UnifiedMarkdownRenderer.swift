@@ -851,10 +851,10 @@ enum UnifiedMarkdownRenderer {
 
         annotateDetectedLinks(nsAttributed)
         sanitizeLinkAttributes(nsAttributed)
-        _ = TextLinkURLTemplateRules.applyConfiguredRules(to: nsAttributed)
-        applyHeadingStyles(markdown: markdownForRender, nsAttributed: nsAttributed, baseFont: baseFont)
         applyMarkHighlights(nsAttributed: nsAttributed, color: markHighlightColor)
         removeIndentedLiteralSentinels(nsAttributed)
+        _ = TextLinkURLTemplateRules.applyConfiguredRules(to: nsAttributed)
+        applyHeadingStyles(markdown: markdownForRender, nsAttributed: nsAttributed, baseFont: baseFont)
 
         let rendered = NSAttributedString(attributedString: nsAttributed)
         if markdownForRender.count <= attributedMarkdownCacheMaxSourceLength {

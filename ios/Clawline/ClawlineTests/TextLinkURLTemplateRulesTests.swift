@@ -32,6 +32,27 @@ struct TextLinkURLTemplateRulesTests {
         #expect(linkTarget("T1135abc", in: rendered) == nil)
     }
 
+    @Test("T1570: generated link templates never receive renderer sentinels")
+    @MainActor
+    func generatedLinkTemplatesNeverReceiveRendererSentinels() throws {
+        let broadRule = TextLinkURLTemplateRule(
+            id: "broad-ticket",
+            enabled: true,
+            pattern: #".*\bT\d+\b.*"#,
+            urlTemplate: "https://tars.tail4105e8.ts.net:19443/tracker.html?id={match}",
+            displayMode: .popup
+        )
+        let rendered = try withConfiguredRules([broadRule]) {
+            try #require(makeRendered("Open ==T273==."))
+        }
+
+        let target = try #require(linkTarget("T273", in: rendered)?.absoluteString)
+        #expect(target == "https://tars.tail4105e8.ts.net:19443/tracker.html?id=Open%20T273.")
+        #expect(!target.contains("%F3%B0%80%80"))
+        #expect(!target.contains("%F3%B0%80%81"))
+        #expect(!target.contains("%F3%B0%80%82"))
+    }
+
     @Test("T1192: rule display mode is direct by default and Codable")
     func ruleDisplayModeDefaultsToDirectAndCodable() throws {
         let legacyJSON = """

@@ -3051,18 +3051,46 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     static var excludesFooterRevealRangeAtRestingBottom: Bool {
-#if os(visionOS)
-        false
-#else
-        true
-#endif
+        shouldExcludeFooterRevealRangeAtRestingBottom(
+            isSpatialPlatform: isSpatialPlatform,
+            isMacCatalyst: isMacCatalystPlatform
+        )
     }
 
     static var hidesFooterAtRestingBottom: Bool {
+        shouldHideFooterAtRestingBottom(
+            isSpatialPlatform: isSpatialPlatform,
+            isMacCatalyst: isMacCatalystPlatform
+        )
+    }
+
+    static func shouldExcludeFooterRevealRangeAtRestingBottom(
+        isSpatialPlatform: Bool,
+        isMacCatalyst: Bool
+    ) -> Bool {
+        !(isSpatialPlatform || isMacCatalyst)
+    }
+
+    static func shouldHideFooterAtRestingBottom(
+        isSpatialPlatform: Bool,
+        isMacCatalyst: Bool
+    ) -> Bool {
+        !(isSpatialPlatform || isMacCatalyst)
+    }
+
+    private static var isSpatialPlatform: Bool {
 #if os(visionOS)
-        false
-#else
         true
+#else
+        false
+#endif
+    }
+
+    private static var isMacCatalystPlatform: Bool {
+#if targetEnvironment(macCatalyst)
+        true
+#else
+        false
 #endif
     }
 

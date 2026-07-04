@@ -124,7 +124,8 @@ struct ScrollToBottomUnreadTests {
         let restingContentHeight = MessageFlowCollectionViewController.restingBottomContentHeight(
             contentSizeHeight: contentHeight,
             footerHeight: footerHeight,
-            hasFooter: true
+            hasFooter: true,
+            excludesFooterRevealRange: true
         )
         let restingBottom = MessageFlowCollectionViewController.bottomOffsetMaxY(
             contentHeight: restingContentHeight,
@@ -144,13 +145,84 @@ struct ScrollToBottomUnreadTests {
             contentOffsetY: restingBottom,
             restingBottomOffsetY: restingBottom,
             trueBottomOffsetY: trueBottom,
+            hidesFooterAtRestingBottom: true
         ) == 0)
         #expect(MessageFlowCollectionViewController.footerRevealAlpha(
             contentOffsetY: restingBottom - 1,
             restingBottomOffsetY: restingBottom,
-            trueBottomOffsetY: trueBottom
+            trueBottomOffsetY: trueBottom,
+            hidesFooterAtRestingBottom: true
         ) == 0)
     }
+
+    @Test("Footer resting bottom policy matches platform interaction")
+    func footerRestingBottomPolicyMatchesPlatformInteraction() {
+        #expect(MessageFlowCollectionViewController.shouldExcludeFooterRevealRangeAtRestingBottom(
+            isSpatialPlatform: false,
+            isMacCatalyst: false
+        ) == true)
+        #expect(MessageFlowCollectionViewController.shouldHideFooterAtRestingBottom(
+            isSpatialPlatform: false,
+            isMacCatalyst: false
+        ) == true)
+        #expect(MessageFlowCollectionViewController.shouldExcludeFooterRevealRangeAtRestingBottom(
+            isSpatialPlatform: true,
+            isMacCatalyst: false
+        ) == false)
+        #expect(MessageFlowCollectionViewController.shouldHideFooterAtRestingBottom(
+            isSpatialPlatform: true,
+            isMacCatalyst: false
+        ) == false)
+        #expect(MessageFlowCollectionViewController.shouldExcludeFooterRevealRangeAtRestingBottom(
+            isSpatialPlatform: false,
+            isMacCatalyst: true
+        ) == false)
+        #expect(MessageFlowCollectionViewController.shouldHideFooterAtRestingBottom(
+            isSpatialPlatform: false,
+            isMacCatalyst: true
+        ) == false)
+    }
+
+#if targetEnvironment(macCatalyst)
+    @Test("Catalyst footer resting bottom includes footer content")
+    func catalystFooterRestingBottomIncludesFooterContent() {
+        let contentHeight: CGFloat = 1_200
+        let boundsHeight: CGFloat = 700
+        let topInset: CGFloat = 40
+        let bottomInset: CGFloat = 180
+        let footerHeight = SessionMetadataFooterCell.fadeRevealRange
+            + SessionMetadataFooterCell.bottomPadding
+
+        #expect(MessageFlowCollectionViewController.excludesFooterRevealRangeAtRestingBottom == false)
+        #expect(MessageFlowCollectionViewController.hidesFooterAtRestingBottom == false)
+
+        let restingContentHeight = MessageFlowCollectionViewController.restingBottomContentHeight(
+            contentSizeHeight: contentHeight,
+            footerHeight: footerHeight,
+            hasFooter: true
+        )
+        let restingBottom = MessageFlowCollectionViewController.bottomOffsetMaxY(
+            contentHeight: restingContentHeight,
+            boundsHeight: boundsHeight,
+            topInset: topInset,
+            bottomInset: bottomInset
+        )
+        let trueBottom = MessageFlowCollectionViewController.bottomOffsetMaxY(
+            contentHeight: contentHeight,
+            boundsHeight: boundsHeight,
+            topInset: topInset,
+            bottomInset: bottomInset
+        )
+
+        #expect(restingContentHeight == contentHeight)
+        #expect(restingBottom == trueBottom)
+        #expect(MessageFlowCollectionViewController.footerRevealAlpha(
+            contentOffsetY: restingBottom,
+            restingBottomOffsetY: restingBottom,
+            trueBottomOffsetY: trueBottom
+        ) == 1)
+    }
+#endif
 
     @Test("Spatial footer resting bottom includes footer content")
     func spatialFooterRestingBottomIncludesFooterContent() {

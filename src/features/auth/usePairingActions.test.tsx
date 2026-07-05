@@ -8,14 +8,14 @@ import {
 
 class MockPairingWebSocket {
   static instances: MockPairingWebSocket[] = [];
-  static nextBehaviors: Array<"pending" | "success"> = [];
+  static nextBehaviors: Array<"pending" | "pending-denied-success" | "success"> = [];
 
-  static reset(behaviors: Array<"pending" | "success">) {
+  static reset(behaviors: Array<"pending" | "pending-denied-success" | "success">) {
     MockPairingWebSocket.instances = [];
     MockPairingWebSocket.nextBehaviors = [...behaviors];
   }
 
-  readonly behavior: "pending" | "success";
+  readonly behavior: "pending" | "pending-denied-success" | "success";
   closeCount = 0;
   onclose: ((event: CloseEvent) => void) | null = null;
   onerror: ((event: Event) => void) | null = null;
@@ -40,7 +40,7 @@ class MockPairingWebSocket {
     this.sentMessages.push(data);
 
     queueMicrotask(() => {
-      if (this.behavior === "pending") {
+      if (this.behavior === "pending" || this.behavior === "pending-denied-success") {
         this.onmessage?.(
           new MessageEvent("message", {
             data: JSON.stringify({
@@ -50,6 +50,18 @@ class MockPairingWebSocket {
             })
           })
         );
+        if (this.behavior === "pending-denied-success") {
+          this.onmessage?.(
+            new MessageEvent("message", {
+              data: JSON.stringify({
+                type: "pair_result",
+                success: false,
+                reason: "pair_denied"
+              })
+            })
+          );
+          this.approve();
+        }
         return;
       }
 
@@ -246,5 +258,51 @@ describe("usePairingActions", () => {
     expect(MockPairingWebSocket.instances).toHaveLength(2);
     expect(MockPairingWebSocket.instances[1].sentMessages).toHaveLength(1);
     expect(screen.getByTestId("location")).toHaveTextContent("/chat");
+  });
+
+  it("keeps waiting through stale pair_denied after pending approval", async () => {
+    MockPairingWebSocket.reset(["pending-denied-success"]);
+
+    const authStore = createAuthSessionStore();
+
+    render(
+      <AuthSessionStoreProvider value={authStore}>
+        <MemoryRouter initialEntries={["/pair"]}>
+          <Routes>
+            <Route
+              element={
+                <>
+                  <PairingScreen />
+                  <LocationProbe />
+                </>
+              }
+              path="/pair"
+            />
+            <Route element={<LocationProbe />} path="/chat" />
+          </Routes>
+        </MemoryRouter>
+      </AuthSessionStoreProvider>
+    );
+
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Clawline Web Test" }
+    });
+    fireEvent.change(screen.getByLabelText("Provider address"), {
+      target: { value: "ws://eezo.tail4105e8.ts.net:18800" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Pair browser" }));
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(MockPairingWebSocket.instances).toHaveLength(1);
+    expect(MockPairingWebSocket.instances[0].sentMessages).toHaveLength(1);
+    expect(screen.getByTestId("location")).toHaveTextContent("/chat");
+    expect(authStore.getState().session).toMatchObject({
+      token: "live-token",
+      userId: "clawline_web_test"
+    });
   });
 });

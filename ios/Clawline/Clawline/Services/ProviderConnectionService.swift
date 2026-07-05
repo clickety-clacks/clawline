@@ -107,6 +107,7 @@ final class ProviderConnectionService: ConnectionServicing {
                     try await socket.send(text: json)
                 }
 
+                var pendingObserved = false
                 while true {
                     let text = try await waitForMessage(stream: socket.incomingTextMessages)
                     let response = try decoder.decode(PairResultPayload.self, from: Data(text.utf8))
@@ -117,6 +118,7 @@ final class ProviderConnectionService: ConnectionServicing {
                     }
 
                     if response.reason == "pair_pending" {
+                        pendingObserved = true
                         logger.debug("Pairing still pending approval...")
                         continue
                     }
@@ -125,6 +127,11 @@ final class ProviderConnectionService: ConnectionServicing {
                        let token = response.token,
                        let userId = response.userId {
                         return .success(token: token, userId: userId)
+                    }
+
+                    if pendingObserved, response.reason == "pair_denied" {
+                        logger.debug("Ignoring stale pair_denied while pending approval remains active...")
+                        continue
                     }
 
                     let reason = response.reason ?? "Pairing request denied"

@@ -41,6 +41,40 @@ struct ProviderServiceTests {
         }
     }
 
+    @Test("Pairing waits through stale denied result after pending approval")
+    func pairingWaitsThroughStaleDeniedAfterPending() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let service = ProviderConnectionService(
+            connector: connector,
+            pendingTimeout: .milliseconds(500)
+        )
+        let serverURL = URL(string: "wss://example.com/ws")!
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(10))
+            mockSocket.enqueue(text: #"{ "type": "pair_result", "success": false, "reason": "pair_pending" }"#)
+            try await Task.sleep(forDuration: .milliseconds(10))
+            mockSocket.enqueue(text: #"{ "type": "pair_result", "success": false, "reason": "pair_denied" }"#)
+            try await Task.sleep(forDuration: .milliseconds(10))
+            mockSocket.enqueue(text: #"{ "type": "pair_result", "success": true, "token": "jwt_after_denied", "userId": "user_after_denied" }"#)
+        }
+
+        let result = try await service.requestPairing(
+            serverURL: serverURL,
+            claimedName: "Test",
+            deviceId: "device_123"
+        )
+
+        switch result {
+        case .success(let token, let userId):
+            #expect(token == "jwt_after_denied")
+            #expect(userId == "user_after_denied")
+        default:
+            Issue.record("Expected success after stale pair_denied, got \(result)")
+        }
+    }
+
     @Test("Pairing request times out when connect never completes")
     func pairingTimesOutWhenConnectHangs() async {
         let connector = HangingWebSocketConnector(mode: .connect)

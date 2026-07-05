@@ -267,7 +267,8 @@ async function requestPairing({
 
       if (
         payload.reason === "pair_pending" ||
-        payload.reason === "device_not_approved"
+        payload.reason === "device_not_approved" ||
+        (pendingObserved && payload.reason === "pair_denied")
       ) {
         pendingObserved = true;
         onPending(payload.reason);

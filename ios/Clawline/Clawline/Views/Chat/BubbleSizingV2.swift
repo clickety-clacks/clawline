@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import UIKit
 
 enum BubbleSizingV2 {
@@ -314,5 +315,83 @@ enum BubbleSizingV2 {
     ) -> CGFloat {
         let available = containerHeight - topInset - bottomInset - (flowPadding * 2)
         return max(120, floor(available))
+    }
+}
+
+enum ClawlineCatalystProfileInstrumentation {
+    static let isEnabled: Bool = {
+        let env = ProcessInfo.processInfo.environment
+        return env["CLAWLINE_CATALYST_PROFILE_INSTRUMENTATION"] == "1"
+            || ProcessInfo.processInfo.arguments.contains("--catalyst-profile-instrumentation")
+    }()
+
+    private static let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "CatalystProfile")
+    private static let signposter = OSSignposter(subsystem: "co.clicketyclacks.Clawline", category: "CatalystProfile")
+    private static var buildIdentityWasLogged = false
+
+    static func beginInterval(_ name: StaticString, _ message: String = "") -> OSSignpostIntervalState? {
+        guard isEnabled else { return nil }
+        logBuildIdentityIfNeeded()
+        let state = signposter.beginInterval(name)
+        if message.isEmpty {
+            logger.notice("PROFILE event=\(String(describing: name), privacy: .public)")
+        } else {
+            logger.notice("PROFILE event=\(String(describing: name), privacy: .public) \(message, privacy: .public)")
+        }
+        return state
+    }
+
+    static func endInterval(_ name: StaticString, _ state: OSSignpostIntervalState?, _ message: String = "") {
+        guard isEnabled, let state else { return }
+        signposter.endInterval(name, state)
+        if !message.isEmpty {
+            logger.notice("PROFILE event=\(String(describing: name), privacy: .public).end \(message, privacy: .public)")
+        }
+    }
+
+    static func event(_ name: StaticString, _ message: String = "") {
+        guard isEnabled else { return }
+        logBuildIdentityIfNeeded()
+        if message.isEmpty {
+            logger.notice("PROFILE event=\(String(describing: name), privacy: .public)")
+        } else {
+            logger.notice("PROFILE event=\(String(describing: name), privacy: .public) \(message, privacy: .public)")
+        }
+    }
+
+    static func countVisibleTextViews(in view: UIView) -> Int {
+        guard isEnabled else { return 0 }
+        var count = 0
+        func walk(_ view: UIView) {
+            if view is UITextView, !view.isHidden, view.window != nil, view.alpha > 0.01 {
+                count += 1
+            }
+            view.subviews.forEach(walk)
+        }
+        walk(view)
+        return count
+    }
+
+    static func attributedTextFingerprint(_ attributedText: NSAttributedString) -> String {
+        guard isEnabled else { return "disabled" }
+        var hasher = Hasher()
+        hasher.combine(attributedText.length)
+        hasher.combine(attributedText.string)
+        attributedText.enumerateAttributes(in: NSRange(location: 0, length: attributedText.length), options: []) { attributes, range, _ in
+            hasher.combine(range.location)
+            hasher.combine(range.length)
+            hasher.combine(attributes.keys.map(\.rawValue).sorted())
+        }
+        return String(hasher.finalize())
+    }
+
+    private static func logBuildIdentityIfNeeded() {
+        guard !buildIdentityWasLogged else { return }
+        buildIdentityWasLogged = true
+        let bundle = Bundle.main
+        let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+        let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+        let gitSha = ProcessInfo.processInfo.environment["CLAWLINE_SOURCE_SHA"] ?? "unknown"
+        logger.notice("PROFILE event=build_identity version=\(version, privacy: .public) build=\(build, privacy: .public) sourceSHA=\(gitSha, privacy: .public)")
     }
 }

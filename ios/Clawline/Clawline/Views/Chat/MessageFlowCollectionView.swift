@@ -1246,11 +1246,21 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     private func bubbleV2Measurement(for key: BubbleSizingV2.CacheKey) -> BubbleSizingV2.Measurement? {
-        bubbleSizingV2MeasurementCache.value(forKey: key)
+        let value = bubbleSizingV2MeasurementCache.value(forKey: key)
+        ClawlineCatalystProfileInstrumentation.event(
+            "BubbleSizingV2.measurementCache",
+            "result=\(value == nil ? "miss" : "hit") reason=measurementOnly messageId=\(key.messageId) linkPreviewVersion=\(key.linkPreviewStateVersion)"
+        )
+        return value
     }
 
     private func bubbleV2LayoutState(for key: BubbleSizingV2.CacheKey) -> BubbleSizingV2.LayoutState? {
-        bubbleSizingV2LayoutStateCache.value(forKey: key)
+        let value = bubbleSizingV2LayoutStateCache.value(forKey: key)
+        ClawlineCatalystProfileInstrumentation.event(
+            "BubbleSizingV2.layoutStateCache",
+            "result=\(value == nil ? "miss" : "hit") reason=layoutState messageId=\(key.messageId) linkPreviewVersion=\(key.linkPreviewStateVersion)"
+        )
+        return value
     }
 
     private func recordBubbleV2Measurement(_ measurement: BubbleSizingV2.Measurement,
@@ -4257,6 +4267,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                     self?.viewModel?.resendFailedMessage(messageId: message.id)
                 }
             )
+            ClawlineCatalystProfileInstrumentation.event(
+                "MessageFlowCollectionView.configureCell",
+                "messageId=\(message.id) bubbleSizingV2=\(layoutStateV2 != nil) visibleTextViews=\(ClawlineCatalystProfileInstrumentation.countVisibleTextViews(in: collectionView)) visibleCells=\(collectionView.visibleCells.count)"
+            )
             return cell
         }
     }
@@ -4683,6 +4697,16 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     private func sizeForItem(at indexPath: IndexPath) -> CGSize {
+        let interval = ClawlineCatalystProfileInstrumentation.beginInterval(
+            "MessageFlowCollectionView.sizeForItem",
+            "section=\(indexPath.section) item=\(indexPath.item) visibleTextViews=\(ClawlineCatalystProfileInstrumentation.countVisibleTextViews(in: collectionView)) visibleCells=\(collectionView.visibleCells.count)"
+        )
+        defer {
+            ClawlineCatalystProfileInstrumentation.endInterval(
+                "MessageFlowCollectionView.sizeForItem",
+                interval
+            )
+        }
         guard let id = dataSource.itemIdentifier(for: indexPath), let viewModel else {
             return .zero
         }

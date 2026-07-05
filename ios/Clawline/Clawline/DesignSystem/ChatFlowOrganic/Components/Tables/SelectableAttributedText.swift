@@ -30,6 +30,18 @@ struct SelectableAttributedText: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UITextView, context: Context) {
+        let fingerprint = ClawlineCatalystProfileInstrumentation.attributedTextFingerprint(attributedString)
+        let interval = ClawlineCatalystProfileInstrumentation.beginInterval(
+            "SelectableAttributedText.updateUIView",
+            "count=\(context.coordinator.recordUpdate()) length=\(attributedString.length) fingerprint=\(fingerprint)"
+        )
+        defer {
+            ClawlineCatalystProfileInstrumentation.endInterval(
+                "SelectableAttributedText.updateUIView",
+                interval,
+                "assigned=\(context.coordinator.lastAttributedTextAssignment)"
+            )
+        }
         context.coordinator.isUpdatingFromSwiftUI = true
         defer { context.coordinator.isUpdatingFromSwiftUI = false }
 
@@ -37,7 +49,13 @@ struct SelectableAttributedText: UIViewRepresentable {
         if uiView.overrideUserInterfaceStyle != style {
             uiView.overrideUserInterfaceStyle = style
         }
-        if Self.needsAttributedTextUpdate(current: uiView.attributedText, next: attributedString) {
+        let shouldAssignAttributedText = Self.needsAttributedTextUpdate(current: uiView.attributedText, next: attributedString)
+        context.coordinator.lastAttributedTextAssignment = shouldAssignAttributedText
+        ClawlineCatalystProfileInstrumentation.event(
+            "SelectableAttributedText.attributedTextAssignment",
+            "assigned=\(shouldAssignAttributedText) fingerprint=\(fingerprint)"
+        )
+        if shouldAssignAttributedText {
             uiView.attributedText = attributedString
         }
         uiView.textAlignment = alignment
@@ -52,7 +70,16 @@ struct SelectableAttributedText: UIViewRepresentable {
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
         guard let width = proposal.width, width > 0 else { return nil }
+        let interval = ClawlineCatalystProfileInstrumentation.beginInterval(
+            "SelectableAttributedText.sizeThatFits",
+            "count=\(context.coordinator.recordSizeThatFits()) width=\(width)"
+        )
         let fitting = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        ClawlineCatalystProfileInstrumentation.endInterval(
+            "SelectableAttributedText.sizeThatFits",
+            interval,
+            "height=\(ceil(fitting.height))"
+        )
         return CGSize(width: width, height: ceil(fitting.height))
     }
 
@@ -99,9 +126,12 @@ struct SelectableAttributedText: UIViewRepresentable {
         private let onSelectionChange: (Bool) -> Void
         private let onLinkTap: (URL) -> Void
         var isUpdatingFromSwiftUI = false
+        var lastAttributedTextAssignment = false
         private var lastHasSelection: Bool?
         private var lastSelectionResetToken: Int?
         private var deferredSelectionChangeGeneration = 0
+        private var updateCount = 0
+        private var sizeThatFitsCount = 0
 
         init(onSelectionChange: @escaping (Bool) -> Void, onLinkTap: @escaping (URL) -> Void) {
             self.onSelectionChange = onSelectionChange
@@ -120,6 +150,16 @@ struct SelectableAttributedText: UIViewRepresentable {
                 return
             }
             emitSelectionChange(hasSelection)
+        }
+
+        func recordUpdate() -> Int {
+            updateCount += 1
+            return updateCount
+        }
+
+        func recordSizeThatFits() -> Int {
+            sizeThatFitsCount += 1
+            return sizeThatFitsCount
         }
 
         @available(iOS 17.0, macCatalyst 17.0, visionOS 1.0, *)

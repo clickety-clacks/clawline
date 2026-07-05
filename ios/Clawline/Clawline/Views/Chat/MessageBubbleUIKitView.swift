@@ -547,6 +547,10 @@ final class MessageBubbleUIKitContainerView: UIView {
                    isCollapsedUserOnlyMode: Bool = false,
                    replyReference: PendingMessageReference? = nil,
                    onResend: (() -> Void)?) {
+        ClawlineCatalystProfileInstrumentation.event(
+            "MessageBubbleUIKitContainerView.configure",
+            "messageId=\(message.id) role=\(message.role.rawValue) bubbleSizingV2=\(bubbleSizingV2 != nil)"
+        )
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
         let sizeClass = MessageFlowRules.sizeClass(for: presentation)
         bubbleView.configure(
@@ -606,6 +610,7 @@ final class MessageBubbleUIKitContainerView: UIView {
     }
 
     func prepareForReuse() {
+        ClawlineCatalystProfileInstrumentation.event("MessageBubbleUIKitContainerView.prepareForReuse")
         // Truncated bubbles use an inner vertical scroll view. Resetting the bubble prevents
         // reused cells from inheriting a non-zero contentOffset (GitHub #56).
         bubbleView.prepareForReuse()
@@ -1252,6 +1257,17 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
                    isCollapsedUserOnlyMode: Bool = false,
                    replyReference: PendingMessageReference? = nil,
                    salientHighlightService: (any SalientHighlightServicing)? = nil) {
+        let interval = ClawlineCatalystProfileInstrumentation.beginInterval(
+            "MessageBubbleUIKitView.configure",
+            "messageId=\(message.id) role=\(message.role.rawValue) bubbleSizingV2=\(bubbleSizingV2 != nil) maxWidth=\(maxWidth)"
+        )
+        defer {
+            ClawlineCatalystProfileInstrumentation.endInterval(
+                "MessageBubbleUIKitView.configure",
+                interval,
+                "textViews=\(ClawlineCatalystProfileInstrumentation.countVisibleTextViews(in: self))"
+            )
+        }
         assert(Thread.isMainThread)
         self.terminalConnectionPool = terminalConnectionPool
         let previousIdentity = currentIdentityKey
@@ -2020,6 +2036,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     }
 
     func prepareForReuse() {
+        ClawlineCatalystProfileInstrumentation.event("MessageBubbleUIKitView.prepareForReuse")
         currentMessage = nil
         currentMessageId = nil
         currentSessionKey = nil

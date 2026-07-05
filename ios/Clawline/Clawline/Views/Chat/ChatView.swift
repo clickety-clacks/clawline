@@ -5217,6 +5217,19 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: KeyboardPinnedContainerView<Content>, context: Context) {
+        context.coordinator.updateCount += 1
+        let interval = ClawlineCatalystProfileInstrumentation.beginInterval(
+            "KeyboardPinnedContainer.updateUIView",
+            "count=\(context.coordinator.updateCount) keyboardVisible=\(isKeyboardVisible) desiredBottomGap=\(desiredBottomGap) freezeBarHeightUpdates=\(freezeBarHeightUpdates)"
+        )
+        var layoutIfNeededReasons: [String] = []
+        defer {
+            ClawlineCatalystProfileInstrumentation.endInterval(
+                "KeyboardPinnedContainer.updateUIView",
+                interval,
+                "layoutIfNeededReasons=\(layoutIfNeededReasons.joined(separator: ","))"
+            )
+        }
         uiView.hostingController.rootView = content
         uiView.updateScrollButton(
             scrollButtonView,
@@ -5232,6 +5245,11 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
         // Seed the pinned gap immediately on every SwiftUI update so launch layout matches the
         // steady-state hidden-keyboard position even before coordinator-driven transitions fire.
         if uiView.updateDesiredBottomGapIfNeeded(desiredBottomGap, isKeyboardVisible: isKeyboardVisible) {
+            layoutIfNeededReasons.append("desiredBottomGapChanged")
+            ClawlineCatalystProfileInstrumentation.event(
+                "KeyboardPinnedContainer.layoutIfNeeded",
+                "reason=desiredBottomGapChanged keyboardVisible=\(isKeyboardVisible) desiredBottomGap=\(desiredBottomGap)"
+            )
             uiView.layoutIfNeeded()
         }
         uiView.setOnBarHeightChange { [weak layoutCoordinator] height in
@@ -5254,6 +5272,14 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
         uiView.setComposerMotionOffsetY(composerMotionOffsetY)
         layoutCoordinator.applyTransitionIfPossible(reason: "KeyboardPinnedContainer.updateUIView")
         _ = layoutKey
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    final class Coordinator {
+        var updateCount = 0
     }
 }
 

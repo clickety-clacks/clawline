@@ -6222,7 +6222,7 @@ enum CrossChatNotificationMarkdownRenderer {
     }()
 
     static func shouldUsePlainTextFastPath(content: String) -> Bool {
-        guard TextLinkURLTemplateRules.configuredRules.allSatisfy({ !$0.enabled }) else {
+        guard !TextLinkURLTemplateRules.configuredRulesNeedGeneratedLinkRendering(for: content) else {
             return false
         }
         return !containsMarkdownSyntax(content)

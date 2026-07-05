@@ -94,6 +94,19 @@ enum TextLinkURLTemplateRules {
         apply(configuredRules, to: attributed)
     }
 
+    static func configuredRulesNeedGeneratedLinkRendering(for text: String) -> Bool {
+        let fullRange = NSRange(location: 0, length: (text as NSString).length)
+        for rule in configuredRules where rule.enabled {
+            guard let regex = try? NSRegularExpression(pattern: rule.pattern) else {
+                return true
+            }
+            if regex.firstMatch(in: text, options: [], range: fullRange) != nil {
+                return true
+            }
+        }
+        return false
+    }
+
     @discardableResult
     static func apply(
         _ rules: [TextLinkURLTemplateRule],

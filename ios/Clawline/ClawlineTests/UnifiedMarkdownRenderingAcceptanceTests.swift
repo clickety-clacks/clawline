@@ -495,7 +495,7 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
     @Test("T384 plain notification links avoid unified markdown render path")
     func t384_plainNotificationLinksUsePlainFastPath() {
         let originalRules = TextLinkURLTemplateRules.configuredRules
-        TextLinkURLTemplateRules.configuredRules = []
+        TextLinkURLTemplateRules.configuredRules = [.janusTrackerExample]
         defer { TextLinkURLTemplateRules.configuredRules = originalRules }
 
         #expect(CrossChatNotificationMarkdownRenderer.shouldUsePlainTextFastPath(

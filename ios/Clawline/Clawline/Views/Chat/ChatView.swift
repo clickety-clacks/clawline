@@ -2950,6 +2950,9 @@ struct ChatView: View {
             },
             onSearchFocusResigned: { presentationID in
                 streamPopupFocusCoordinator.acknowledgeSearchFocusResigned(presentationID: presentationID)
+            },
+            onPopupPresentationEnded: { presentationID in
+                streamPopupFocusCoordinator.clearActivePresentation(presentationID: presentationID)
             }
         )
     }
@@ -3666,6 +3669,8 @@ private struct StreamPopupTrigger: View {
     /// R1136-ARCH-06: child focus reporting channel.
     let onSearchFocusApplied: (UInt) -> Void
     let onSearchFocusResigned: (UInt) -> Void
+    /// R1136-ARCH-05: popup teardown reports the finished presentation ID.
+    let onPopupPresentationEnded: (UInt) -> Void
 
     var body: some View {
         StreamPageDotsView(
@@ -3723,7 +3728,8 @@ private struct StreamPopupTrigger: View {
                 },
                 onShortcutOwnershipChange: onShortcutOwnershipChange,
                 onSearchFocusApplied: onSearchFocusApplied,
-                onSearchFocusResigned: onSearchFocusResigned
+                onSearchFocusResigned: onSearchFocusResigned,
+                onPresentationEnded: onPopupPresentationEnded
             )
             .presentationCompactAdaptation(.popover)
             .streamManagerPopoverBackgroundInteraction()

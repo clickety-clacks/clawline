@@ -45,6 +45,8 @@ struct StreamManagerSheet: View {
     /// the active presentation ID. Children report; the parent decides policy.
     let onSearchFocusApplied: (UInt) -> Void
     let onSearchFocusResigned: (UInt) -> Void
+    /// Reports that SwiftUI has torn down the popup presentation for this ID.
+    let onPresentationEnded: (UInt) -> Void
 
     @State private var draftName = ""
     @State private var searchQuery = ""
@@ -704,6 +706,7 @@ struct StreamManagerSheet: View {
         if isSearchFieldFocused {
             onSearchFocusResigned(presentationID)
         }
+        onPresentationEnded(presentationID)
         resetInlineEditing()
         searchQuery = ""
         isSearchFieldFocused = false

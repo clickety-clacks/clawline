@@ -3383,7 +3383,9 @@ struct ChatView: View {
                 requestComposerFocusAfterStreamPopupDismissal()
             }
         }
-        suppressStreamPopupReopenFromClosingTap(presentationID: closingPresentationID)
+        if let closingPresentationID {
+            suppressStreamPopupReopenFromClosingTap(presentationID: closingPresentationID)
+        }
     }
 
     @MainActor

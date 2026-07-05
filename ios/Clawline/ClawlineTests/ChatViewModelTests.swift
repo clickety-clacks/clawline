@@ -342,9 +342,9 @@ struct ChatViewModelTests {
         let sourceC = "agent:main:clawline:user:s_popup_c"
         let streams = [
             makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
-            makeStreamSession(sessionKey: sourceA, displayName: "Popup A", kind: "custom", orderIndex: 1, isBuiltIn: false),
-            makeStreamSession(sessionKey: sourceB, displayName: "Popup B", kind: "custom", orderIndex: 2, isBuiltIn: false),
-            makeStreamSession(sessionKey: sourceC, displayName: "Popup C", kind: "custom", orderIndex: 3, isBuiltIn: false)
+            makeStreamSession(sessionKey: sourceA, displayName: "Popup A", kind: "custom", orderIndex: 1, isBuiltIn: false, trackingMode: .adopted),
+            makeStreamSession(sessionKey: sourceB, displayName: "Popup B", kind: "custom", orderIndex: 2, isBuiltIn: false, trackingMode: .adopted),
+            makeStreamSession(sessionKey: sourceC, displayName: "Popup C", kind: "custom", orderIndex: 3, isBuiltIn: false, trackingMode: .adopted)
         ]
         let chatService = TestChatService()
         chatService.streams = streams
@@ -359,10 +359,10 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await viewModel.activate(origin: "test.t1355.popupInteraction")
         chatService.emitServiceEvent(.streamSnapshot(streams))
         try await setConnected(chatService: chatService, viewModel: viewModel)
-        chatService.emit(
+        try emitServerMessage(
             Message(
                 id: "s_popup_a_1",
                 role: .assistant,
@@ -372,9 +372,10 @@ struct ChatViewModelTests {
                 attachments: [],
                 deviceId: nil,
                 sessionKey: sourceA
-            )
+            ),
+            via: chatService
         )
-        chatService.emit(
+        try emitServerMessage(
             Message(
                 id: "s_popup_b_1",
                 role: .assistant,
@@ -384,7 +385,8 @@ struct ChatViewModelTests {
                 attachments: [],
                 deviceId: nil,
                 sessionKey: sourceB
-            )
+            ),
+            via: chatService
         )
         for _ in 0..<50 {
             if viewModel.crossChatNotificationBubbles.count == 2 { break }
@@ -393,7 +395,7 @@ struct ChatViewModelTests {
         #expect(viewModel.crossChatNotificationBubbles.map(\.sourceChatId) == [sourceA, sourceB])
 
         viewModel.beginCrossChatNotificationPopupInteraction(sourceChatId: sourceB)
-        chatService.emit(
+        try emitServerMessage(
             Message(
                 id: "s_popup_c_1",
                 role: .assistant,
@@ -403,7 +405,8 @@ struct ChatViewModelTests {
                 attachments: [],
                 deviceId: nil,
                 sessionKey: sourceC
-            )
+            ),
+            via: chatService
         )
         viewModel.dismissCrossChatNotification(sourceChatId: sourceA)
         try await Task.sleep(for: .milliseconds(20))
@@ -434,9 +437,9 @@ struct ChatViewModelTests {
         let sourceC = "agent:main:clawline:user:s_popup_batch_c"
         let streams = [
             makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
-            makeStreamSession(sessionKey: sourceA, displayName: "Popup Batch A", kind: "custom", orderIndex: 1, isBuiltIn: false),
-            makeStreamSession(sessionKey: sourceB, displayName: "Popup Batch B", kind: "custom", orderIndex: 2, isBuiltIn: false),
-            makeStreamSession(sessionKey: sourceC, displayName: "Popup Batch C", kind: "custom", orderIndex: 3, isBuiltIn: false)
+            makeStreamSession(sessionKey: sourceA, displayName: "Popup Batch A", kind: "custom", orderIndex: 1, isBuiltIn: false, trackingMode: .adopted),
+            makeStreamSession(sessionKey: sourceB, displayName: "Popup Batch B", kind: "custom", orderIndex: 2, isBuiltIn: false, trackingMode: .adopted),
+            makeStreamSession(sessionKey: sourceC, displayName: "Popup Batch C", kind: "custom", orderIndex: 3, isBuiltIn: false, trackingMode: .adopted)
         ]
         let chatService = TestChatService()
         chatService.streams = streams
@@ -460,7 +463,7 @@ struct ChatViewModelTests {
             try await Task.sleep(forDuration: .milliseconds(10))
         }
 
-        chatService.emit(
+        try emitServerMessage(
             Message(
                 id: "s_popup_batch_a_1",
                 role: .assistant,
@@ -470,9 +473,10 @@ struct ChatViewModelTests {
                 attachments: [],
                 deviceId: nil,
                 sessionKey: sourceA
-            )
+            ),
+            via: chatService
         )
-        chatService.emit(
+        try emitServerMessage(
             Message(
                 id: "s_popup_batch_b_1",
                 role: .assistant,
@@ -482,7 +486,8 @@ struct ChatViewModelTests {
                 attachments: [],
                 deviceId: nil,
                 sessionKey: sourceB
-            )
+            ),
+            via: chatService
         )
         for _ in 0..<50 {
             if viewModel.crossChatNotificationBubbles.count == 2 { break }
@@ -491,9 +496,22 @@ struct ChatViewModelTests {
         #expect(viewModel.crossChatNotificationBubbles.map(\.sourceChatId) == [sourceA, sourceB])
 
         viewModel.beginCrossChatNotificationPopupInteraction(sourceChatId: sourceB)
-        let replayPayload = #"{"type":"message","id":"s_popup_batch_c_1","role":"assistant","content":"replayed while popup open","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(sourceC)","attachments":[]}"#
-        chatService.emitLifecycleEvent(.init(epoch: 12, payload: .serverMessage(data: Data(replayPayload.utf8))))
-        chatService.emitLifecycleEvent(.init(epoch: 12, payload: .syncComplete))
+        let replayEpoch = try #require(chatService.lastStartedEpoch)
+        try emitServerMessage(
+            Message(
+                id: "s_popup_batch_c_1",
+                role: .assistant,
+                content: "replayed while popup open",
+                timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: sourceC
+            ),
+            via: chatService,
+            epoch: replayEpoch
+        )
+        chatService.emitLifecycleEvent(.init(epoch: replayEpoch, payload: .syncComplete))
         viewModel.dismissCrossChatNotification(sourceChatId: sourceA)
         try await Task.sleep(forDuration: .milliseconds(40))
 
@@ -7375,6 +7393,7 @@ final class TestChatService: ChatServicing {
     private(set) var fetchedSessionStatusKeys: [String] = []
     private(set) var cancelCurrentRunCallCount: Int = 0
     private(set) var lastCancelledSessionKey: String?
+    private(set) var lastStartedEpoch: Int?
     private(set) var deleteStreamCallCount: Int = 0
     private(set) var lastDeletedSessionKey: String?
     private(set) var renameStreamCallCount: Int = 0
@@ -7427,6 +7446,7 @@ final class TestChatService: ChatServicing {
         _ = lastMessageId
         _ = token
         connectCallCount += 1
+        lastStartedEpoch = epoch
         lifecycleContinuation?.yield(.init(epoch: epoch, payload: .transportOpened))
         lifecycleContinuation?.yield(
             .init(
@@ -7885,7 +7905,8 @@ private func makeStreamSession(
     displayName: String,
     kind: String,
     orderIndex: Int,
-    isBuiltIn: Bool
+    isBuiltIn: Bool,
+    trackingMode: StreamSession.TrackingMode = .serverManaged
 ) -> StreamSession {
     StreamSession(
         sessionKey: sessionKey,
@@ -7894,7 +7915,8 @@ private func makeStreamSession(
         orderIndex: orderIndex,
         isBuiltIn: isBuiltIn,
         createdAt: Date(),
-        updatedAt: Date()
+        updatedAt: Date(),
+        trackingMode: trackingMode
     )
 }
 

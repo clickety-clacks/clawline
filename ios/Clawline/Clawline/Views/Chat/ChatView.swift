@@ -351,6 +351,15 @@ enum StreamPagerKeyboardDismissPolicy {
     }
 }
 
+enum ScrollButtonPopupVisibilityPolicy {
+    static func resolvedVisibility(
+        normalVisibility: Bool,
+        isStreamPopupPresented: Bool
+    ) -> Bool {
+        normalVisibility && !isStreamPopupPresented
+    }
+}
+
 struct ChatView: View {
     private static let spatialPromptFocusShortcutTargetLeaseDuration: TimeInterval = 10
 
@@ -938,8 +947,17 @@ struct ChatView: View {
         if !activeSelectionPopupVisible {
             let sessionKey = viewModel.uiSelectedSessionKey
             let state = scrollButtonState(for: sessionKey)
+            let isVisible = ScrollButtonPopupVisibilityPolicy.resolvedVisibility(
+                normalVisibility: state.isVisible,
+                isStreamPopupPresented: streamPopupRouteController.isPopupPresented
+            )
             scrollButtonControl(
-                state: state,
+                state: ScrollButtonState(
+                    isVisible: isVisible,
+                    unreadCount: state.unreadCount,
+                    firstUnreadMessageId: state.firstUnreadMessageId,
+                    bounceToken: state.bounceToken
+                ),
                 containerWidth: containerWidth,
                 onTap: { handleScrollButtonTap(sessionKey: sessionKey, viewModel: viewModel) }
             )
@@ -2349,8 +2367,10 @@ struct ChatView: View {
 #else
         let pinnedScrollButtonView: AnyView? = scrollButtonView
         let pinnedScrollButtonIsVisible = !isMentionPickerVisible
-            && streamPopupRouteController.route == .closed
-            && state.isVisible
+            && ScrollButtonPopupVisibilityPolicy.resolvedVisibility(
+                normalVisibility: state.isVisible,
+                isStreamPopupPresented: streamPopupRouteController.isPopupPresented
+            )
         let pinnedScrollButtonGap: CGFloat = floatingScrollButtonBottomGap
         let pinnedScrollButtonHorizontalOffset = scrollButtonHorizontalOffset(
             for: scrollButtonDetent,

@@ -732,6 +732,38 @@ struct StreamPageDotsViewTests {
         )
     }
 
+    @Test("T322 open stream popup suppresses scroll-to-bottom button")
+    func openStreamPopupSuppressesScrollToBottomButton() {
+        #expect(
+            ScrollButtonPopupVisibilityPolicy.resolvedVisibility(
+                normalVisibility: true,
+                isStreamPopupPresented: true
+            ) == false
+        )
+        #expect(
+            ScrollButtonPopupVisibilityPolicy.resolvedVisibility(
+                normalVisibility: false,
+                isStreamPopupPresented: true
+            ) == false
+        )
+    }
+
+    @Test("T322 dismissed stream popup restores normal scroll-to-bottom visibility")
+    func dismissedStreamPopupRestoresNormalScrollToBottomVisibility() {
+        #expect(
+            ScrollButtonPopupVisibilityPolicy.resolvedVisibility(
+                normalVisibility: true,
+                isStreamPopupPresented: false
+            )
+        )
+        #expect(
+            ScrollButtonPopupVisibilityPolicy.resolvedVisibility(
+                normalVisibility: false,
+                isStreamPopupPresented: false
+            ) == false
+        )
+    }
+
     @Test("T1146 stream pager does not dismiss the software keyboard")
     @MainActor
     func streamPagerDoesNotDismissSoftwareKeyboard() {

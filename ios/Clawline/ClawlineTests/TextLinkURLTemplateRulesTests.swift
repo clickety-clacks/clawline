@@ -904,6 +904,11 @@ struct TextLinkURLTemplateRulesTests {
         #expect(webFrame.intersects(closeFrame))
         #expect(closeFrame.minY < webFrame.minY)
         #expect(closeFrame.maxX > webFrame.maxX)
+
+        let visibleFloatingPoint = CGPoint(x: closeFrame.maxX - 4, y: closeFrame.midY)
+        #expect(!webFrame.contains(visibleFloatingPoint))
+        #expect(closeFrame.contains(visibleFloatingPoint))
+        #expect(controller.view.hitTest(visibleFloatingPoint, with: nil) === closeButton)
     }
 
     @Test("T1192: popup layout keeps edge hover point inside content")

@@ -272,7 +272,7 @@ final class TextLinkResolvedURLContentViewController: UIViewController {
         applyPresentationStyle()
 
         contentView.addSubview(webView)
-        contentView.addSubview(closeButton)
+        view.addSubview(closeButton)
 
         if presentation == .modal {
             let outsideTap = UITapGestureRecognizer(target: self, action: #selector(handleOutsideTap(_:)))
@@ -328,7 +328,7 @@ final class TextLinkResolvedURLContentViewController: UIViewController {
 
         contentView.frame = CGRect(origin: origin, size: size)
         webView.frame = contentView.bounds
-        closeButton.frame = closeButtonFrame(in: contentView.bounds, presentation: presentation)
+        closeButton.frame = closeButtonFrame(in: contentView.frame, presentation: presentation)
     }
 
     @objc private func handleOutsideTap(_ recognizer: UITapGestureRecognizer) {
@@ -362,12 +362,12 @@ final class TextLinkResolvedURLContentViewController: UIViewController {
         Swift.max(min, Swift.min(max, value))
     }
 
-    private func closeButtonFrame(in bounds: CGRect, presentation: Presentation) -> CGRect {
+    private func closeButtonFrame(in contentFrame: CGRect, presentation: Presentation) -> CGRect {
         switch presentation {
         case .modal:
-            CGRect(x: bounds.maxX - 48, y: 12, width: 36, height: 36)
+            CGRect(x: contentFrame.maxX - 48, y: contentFrame.minY + 12, width: 36, height: 36)
         case .popup:
-            CGRect(x: bounds.maxX - 18, y: -18, width: 36, height: 36)
+            CGRect(x: contentFrame.maxX - 18, y: contentFrame.minY - 18, width: 36, height: 36)
         }
     }
 }

@@ -238,7 +238,7 @@ final class StreamAPIClient {
         guard let baseURL = baseURLProvider() else {
             throw ProviderChatService.Error.missingBaseURL
         }
-        guard let url = endpointURL(baseURL: baseURL, path: path, queryItems: queryItems) else {
+        guard let url = endpointURL(baseURL: ProviderHTTPURLResolver.apiBaseURL(from: baseURL), path: path, queryItems: queryItems) else {
             throw ProviderChatService.Error.missingBaseURL
         }
         var request = URLRequest(url: url)

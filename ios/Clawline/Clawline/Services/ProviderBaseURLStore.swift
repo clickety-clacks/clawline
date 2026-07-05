@@ -113,3 +113,74 @@ enum ProviderWebSocketURLBuilder {
         return urls
     }
 }
+
+enum ProviderHTTPURLResolver {
+    static func uploadURL(from baseURL: URL) -> URL {
+        apiBaseURL(from: baseURL).appendingPathComponent("upload")
+    }
+
+    static func downloadURL(from baseURL: URL, assetId: String) throws -> URL {
+        guard !assetId.isEmpty else {
+            throw AttachmentError.invalidData
+        }
+        guard var components = URLComponents(url: apiBaseURL(from: baseURL), resolvingAgainstBaseURL: false) else {
+            throw AttachmentError.invalidData
+        }
+        guard let encodedAssetId = encodePathComponent(assetId) else {
+            throw AttachmentError.invalidData
+        }
+        let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
+        components.path = "\(basePath)/download/\(encodedAssetId)"
+        guard let url = components.url else {
+            throw AttachmentError.invalidData
+        }
+        return url
+    }
+
+    static func apiBaseURL(from baseURL: URL) -> URL {
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
+              components.scheme?.lowercased() == "http",
+              let host = components.host,
+              !isLocalHTTPHost(host) else {
+            return baseURL
+        }
+
+        components.scheme = "https"
+        if let canonicalHost = canonicalHTTPSHost(for: host) {
+            components.host = canonicalHost
+        }
+        if components.port == 18800 {
+            components.port = 19443
+        }
+        return components.url ?? baseURL
+    }
+
+    private static func isLocalHTTPHost(_ host: String) -> Bool {
+        let normalized = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]")).lowercased()
+        if normalized == "localhost" || normalized == "0.0.0.0" || normalized == "::1" {
+            return true
+        }
+        if normalized.hasSuffix(".local") {
+            return true
+        }
+        if normalized.hasPrefix("127.") {
+            return true
+        }
+        return false
+    }
+
+    private static func canonicalHTTPSHost(for host: String) -> String? {
+        switch host.lowercased() {
+        case "100.85.66.60":
+            return "tars.tail4105e8.ts.net"
+        default:
+            return nil
+        }
+    }
+
+    private static func encodePathComponent(_ value: String) -> String? {
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "/")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed)
+    }
+}

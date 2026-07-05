@@ -260,9 +260,13 @@ final class TextLinkResolvedURLContentViewController: UIViewController {
 
         closeButton.setImage(UIImage(systemName: "xmark"), for: .normal)
         closeButton.tintColor = .label
-        closeButton.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.92)
+        closeButton.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.78)
         closeButton.layer.cornerRadius = 18
         closeButton.layer.cornerCurve = .continuous
+        closeButton.layer.shadowColor = UIColor.black.cgColor
+        closeButton.layer.shadowOpacity = 0.18
+        closeButton.layer.shadowRadius = 7
+        closeButton.layer.shadowOffset = CGSize(width: 0, height: 2)
         closeButton.accessibilityLabel = "Close resolved URL"
         closeButton.addTarget(self, action: #selector(close), for: .touchUpInside)
         applyPresentationStyle()
@@ -282,7 +286,7 @@ final class TextLinkResolvedURLContentViewController: UIViewController {
     private func applyPresentationStyle() {
         view.backgroundColor = presentation == .modal ? UIColor.black.withAlphaComponent(0.36) : .clear
         contentView.backgroundColor = presentation == .modal ? .systemBackground : .clear
-        closeButton.isHidden = presentation == .popup
+        closeButton.isHidden = false
     }
 
     private func installPopupHoverRecognizers() {
@@ -324,7 +328,7 @@ final class TextLinkResolvedURLContentViewController: UIViewController {
 
         contentView.frame = CGRect(origin: origin, size: size)
         webView.frame = contentView.bounds
-        closeButton.frame = CGRect(x: contentView.bounds.maxX - 48, y: 12, width: 36, height: 36)
+        closeButton.frame = closeButtonFrame(in: contentView.bounds, presentation: presentation)
     }
 
     @objc private func handleOutsideTap(_ recognizer: UITapGestureRecognizer) {
@@ -337,13 +341,15 @@ final class TextLinkResolvedURLContentViewController: UIViewController {
 
     @objc private func handlePopupHover(_ recognizer: UIHoverGestureRecognizer) {
         let location = recognizer.location(in: view)
+        let closeFrame = closeButton.convert(closeButton.bounds, to: view)
+        let isOverPopupChrome = contentView.frame.contains(location) || closeFrame.contains(location)
         if recognizer.state == .changed,
-           !contentView.frame.contains(location) {
+           !isOverPopupChrome {
             dismiss(animated: false)
             return
         }
         if (recognizer.state == .ended || recognizer.state == .cancelled),
-           !contentView.frame.contains(location) {
+           !isOverPopupChrome {
             dismiss(animated: false)
         }
     }
@@ -354,5 +360,14 @@ final class TextLinkResolvedURLContentViewController: UIViewController {
 
     private func clamp(_ value: CGFloat, min: CGFloat, max: CGFloat) -> CGFloat {
         Swift.max(min, Swift.min(max, value))
+    }
+
+    private func closeButtonFrame(in bounds: CGRect, presentation: Presentation) -> CGRect {
+        switch presentation {
+        case .modal:
+            CGRect(x: bounds.maxX - 48, y: 12, width: 36, height: 36)
+        case .popup:
+            CGRect(x: bounds.maxX - 18, y: -18, width: 36, height: 36)
+        }
     }
 }

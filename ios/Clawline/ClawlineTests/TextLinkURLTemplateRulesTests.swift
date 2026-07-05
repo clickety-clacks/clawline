@@ -873,9 +873,9 @@ struct TextLinkURLTemplateRulesTests {
         #expect(received?.2 == anchor)
     }
 
-    @Test("D11/R1135-11: popup resolved URL presentation uses clear outer background and web content")
+    @Test("D11/R1135-11/T1341: popup resolved URL chrome keeps clear outer background and overlaid close control")
     @MainActor
-    func popupResolvedURLPresentationUsesClearOuterBackgroundAndWebContent() throws {
+    func popupResolvedURLPresentationUsesClearOuterBackgroundAndOverlaidCloseControl() throws {
         let popupURL = try #require(URL(string: "https://example.com/popup/P1192"))
         let controller = TextLinkResolvedURLContentViewController(
             url: popupURL,
@@ -896,7 +896,14 @@ struct TextLinkURLTemplateRulesTests {
         let webView = try #require(webViews(in: controller.view).first)
         #expect(webView.frame.width >= 320)
         #expect(webView.frame.height >= 280)
-        #expect(!buttons(in: controller.view).contains { !$0.isHidden })
+        let closeButton = try #require(buttons(in: controller.view).first { !$0.isHidden })
+        #expect(closeButton.accessibilityLabel == "Close resolved URL")
+
+        let webFrame = webView.convert(webView.bounds, to: controller.view)
+        let closeFrame = closeButton.convert(closeButton.bounds, to: controller.view)
+        #expect(webFrame.intersects(closeFrame))
+        #expect(closeFrame.minY < webFrame.minY)
+        #expect(closeFrame.maxX > webFrame.maxX)
     }
 
     @Test("T1192: popup layout keeps edge hover point inside content")

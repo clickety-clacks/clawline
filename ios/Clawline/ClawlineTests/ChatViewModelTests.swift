@@ -423,6 +423,95 @@ struct ChatViewModelTests {
         #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceA] == nil)
     }
 
+    @Test("T1355 T1213 batch commit waits for popup dismissal before consuming epoch")
+    @MainActor
+    func popupInteractionDefersReplayBatchCommitUntilDismissal() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let sourceA = "agent:main:clawline:user:s_popup_batch_a"
+        let sourceB = "agent:main:clawline:user:s_popup_batch_b"
+        let sourceC = "agent:main:clawline:user:s_popup_batch_c"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: sourceA, displayName: "Popup Batch A", kind: "custom", orderIndex: 1, isBuiltIn: false),
+            makeStreamSession(sessionKey: sourceB, displayName: "Popup Batch B", kind: "custom", orderIndex: 2, isBuiltIn: false),
+            makeStreamSession(sessionKey: sourceC, displayName: "Popup Batch C", kind: "custom", orderIndex: 3, isBuiltIn: false)
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.activate(origin: "test.t1355.popupReplayBatch")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: sourceA) != nil,
+               viewModel.stream(for: sourceB) != nil,
+               viewModel.stream(for: sourceC) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        chatService.emit(
+            Message(
+                id: "s_popup_batch_a_1",
+                role: .assistant,
+                content: "dismissed while frozen",
+                timestamp: Date(timeIntervalSince1970: 20),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: sourceA
+            )
+        )
+        chatService.emit(
+            Message(
+                id: "s_popup_batch_b_1",
+                role: .assistant,
+                content: "interacted notification",
+                timestamp: Date(timeIntervalSince1970: 10),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: sourceB
+            )
+        )
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubbles.count == 2 { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.crossChatNotificationBubbles.map(\.sourceChatId) == [sourceA, sourceB])
+
+        viewModel.beginCrossChatNotificationPopupInteraction(sourceChatId: sourceB)
+        let replayPayload = #"{"type":"message","id":"s_popup_batch_c_1","role":"assistant","content":"replayed while popup open","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(sourceC)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 12, payload: .serverMessage(data: Data(replayPayload.utf8))))
+        chatService.emitLifecycleEvent(.init(epoch: 12, payload: .syncComplete))
+        viewModel.dismissCrossChatNotification(sourceChatId: sourceA)
+        try await Task.sleep(forDuration: .milliseconds(40))
+
+        #expect(viewModel.crossChatNotificationBubbles.map(\.sourceChatId) == [sourceA, sourceB])
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceC] == nil)
+
+        viewModel.endCrossChatNotificationPopupInteraction(sourceChatId: sourceB)
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubbles.map(\.sourceChatId) == [sourceC, sourceB] { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        #expect(viewModel.crossChatNotificationBubbles.map(\.sourceChatId) == [sourceC, sourceB])
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceC]?.entries.map(\.content) == ["replayed while popup open"])
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceB]?.entries.map(\.content) == ["interacted notification"])
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceA] == nil)
+    }
+
     @Test("T307 dismissing notification clears source unread dot through read-state")
     @MainActor
     func dismissingNotificationClearsSourceUnreadDot() async throws {

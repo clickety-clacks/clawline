@@ -2719,6 +2719,11 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func commitCrossChatNotificationBatchIfReady(epoch: Int, reachedTruncationBoundary: Bool) {
+        if deferCrossChatNotificationMutationIfNeeded({ [weak self] in
+            self?.commitCrossChatNotificationBatchIfReady(epoch: epoch, reachedTruncationBoundary: reachedTruncationBoundary)
+        }) {
+            return
+        }
         guard let committedSnapshot = notificationBatchCommitCoordinator.commitIfReady(
             epoch: epoch,
             reachedTruncationBoundary: reachedTruncationBoundary,
@@ -2733,11 +2738,6 @@ final class ChatViewModel: ChatViewModelHosting {
                 self?.recordSuppressedCrossChatNotificationEntries(entries, sourceChatId: sourceChatId)
             }
         ) else {
-            return
-        }
-        if deferCrossChatNotificationMutationIfNeeded({ [weak self] in
-            self?.commitCrossChatNotificationBatchIfReady(epoch: epoch, reachedTruncationBoundary: reachedTruncationBoundary)
-        }) {
             return
         }
         crossChatNotificationBubblesBySourceChatId = committedSnapshot

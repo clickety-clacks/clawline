@@ -4307,21 +4307,56 @@ private struct CancelCurrentPromptBubbleShape: Shape {
         )
         let tailLeftX = rect.minX + clampedTailCenterX - tailWidth / 2
         let tailRightX = rect.minX + clampedTailCenterX + tailWidth / 2
+        let tailTip = CGPoint(
+            x: rect.minX + clampedTailCenterX,
+            y: tailEdge == .top ? rect.minY : rect.maxY
+        )
 
-        var path = Path(roundedRect: bodyRect, cornerRadius: radius, style: .continuous)
-        var tail = Path()
-        switch tailEdge {
-        case .top:
-            tail.move(to: CGPoint(x: tailLeftX, y: bodyRect.minY + 1))
-            tail.addLine(to: CGPoint(x: rect.minX + clampedTailCenterX, y: rect.minY))
-            tail.addLine(to: CGPoint(x: tailRightX, y: bodyRect.minY + 1))
-        case .bottom:
-            tail.move(to: CGPoint(x: tailLeftX, y: bodyRect.maxY - 1))
-            tail.addLine(to: CGPoint(x: rect.minX + clampedTailCenterX, y: rect.maxY))
-            tail.addLine(to: CGPoint(x: tailRightX, y: bodyRect.maxY - 1))
+        var path = Path()
+        path.move(to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.minY))
+        if tailEdge == .top {
+            path.addLine(to: CGPoint(x: tailLeftX, y: bodyRect.minY))
+            path.addLine(to: tailTip)
+            path.addLine(to: CGPoint(x: tailRightX, y: bodyRect.minY))
         }
-        tail.closeSubpath()
-        path.addPath(tail)
+        path.addLine(to: CGPoint(x: bodyRect.maxX - radius, y: bodyRect.minY))
+        path.addArc(
+            center: CGPoint(x: bodyRect.maxX - radius, y: bodyRect.minY + radius),
+            radius: radius,
+            startAngle: .degrees(-90),
+            endAngle: .degrees(0),
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: bodyRect.maxX, y: bodyRect.maxY - radius))
+        path.addArc(
+            center: CGPoint(x: bodyRect.maxX - radius, y: bodyRect.maxY - radius),
+            radius: radius,
+            startAngle: .degrees(0),
+            endAngle: .degrees(90),
+            clockwise: false
+        )
+        if tailEdge == .bottom {
+            path.addLine(to: CGPoint(x: tailRightX, y: bodyRect.maxY))
+            path.addLine(to: tailTip)
+            path.addLine(to: CGPoint(x: tailLeftX, y: bodyRect.maxY))
+        }
+        path.addLine(to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.maxY))
+        path.addArc(
+            center: CGPoint(x: bodyRect.minX + radius, y: bodyRect.maxY - radius),
+            radius: radius,
+            startAngle: .degrees(90),
+            endAngle: .degrees(180),
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: bodyRect.minX, y: bodyRect.minY + radius))
+        path.addArc(
+            center: CGPoint(x: bodyRect.minX + radius, y: bodyRect.minY + radius),
+            radius: radius,
+            startAngle: .degrees(180),
+            endAngle: .degrees(270),
+            clockwise: false
+        )
+        path.closeSubpath()
         return path
     }
 }

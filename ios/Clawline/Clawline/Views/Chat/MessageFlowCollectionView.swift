@@ -6509,12 +6509,11 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
     }
 
     static func height(for status: SessionStatus?) -> CGFloat {
-        guard footerText(for: status) != nil else { return 0 }
         return ceil(searchRowHeight + footerRowSpacing + actionRegionHeight + footerRowSpacing + versionRowHeight + topPadding + bottomPadding)
     }
 
     static func shouldAppendFooter(after itemIds: [String], status: SessionStatus?) -> Bool {
-        !itemIds.isEmpty && footerText(for: status) != nil
+        !itemIds.isEmpty
     }
 
     private func configureSearchField(query: String, textColor: UIColor, isDark: Bool, isSpatial: Bool) {
@@ -6553,7 +6552,9 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
     }
 
     private static func footerItems(for status: SessionStatus?, isDark: Bool = false) -> [FooterItem] {
-        guard let status else { return [] }
+        guard let status else {
+            return metadataPlaceholderFooterItems(state: "loading", reason: "session_status_loading")
+        }
         let display = status.display
         let capabilities = status.capabilities
         let modelCapability = capability(
@@ -6577,7 +6578,12 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                 textColor: nil
             ),
             FooterItem(
-                text: "Thinking \(thinkingValue ?? reasoningValue ?? "Unknown")",
+                text: thinkingText(
+                    thinkingValue: thinkingValue,
+                    reasoningValue: reasoningValue,
+                    action: levelControl.action,
+                    unsupportedReason: levelControl.reason
+                ),
                 action: levelControl.action,
                 options: levelOptions(
                     current: thinkingValue ?? reasoningValue,
@@ -6611,6 +6617,32 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             return (capability.supported, capability.reason, capability.options)
         }
         return (legacySupported, nil, nil)
+    }
+
+    private static func metadataPlaceholderFooterItems(state: String, reason: String) -> [FooterItem] {
+        [
+            FooterItem(
+                text: "Model \(state)",
+                action: nil,
+                options: [],
+                unsupportedReason: reason,
+                textColor: nil
+            ),
+            FooterItem(
+                text: "Thinking \(state)",
+                action: nil,
+                options: [],
+                unsupportedReason: reason,
+                textColor: nil
+            ),
+            FooterItem(
+                text: "Fast \(state)",
+                action: nil,
+                options: [],
+                unsupportedReason: reason,
+                textColor: nil
+            )
+        ]
     }
 
     private func footerView(
@@ -6780,7 +6812,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
            }).first {
             return match
         }
-        return current ?? "Unknown model"
+        return current ?? "Model unavailable"
     }
 
     private static func modelCatalogOption(_ model: SessionStatus.ModelCatalog.Model,
@@ -6912,6 +6944,16 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             return (.setMode, nil, modeCapability.options)
         }
         return (nil, fastModeCapability.reason ?? modeCapability.reason, nil)
+    }
+
+    private static func thinkingText(thinkingValue: String?,
+                                     reasoningValue: String?,
+                                     action: SessionControlAction?,
+                                     unsupportedReason: String?) -> String {
+        if action == nil, thinkingValue == nil, reasoningValue == nil, unsupportedReason != nil {
+            return "Thinking unavailable"
+        }
+        return "Thinking \(thinkingValue ?? reasoningValue ?? "Unknown")"
     }
 
     private static func fastModeText(_ fastMode: Bool?,

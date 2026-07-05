@@ -3063,11 +3063,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     static var hidesFooterAtRestingBottom: Bool {
-#if os(visionOS)
         false
-#else
-        true
-#endif
     }
 
     static func bottomOffsetMaxY(
@@ -3087,10 +3083,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         hidesFooterAtRestingBottom: Bool = MessageFlowCollectionViewController.hidesFooterAtRestingBottom
     ) -> CGFloat {
         guard restingBottomOffsetY.isFinite, trueBottomOffsetY.isFinite else { return 0 }
-        let revealDistance = trueBottomOffsetY - restingBottomOffsetY
-        if !hidesFooterAtRestingBottom, revealDistance <= 0 {
+        if !hidesFooterAtRestingBottom {
             return 1
         }
+        let revealDistance = trueBottomOffsetY - restingBottomOffsetY
         guard revealDistance > 0 else { return 0 }
         let revealedDistance = contentOffsetY - restingBottomOffsetY
         return min(1, max(0, revealedDistance / revealDistance))

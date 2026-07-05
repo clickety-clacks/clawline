@@ -129,6 +129,30 @@ struct SessionMetadataFooterHitTestingTests {
         }
     }
 
+    @Test("Resting bottom footer search remains visible and hit-testable")
+    func restingBottomFooterSearchRemainsVisibleAndHitTestable() throws {
+        let restingBottom: CGFloat = 440
+        let trueBottom: CGFloat = 500
+        let cell = makeConfiguredCell()
+        cell.alpha = MessageFlowCollectionViewController.initialFooterCellAlpha(
+            contentOffsetY: restingBottom,
+            restingBottomOffsetY: restingBottom,
+            trueBottomOffsetY: trueBottom
+        )
+        let searchField = try footerSearchField(in: cell)
+        let searchCenter = searchField.convert(
+            CGPoint(x: searchField.bounds.midX, y: searchField.bounds.midY),
+            to: cell
+        )
+
+        #expect(MessageFlowCollectionViewController.hidesFooterAtRestingBottom == false)
+        #expect(cell.alpha == 1)
+        #expect(searchField.alpha > 0.01)
+        #expect(searchField.isUserInteractionEnabled)
+        let hitView = try #require(cell.hitTest(searchCenter, with: nil))
+        #expect(hitView === searchField || hitView.isDescendant(of: searchField))
+    }
+
     @Test("Direct label glyph taps resolve to the enabled footer button")
     func directLabelGlyphTapsResolveToTheEnabledFooterButton() throws {
         let cell = makeConfiguredCell()

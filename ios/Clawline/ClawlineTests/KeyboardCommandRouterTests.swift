@@ -458,6 +458,12 @@ struct KeyboardCommandRouterTests {
 #endif
     }
 
+    @Test("T1190 notification shortcut indicators follow hardware keyboard availability")
+    func notificationShortcutIndicatorsFollowHardwareKeyboardAvailability() {
+        #expect(CrossChatNotificationShortcutIndicatorAvailability.current(coalescedKeyboardPresent: true) == true)
+        #expect(CrossChatNotificationShortcutIndicatorAvailability.current(coalescedKeyboardPresent: false) == false)
+    }
+
     @Test("T343 VG-03 mention picker open close cannot poison notification scroll ownership")
     func mentionPickerOpenCloseCannotPoisonNotificationScrollOwnership() {
         let openStore = KeyboardOwnershipSceneFactory.chatScene(

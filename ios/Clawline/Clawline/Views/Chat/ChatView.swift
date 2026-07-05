@@ -17,6 +17,7 @@ import GameController
 import os.log
 
 private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "ChatView")
+private let t1416KeyboardPinnedTraceLogger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "T1416KeyboardPinned")
 
 enum CrossChatShortcutLabelAvailability {
     static var current: Bool {
@@ -5217,6 +5218,9 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: KeyboardPinnedContainerView<Content>, context: Context) {
+        uiView.recordUpdateUIView(
+            reason: "desiredBottomGap=\(desiredBottomGap) keyboard=\(isKeyboardVisible) motionY=\(composerMotionOffsetY) freezeHeight=\(freezeBarHeightUpdates) scrollButton=\(scrollButtonIsVisible)"
+        )
         uiView.hostingController.rootView = content
         uiView.updateScrollButton(
             scrollButtonView,
@@ -5314,6 +5318,8 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
     private var lastDesiredBottomGap: CGFloat?
     private var lastPinnedKeyboardVisible: Bool?
     private var composerMotionOffsetY: CGFloat = 0
+    private var updateUIViewCount = 0
+    private var layoutSubviewsCount = 0
 
     init(rootView: Content) {
         hostingController = UIHostingController(rootView: rootView)
@@ -5342,6 +5348,11 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
 
     var barHeight: CGFloat {
         hostingController.view?.bounds.height ?? 0
+    }
+
+    func recordUpdateUIView(reason: String) {
+        updateUIViewCount += 1
+        t1416KeyboardPinnedTraceLogger.debug("graphhost_bridge_keyboard_update count=\(self.updateUIViewCount, privacy: .public) reason=\(reason, privacy: .public) bounds=\(String(describing: self.bounds), privacy: .public) barHeight=\(self.barHeight, privacy: .public)")
     }
 
     func setOnBarHeightChange(_ handler: @escaping (CGFloat) -> Void) {
@@ -5602,6 +5613,8 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        layoutSubviewsCount += 1
+        t1416KeyboardPinnedTraceLogger.debug("keyboard_pinned_layout count=\(self.layoutSubviewsCount, privacy: .public) bounds=\(String(describing: self.bounds), privacy: .public) barHeight=\(self.barHeight, privacy: .public) desiredBottomGap=\(self.lastDesiredBottomGap ?? -1, privacy: .public) keyboard=\(self.lastPinnedKeyboardVisible ?? false, privacy: .public)")
         applyComposerMotionTransform()
         let height = barHeight
         guard abs(height - lastMeasuredHeight) > 0.5 else { return }

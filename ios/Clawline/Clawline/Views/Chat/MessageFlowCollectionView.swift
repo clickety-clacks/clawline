@@ -343,6 +343,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessagePipeline")
     private let typingCancelDiagnosticLogger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "T217TypingCancel")
+    private let t1416TraceLogger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "T1416Resize")
     private static var t217DiagnosticBuild: String {
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
         return "T217-typing-cancel-\(build)"
@@ -428,6 +429,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private static let bubbleSizingV2RestSettleDelaySeconds: TimeInterval = 0.12
     private static let previewRemeasureRestPollSeconds: TimeInterval = 0.06
     private static let bottomInsetHeightCapInvalidationDebounceSeconds: TimeInterval = 0.20
+    private static let catalystResizeCoalesceDelaySeconds: TimeInterval = 0.08
     private static let restoreMaxConfirmationRetries: Int = 3
     private static let typingIndicatorTapTargetLeadingOutset: CGFloat = 8
     private static let typingIndicatorTapTargetTrailingOutset: CGFloat = 44
@@ -553,6 +555,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var lastMeasurementContentWidth: CGFloat?
     private var lastMeasurementMetricsFingerprint: Int?
     private var pendingBoundsChange = false
+    private var catalystResizeCoalescedWorkItem: DispatchWorkItem?
+    private var catalystResizePendingBoundsChange: (size: CGSize, hadPendingFullReconfigure: Bool)?
+    private var t1416BoundsChangeCount = 0
+    private var t1416CoalescedBoundsFlushCount = 0
+    private var t1416LayoutInvalidationCount = 0
+    private var t1416BubbleCacheInvalidationCount = 0
     private var forceReconfigureAll = false
     private var currentFontScaleChangeSequence: Int = 0
     private var onExpand: ((Message) -> Void)?
@@ -1140,6 +1148,39 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         case fullRebuild
     }
 
+    private func traceBubbleSizingV2CacheInvalidation(reason: InvalidationReason) {
+        t1416BubbleCacheInvalidationCount += 1
+        let reasonDescription: String
+        switch reason {
+        case let .messageChanged(id):
+            reasonDescription = "messageChanged:\(id)"
+        case let .messagesRemoved(ids):
+            reasonDescription = "messagesRemoved:\(ids.count)"
+        case .envChanged:
+            reasonDescription = "envChanged"
+        case .compactnessChanged:
+            reasonDescription = "compactnessChanged"
+        case .containerSizeChanged:
+            reasonDescription = "containerSizeChanged"
+        }
+        t1416TraceLogger.debug("bubble_sizing_v2_cache_reason count=\(self.t1416BubbleCacheInvalidationCount, privacy: .public) reason=\(reasonDescription, privacy: .public) bounds=\(String(describing: self.collectionView?.bounds.size ?? .zero), privacy: .public)")
+    }
+
+    private func traceBubbleSizingV2InvalidationPlan(_ plan: InvalidationPlan) {
+        let planDescription: String
+        switch plan {
+        case .none:
+            planDescription = "none"
+        case let .reconfigureItems(ids):
+            planDescription = "reconfigure:\(ids.count)"
+        case let .remeasureAndShift(changes):
+            planDescription = "remeasureAndShift:\(changes.count)"
+        case .fullRebuild:
+            planDescription = "fullRebuild"
+        }
+        t1416TraceLogger.debug("bubble_sizing_v2_plan plan=\(planDescription, privacy: .public) pendingBoundsChange=\(self.pendingBoundsChange, privacy: .public)")
+    }
+
     @discardableResult
     private func readSizeState(messageId: String, env: BubbleSizingV2.Environment) -> CachedMeasurement? {
         _ = env
@@ -1175,13 +1216,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     @discardableResult
     private func invalidateFor(reason: InvalidationReason) -> InvalidationPlan {
+        traceBubbleSizingV2CacheInvalidation(reason: reason)
         switch reason {
         case let .messageChanged(id):
             dirtySizeIds.insert(id)
             return .fullRebuild
         case let .messagesRemoved(ids):
             clearSizeState(for: ids)
-            ids.forEach { invalidateBubbleSizingV2Cache(for: $0) }
+            ids.forEach { invalidateBubbleSizingV2Cache(for: $0, reason: "messagesRemoved") }
             removeBubbleV2PreviewVersions(for: ids)
             return .none
         case .envChanged, .compactnessChanged, .containerSizeChanged:
@@ -1192,6 +1234,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     private func executeInvalidationPlan(_ plan: InvalidationPlan) {
+        traceBubbleSizingV2InvalidationPlan(plan)
         switch plan {
         case .none:
             break
@@ -1346,6 +1389,43 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
         let hadPendingFullReconfigure = forceReconfigureAll
         lastBoundsSize = size
+        traceCollectionBoundsChange(size: size, hadPendingFullReconfigure: hadPendingFullReconfigure)
+#if targetEnvironment(macCatalyst)
+        scheduleCatalystBoundsChangeFlush(size: size, hadPendingFullReconfigure: hadPendingFullReconfigure)
+        notifyTypingIndicatorAnchorFrameIfNeeded()
+#else
+        handleBoundsSizeChange(size: size, hadPendingFullReconfigure: hadPendingFullReconfigure)
+#endif
+    }
+
+    private func traceCollectionBoundsChange(size: CGSize, hadPendingFullReconfigure: Bool) {
+        t1416BoundsChangeCount += 1
+        t1416TraceLogger.debug("collection_bounds_change count=\(self.t1416BoundsChangeCount, privacy: .public) width=\(size.width, privacy: .public) height=\(size.height, privacy: .public) hadPendingFullReconfigure=\(hadPendingFullReconfigure, privacy: .public) viewBounds=\(String(describing: self.view.bounds.size), privacy: .public) windowBounds=\(String(describing: self.view.window?.bounds.size ?? .zero), privacy: .public)")
+    }
+
+    private func scheduleCatalystBoundsChangeFlush(size: CGSize, hadPendingFullReconfigure: Bool) {
+        catalystResizePendingBoundsChange = (size: size, hadPendingFullReconfigure: hadPendingFullReconfigure)
+        catalystResizeCoalescedWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            guard let pending = self.catalystResizePendingBoundsChange else { return }
+            self.catalystResizePendingBoundsChange = nil
+            self.t1416CoalescedBoundsFlushCount += 1
+            self.t1416TraceLogger.debug("catalyst_bounds_flush count=\(self.t1416CoalescedBoundsFlushCount, privacy: .public) width=\(pending.size.width, privacy: .public) height=\(pending.size.height, privacy: .public) delayMs=\(Int(Self.catalystResizeCoalesceDelaySeconds * 1000), privacy: .public)")
+            self.handleBoundsSizeChange(
+                size: pending.size,
+                hadPendingFullReconfigure: pending.hadPendingFullReconfigure
+            )
+        }
+        catalystResizeCoalescedWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.catalystResizeCoalesceDelaySeconds, execute: workItem)
+    }
+
+    private func handleBoundsSizeChange(size: CGSize, hadPendingFullReconfigure: Bool) {
+        guard size == collectionView.bounds.size else {
+            t1416TraceLogger.debug("collection_bounds_flush_skipped staleWidth=\(size.width, privacy: .public) staleHeight=\(size.height, privacy: .public) currentWidth=\(self.collectionView.bounds.size.width, privacy: .public) currentHeight=\(self.collectionView.bounds.size.height, privacy: .public)")
+            return
+        }
         pendingBoundsChange = true
         let measurementInputsChanged = updateLayout()
         guard Self.shouldRunUpdateAfterBoundsChange(
@@ -1355,6 +1435,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 #if os(visionOS)
             updateVisibleFooterAlpha()
 #endif
+            notifyTypingIndicatorAnchorFrameIfNeeded()
             return
         }
         if let viewModel {
@@ -1711,7 +1792,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         guard !idsToRemeasure.isEmpty else { return }
 
         if bubbleSizingV2Enabled {
-            idsToRemeasure.forEach { invalidateBubbleSizingV2Cache(for: $0) }
+            idsToRemeasure.forEach { invalidateBubbleSizingV2Cache(for: $0, reason: "bottomInsetRemeasure") }
         } else {
             clearSizeState(for: idsToRemeasure)
         }
@@ -2808,7 +2889,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 let plan = invalidateFor(reason: .messageChanged(id: id))
                 executeInvalidationPlan(plan)
             }
-            changedIds.forEach { invalidateBubbleSizingV2Cache(for: $0) }
+            changedIds.forEach { invalidateBubbleSizingV2Cache(for: $0, reason: "dynamicContentChanged") }
             removeBubbleV2PreviewVersions(for: changedIds)
         }
         if previousSessionStatus != sessionStatus,
@@ -5931,7 +6012,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let viewportAnchor = captureBubbleSizingV2ViewportAnchor()
 
         for id in ids {
-            invalidateBubbleSizingV2Cache(for: id)
+            invalidateBubbleSizingV2Cache(for: id, reason: "pendingRemeasureFlush")
             invalidateLayout(for: id)
             scheduleReconfigure(for: id)
         }
@@ -5943,7 +6024,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
     }
 
-    private func invalidateBubbleSizingV2Cache(for messageId: String) {
+    private func invalidateBubbleSizingV2Cache(for messageId: String, reason: String) {
+        t1416TraceLogger.debug("bubble_sizing_v2_remove messageId=\(messageId, privacy: .public) reason=\(reason, privacy: .public)")
         removeBubbleV2Measurements(for: messageId)
     }
 
@@ -6256,6 +6338,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     private func scheduleLayoutInvalidation() {
         guard !invalidationScheduled else { return }
+        t1416LayoutInvalidationCount += 1
+        t1416TraceLogger.debug("layout_invalidation_scheduled count=\(self.t1416LayoutInvalidationCount, privacy: .public) bounds=\(String(describing: self.collectionView.bounds.size), privacy: .public) pendingBoundsChange=\(self.pendingBoundsChange, privacy: .public)")
         invalidationScheduled = true
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -6264,6 +6348,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 let ids = self.consumePendingInvalidatedSizeIds()
                 self.clearSizeState(for: ids)
             }
+            self.t1416TraceLogger.debug("layout_invalidation_flush bounds=\(String(describing: self.collectionView.bounds.size), privacy: .public)")
             self.flowLayout.invalidateLayout()
         }
     }

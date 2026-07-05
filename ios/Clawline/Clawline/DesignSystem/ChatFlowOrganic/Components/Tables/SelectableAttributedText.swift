@@ -1,7 +1,10 @@
 import SwiftUI
 import UIKit
+import OSLog
 
 struct SelectableAttributedText: UIViewRepresentable {
+    private static let traceLogger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "T1416TextKit")
+
     var attributedString: NSAttributedString
     var alignment: NSTextAlignment
     var colorScheme: ColorScheme
@@ -30,6 +33,8 @@ struct SelectableAttributedText: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UITextView, context: Context) {
+        context.coordinator.updateUIViewCount += 1
+        Self.traceLogger.debug("graphhost_bridge_selectable_update count=\(context.coordinator.updateUIViewCount, privacy: .public) proposedWidth=\(uiView.bounds.width, privacy: .public) length=\(attributedString.length, privacy: .public)")
         context.coordinator.isUpdatingFromSwiftUI = true
         defer { context.coordinator.isUpdatingFromSwiftUI = false }
 
@@ -39,6 +44,8 @@ struct SelectableAttributedText: UIViewRepresentable {
         }
         if Self.needsAttributedTextUpdate(current: uiView.attributedText, next: attributedString) {
             uiView.attributedText = attributedString
+            context.coordinator.attributedTextAssignmentCount += 1
+            Self.traceLogger.debug("selectable_text_assignment count=\(context.coordinator.attributedTextAssignmentCount, privacy: .public) length=\(attributedString.length, privacy: .public) width=\(uiView.bounds.width, privacy: .public) height=\(uiView.bounds.height, privacy: .public)")
         }
         uiView.textAlignment = alignment
         if context.coordinator.consumeSelectionResetToken(selectionResetToken) {
@@ -53,6 +60,8 @@ struct SelectableAttributedText: UIViewRepresentable {
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
         guard let width = proposal.width, width > 0 else { return nil }
         let fitting = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        context.coordinator.sizeThatFitsCount += 1
+        Self.traceLogger.debug("selectable_text_size count=\(context.coordinator.sizeThatFitsCount, privacy: .public) proposedWidth=\(width, privacy: .public) measuredHeight=\(ceil(fitting.height), privacy: .public) length=\(uiView.attributedText?.length ?? 0, privacy: .public)")
         return CGSize(width: width, height: ceil(fitting.height))
     }
 
@@ -99,6 +108,9 @@ struct SelectableAttributedText: UIViewRepresentable {
         private let onSelectionChange: (Bool) -> Void
         private let onLinkTap: (URL) -> Void
         var isUpdatingFromSwiftUI = false
+        var updateUIViewCount = 0
+        var attributedTextAssignmentCount = 0
+        var sizeThatFitsCount = 0
         private var lastHasSelection: Bool?
         private var lastSelectionResetToken: Int?
         private var deferredSelectionChangeGeneration = 0

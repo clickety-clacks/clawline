@@ -306,7 +306,11 @@ final class StreamPopupRouteController {
     }
 
     func closePopup() {
-        closingPresentationID = currentPopupPresentationID
+        guard let presentationID = currentPopupPresentationID else {
+            route = .closed
+            return
+        }
+        closingPresentationID = presentationID
         route = .closed
     }
 

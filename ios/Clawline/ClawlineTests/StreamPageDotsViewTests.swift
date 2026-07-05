@@ -594,6 +594,38 @@ struct StreamPageDotsViewTests {
         #expect(routeController.route == .closed)
     }
 
+    @Test("T1136 popup close suppression survives repeated close requests")
+    func popupCloseSuppressionSurvivesRepeatedCloseRequests() {
+        let routeController = StreamPopupRouteController()
+        routeController.openPopup(focusSearch: true)
+        let presentationID = routeController.currentPopupPresentationID
+
+        routeController.closePopup()
+
+        #expect(routeController.route == .closed)
+        #expect(routeController.isSuppressingReopenFromClosingPresentation)
+
+        routeController.closePopup()
+
+        #expect(routeController.route == .closed)
+        #expect(routeController.isSuppressingReopenFromClosingPresentation)
+
+        routeController.finishClosingSuppression(for: presentationID)
+
+        #expect(routeController.isSuppressingReopenFromClosingPresentation == false)
+    }
+
+    @Test("T1136 stale closing suppression is not cleared by unrelated finish")
+    func staleClosingSuppressionIsNotClearedByUnrelatedFinish() {
+        let routeController = StreamPopupRouteController()
+        routeController.openPopup(focusSearch: false)
+        routeController.closePopup()
+
+        routeController.finishClosingSuppression(for: nil)
+
+        #expect(routeController.isSuppressingReopenFromClosingPresentation)
+    }
+
     @Test("T1136 stream popup search focus follows input availability")
     func streamPopupSearchFocusFollowsInputAvailability() {
         #expect(

@@ -3,6 +3,7 @@ import Observation
 import Testing
 @testable import Clawline
 
+@Suite(.serialized)
 struct UploadServiceTests {
     @Test("T1517 upload upgrades known TARS HTTP provider URL before posting asset")
     @MainActor
@@ -36,6 +37,39 @@ struct UploadServiceTests {
         #expect(assetId == "asset_1")
         #expect(capture.request?.url?.absoluteString == "https://tars.tail4105e8.ts.net:19443/upload")
         #expect(capture.request?.httpMethod == "POST")
+    }
+
+    @Test("T1517 download upgrades known TARS HTTP provider URL before fetching asset")
+    @MainActor
+    func downloadUsesHTTPSGatewayForKnownTARSHTTPBaseURL() async throws {
+        let auth = UploadTestAuthManager()
+        auth.storeCredentials(token: "token", userId: "user")
+        let capture = RequestCapture()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [UploadCaptureURLProtocol.self]
+        UploadCaptureURLProtocol.handler = { request in
+            capture.record(request)
+            let response = HTTPURLResponse(
+                url: request.url ?? URL(string: "https://tars.tail4105e8.ts.net:19443/download/asset_1")!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "image/jpeg"]
+            )!
+            return (response, Data([0x03, 0x04]))
+        }
+        defer { UploadCaptureURLProtocol.handler = nil }
+
+        let service = UploadService(
+            auth: auth,
+            baseURLProvider: { URL(string: "http://100.85.66.60:18800") },
+            session: URLSession(configuration: configuration)
+        )
+
+        let data = try await service.download(assetId: "asset_1")
+
+        #expect(data == Data([0x03, 0x04]))
+        #expect(capture.request?.url?.absoluteString == "https://tars.tail4105e8.ts.net:19443/download/asset_1")
+        #expect(capture.request?.httpMethod == "GET")
     }
 
     @Test("T1517 generic HTTP provider URL is not rewritten")

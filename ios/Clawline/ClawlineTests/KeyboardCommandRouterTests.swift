@@ -58,6 +58,27 @@ struct KeyboardCommandRouterTests {
         assertRoute(.textModifiedNewline, in: store, isHandledBy: .notificationReply("n0"), rule: "PR-05")
     }
 
+    @Test("T1354 notification shortcut routing follows stable source identity after order changes")
+    func notificationShortcutRoutingFollowsStableSourceIdentityAfterOrderChanges() {
+        let originalStore = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: ["older", "target", "newer"],
+            mentionPickerVisible: false,
+            composerFocused: true,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
+        assertRoute(.notificationAssignedOpen(1), in: originalStore, isHandledBy: .notificationBubble("target"), rule: "PR-03")
+
+        let reorderedStore = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: ["incoming", "older", "target"],
+            mentionPickerVisible: false,
+            composerFocused: true,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
+        assertRoute(.notificationAssignedOpen(2), in: reorderedStore, isHandledBy: .notificationBubble("target"), rule: "PR-03")
+    }
+
     @Test("T1210 selector plain number shortcuts override notification open only while selector owns slot")
     func selectorPlainNumberShortcutsOverrideNotificationOpenOnlyWhileSelectorOwnsSlot() {
         var selectorStore = KeyboardOwnershipSceneFactory.chatScene(

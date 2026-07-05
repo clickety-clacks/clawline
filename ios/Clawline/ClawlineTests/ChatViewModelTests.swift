@@ -331,6 +331,98 @@ struct ChatViewModelTests {
         #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceSessionKey] == nil)
     }
 
+    @Test("T1355 popup interaction defers notification additions and removals until dismissal")
+    @MainActor
+    func popupInteractionDefersNotificationAdditionsAndRemovalsUntilDismissal() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let sourceA = "agent:main:clawline:user:s_popup_a"
+        let sourceB = "agent:main:clawline:user:s_popup_b"
+        let sourceC = "agent:main:clawline:user:s_popup_c"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: sourceA, displayName: "Popup A", kind: "custom", orderIndex: 1, isBuiltIn: false),
+            makeStreamSession(sessionKey: sourceB, displayName: "Popup B", kind: "custom", orderIndex: 2, isBuiltIn: false),
+            makeStreamSession(sessionKey: sourceC, displayName: "Popup C", kind: "custom", orderIndex: 3, isBuiltIn: false)
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        try await setConnected(chatService: chatService, viewModel: viewModel)
+        chatService.emit(
+            Message(
+                id: "s_popup_a_1",
+                role: .assistant,
+                content: "first visible notification",
+                timestamp: Date(timeIntervalSince1970: 20),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: sourceA
+            )
+        )
+        chatService.emit(
+            Message(
+                id: "s_popup_b_1",
+                role: .assistant,
+                content: "interacted notification",
+                timestamp: Date(timeIntervalSince1970: 10),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: sourceB
+            )
+        )
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubbles.count == 2 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(viewModel.crossChatNotificationBubbles.map(\.sourceChatId) == [sourceA, sourceB])
+
+        viewModel.beginCrossChatNotificationPopupInteraction(sourceChatId: sourceB)
+        chatService.emit(
+            Message(
+                id: "s_popup_c_1",
+                role: .assistant,
+                content: "newer queued notification",
+                timestamp: Date(timeIntervalSince1970: 30),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: sourceC
+            )
+        )
+        viewModel.dismissCrossChatNotification(sourceChatId: sourceA)
+        try await Task.sleep(for: .milliseconds(20))
+
+        #expect(viewModel.crossChatNotificationBubbles.map(\.sourceChatId) == [sourceA, sourceB])
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceB]?.entries.map(\.content) == ["interacted notification"])
+
+        viewModel.endCrossChatNotificationPopupInteraction(sourceChatId: sourceB)
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubbles.map(\.sourceChatId) == [sourceC, sourceB] { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(viewModel.crossChatNotificationBubbles.map(\.sourceChatId) == [sourceC, sourceB])
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceC]?.entries.map(\.content) == ["newer queued notification"])
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceB]?.entries.map(\.content) == ["interacted notification"])
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceA] == nil)
+    }
+
     @Test("T307 dismissing notification clears source unread dot through read-state")
     @MainActor
     func dismissingNotificationClearsSourceUnreadDot() async throws {

@@ -492,6 +492,61 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         #expect(linkTarget("details", in: attributed)?.absoluteString == "https://example.com")
     }
 
+    @Test("T384 plain notification links avoid unified markdown render path")
+    func t384_plainNotificationLinksUsePlainFastPath() {
+        let originalRules = TextLinkURLTemplateRules.configuredRules
+        TextLinkURLTemplateRules.configuredRules = []
+        defer { TextLinkURLTemplateRules.configuredRules = originalRules }
+
+        #expect(CrossChatNotificationMarkdownRenderer.shouldUsePlainTextFastPath(
+            content: "Plain update https://example.com/path"
+        ))
+        #expect(!CrossChatNotificationMarkdownRenderer.shouldUsePlainTextFastPath(
+            content: "Side **notification** with [details](https://example.com)"
+        ))
+
+        let rendered = CrossChatNotificationMarkdownRenderer.renderBlocks(
+            content: "Plain update https://example.com/path",
+            messageID: "t384_plain_notification_link",
+            baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
+            inkColor: .label,
+            lineSpacing: 2,
+            isDark: false
+        )
+
+        guard case .attributedText(let attributed)? = rendered.first else {
+            Issue.record("Expected plain notification text")
+            return
+        }
+        #expect(rendered.count == 1)
+        #expect(attributed.string == "Plain update https://example.com/path")
+        #expect(linkTarget("https://example.com/path", in: attributed)?.absoluteString == "https://example.com/path")
+    }
+
+    @Test("T384 generated notification links keep unified renderer path")
+    func t384_generatedNotificationLinksKeepUnifiedRendererPath() {
+        let originalRules = TextLinkURLTemplateRules.configuredRules
+        TextLinkURLTemplateRules.configuredRules = [.janusTrackerExample]
+        defer { TextLinkURLTemplateRules.configuredRules = originalRules }
+
+        #expect(!CrossChatNotificationMarkdownRenderer.shouldUsePlainTextFastPath(content: "Review T384."))
+
+        let rendered = CrossChatNotificationMarkdownRenderer.renderBlocks(
+            content: "Review T384.",
+            messageID: "t384_generated_notification_link",
+            baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
+            inkColor: .label,
+            lineSpacing: 2,
+            isDark: false
+        )
+
+        guard case .attributedText(let attributed)? = rendered.first else {
+            Issue.record("Expected generated-link notification text")
+            return
+        }
+        #expect(linkTarget("T384", in: attributed)?.absoluteString == "https://tars.tail4105e8.ts.net:19443/tracker.html?id=T384")
+    }
+
     @Test("T1278 notification content renders Clawline highlight markup")
     func t1278_notificationContentRendersHighlightMarkup() {
         let rendered = CrossChatNotificationMarkdownRenderer.renderBlocks(

@@ -6217,6 +6217,16 @@ private enum CrossChatNotificationMotion {
 
 enum CrossChatNotificationMarkdownRenderer {
     private static let metrics = ChatFlowTheme.Metrics(isCompact: true)
+    private static let linkDetector: NSDataDetector? = {
+        try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+    }()
+
+    static func shouldUsePlainTextFastPath(content: String) -> Bool {
+        guard TextLinkURLTemplateRules.configuredRules.allSatisfy({ !$0.enabled }) else {
+            return false
+        }
+        return !containsMarkdownSyntax(content)
+    }
 
     static func renderBlocks(
         content: String,
@@ -6227,6 +6237,18 @@ enum CrossChatNotificationMarkdownRenderer {
         isDark: Bool
     ) -> [RenderedMarkdownBlock] {
         let markdown = content.isEmpty ? "Assistant reply" : content
+        if shouldUsePlainTextFastPath(content: markdown) {
+            return [
+                .attributedText(
+                    plainNotificationText(
+                        markdown,
+                        baseFont: baseFont,
+                        inkColor: inkColor,
+                        lineSpacing: lineSpacing
+                    )
+                )
+            ]
+        }
         let content = UnifiedMarkdownRenderer.makeContent(
             messageText: markdown,
             context: MarkdownMessageRenderContext(
@@ -6252,6 +6274,48 @@ enum CrossChatNotificationMarkdownRenderer {
             return [.attributedText(attributed)]
         }
         return rendered
+    }
+
+    private static func containsMarkdownSyntax(_ content: String) -> Bool {
+        content.range(
+            of: #"(^|\n)\s{0,3}(```|~~~|#{1,6}\s|>\s|[-*+]\s|\d+\.\s)|(\*\*|__|==|`|\[[^\]]+\]\([^)]+\)|\|)"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    private static func plainNotificationText(
+        _ text: String,
+        baseFont: UIFont,
+        inkColor: UIColor,
+        lineSpacing: CGFloat
+    ) -> NSAttributedString {
+        let attributed = NSMutableAttributedString(
+            string: text,
+            attributes: [
+                .font: baseFont,
+                .foregroundColor: inkColor
+            ]
+        )
+        if lineSpacing > 0 {
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineSpacing = lineSpacing
+            attributed.addAttribute(
+                .paragraphStyle,
+                value: paragraph,
+                range: NSRange(location: 0, length: attributed.length)
+            )
+        }
+        let fullRange = NSRange(location: 0, length: (text as NSString).length)
+        linkDetector?.enumerateMatches(in: text, options: [], range: fullRange) { match, _, _ in
+            guard let match,
+                  match.resultType == .link,
+                  let url = match.url,
+                  ["http", "https"].contains(url.scheme?.lowercased() ?? "") else {
+                return
+            }
+            attributed.addAttribute(.link, value: url, range: match.range)
+        }
+        return attributed
     }
 }
 

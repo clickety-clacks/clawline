@@ -46,6 +46,65 @@ struct MessageBubbleRenderedGeometry {
     let dynamicContentFrame: CGRect
 }
 
+struct MessageDetectedTextLink {
+    let title: String
+    let url: URL
+    let characterRange: NSRange
+    let displayMode: TextLinkResolvedURLDisplayMode
+    let isGenerated: Bool
+}
+
+enum MessageDetectedTextLinkMenuBuilder {
+    static func detectedTextLinks(from attributed: NSAttributedString?) -> [MessageDetectedTextLink] {
+        guard let attributed, attributed.length > 0 else { return [] }
+        let text = attributed.string as NSString
+        let fullRange = NSRange(location: 0, length: attributed.length)
+        var links: [MessageDetectedTextLink] = []
+
+        attributed.enumerateAttribute(.link, in: fullRange, options: []) { value, range, _ in
+            guard range.length > 0 else { return }
+            let url: URL?
+            if let value = value as? URL {
+                url = value
+            } else if let value = value as? String {
+                url = URL(string: value)
+            } else {
+                url = nil
+            }
+            guard let url else { return }
+            let title = text.substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { return }
+            let isGenerated = TextLinkURLTemplateRules.isGeneratedLink(in: attributed, characterRange: range)
+            links.append(MessageDetectedTextLink(
+                title: title,
+                url: url,
+                characterRange: range,
+                displayMode: TextLinkURLTemplateRules.displayMode(in: attributed, characterRange: range),
+                isGenerated: isGenerated
+            ))
+        }
+
+        return links
+    }
+
+    static func linksSubmenu(
+        from attributed: NSAttributedString?,
+        isSpatial: Bool,
+        actionHandler: @escaping (MessageDetectedTextLink) -> Void
+    ) -> UIMenu? {
+        guard isSpatial else { return nil }
+        let links = detectedTextLinks(from: attributed)
+        guard !links.isEmpty else { return nil }
+
+        let actions = links.map { link in
+            UIAction(title: link.title, image: UIImage(systemName: "link")) { _ in
+                actionHandler(link)
+            }
+        }
+        return UIMenu(title: "Links", image: UIImage(systemName: "link"), children: actions)
+    }
+}
+
 enum MessageBubbleGeometry {
     static let typingBubbleWidth: CGFloat = 240
     static let typingBubbleHeight: CGFloat = 86
@@ -2648,11 +2707,40 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             )
             actions.append(command)
         }
+        if let linksMenu = MessageDetectedTextLinkMenuBuilder.linksSubmenu(
+            from: bodyLabel.attributedText,
+            isSpatial: Self.isSpatialPlatform,
+            actionHandler: { [weak self] link in
+                self?.openDetectedTextLink(link)
+            }
+        ) {
+            actions.append(linksMenu)
+        }
         return actions.isEmpty ? nil : UIMenu(children: actions)
     }
 
     @objc private func handleToggleShowOnlyUserMessagesCommand(_ sender: UICommand) {
         onToggleShowOnlyUserMessages?()
+    }
+
+    private func openDetectedTextLink(_ link: MessageDetectedTextLink) {
+        if link.isGenerated {
+            _ = GeneratedTextLinkActivationRouter.activateGeneratedLinkTap(
+                link.url,
+                displayMode: link.displayMode,
+                from: bodyLabel
+            )
+            return
+        }
+        UIApplication.shared.open(link.url)
+    }
+
+    private static var isSpatialPlatform: Bool {
+#if os(visionOS)
+        true
+#else
+        false
+#endif
     }
 
     @available(iOS 17.0, macCatalyst 17.0, visionOS 1.0, *)

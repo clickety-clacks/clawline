@@ -1395,6 +1395,79 @@ struct ProviderServiceTests {
         #expect(emittedKey == deletedKey)
     }
 
+    @Test("T142: Delete stream uses HTTP control plane without target WebSocket")
+    func deleteStreamUsesControlPlaneWithoutTargetWebSocket() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let inactiveSessionKey = "agent:main:openclaw:user:s_inactive_delete"
+        var capturedRequest: URLRequest?
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            capturedRequest = request
+            let data = #"""
+            {
+              "deletedSessionKey": "agent:main:openclaw:user:s_inactive_delete"
+            }
+            """#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL },
+            authTokenProvider: { "jwt" },
+            streamAPIClient: streamAPIClient
+        )
+
+        let deletedKey = try await service.deleteStream(
+            sessionKey: inactiveSessionKey,
+            idempotencyKey: "req_t142_delete"
+        )
+
+        let request = try #require(capturedRequest)
+        #expect(deletedKey == inactiveSessionKey)
+        #expect(connector.connectedURL == nil)
+        #expect(mockSocket.sentTexts.isEmpty)
+        #expect(request.httpMethod == "DELETE")
+        #expect(request.url?.path == "/api/streams/agent%3Amain%3Aopenclaw%3Auser%3As_inactive_delete")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer jwt")
+        let body = try #require(request.httpBody ?? Self.bodyData(from: request.httpBodyStream))
+        let payload = try JSONSerialization.jsonObject(with: body) as? [String: String]
+        #expect(payload?["idempotencyKey"] == "req_t142_delete")
+    }
+
+    private static func bodyData(from stream: InputStream?) -> Data? {
+        guard let stream else { return nil }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 1024)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count < 0 {
+                return nil
+            }
+            if count == 0 {
+                break
+            }
+            data.append(buffer, count: count)
+        }
+        return data
+    }
+
     @Test("Chat service emits incremental read-state updates")
     func chatIncrementalReadStateEvents() async throws {
         let mockSocket = MockWebSocketClient()

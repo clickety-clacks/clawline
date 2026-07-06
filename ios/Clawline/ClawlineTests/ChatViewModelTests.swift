@@ -6839,68 +6839,6 @@ struct ChatViewModelTests {
         #expect(chatService.connectCallCount > connectCountBeforeDelete)
     }
 
-    @Test("T142: delete inactive stream uses active control connection")
-    @MainActor
-    func deleteInactiveStreamUsesActiveControlConnection() async throws {
-        resetChatPersistence()
-        let auth = TestAuthManager()
-        auth.storeCredentials(token: "jwt", userId: "user")
-        let inactiveSessionKey = "agent:main:clawline:user:s_inactive_delete"
-        let chatService = TestChatService()
-        let toastManager = ToastManager()
-        chatService.streams = [
-            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
-            makeStreamSession(sessionKey: inactiveSessionKey, displayName: "Inactive", kind: "custom", orderIndex: 1, isBuiltIn: false),
-        ]
-        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
-            sessionKey: personalSessionKey,
-            state: .idle,
-            provider: "openai",
-            model: "gpt-5.5",
-            thinkingLevel: "medium",
-            queueDepth: 0
-        )
-        chatService.sessionStatusBySessionKey[inactiveSessionKey] = makeSessionStatus(
-            sessionKey: inactiveSessionKey,
-            state: .unknown,
-            provider: nil,
-            model: nil,
-            thinkingLevel: nil,
-            queueDepth: 0
-        )
-        let viewModel = ChatViewModel(
-            auth: auth,
-            chatService: chatService,
-            settings: SettingsManager(),
-            device: TestDevice(),
-            uploadService: TestUploadService(),
-            toastManager: toastManager,
-            salientHighlightService: SalientHighlightService()
-        )
-        defer { viewModel.onDisappear() }
-
-        await viewModel.activate(origin: "test.t142.deleteInactiveStream")
-        await viewModel.onAppear()
-        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
-        for _ in 0..<50 {
-            if viewModel.stream(for: inactiveSessionKey) != nil { break }
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
-        viewModel.setActiveSessionKeyForTesting(personalSessionKey)
-        chatService.resetFetchedSessionStatusKeys()
-
-        let deleted = await viewModel.deleteStream(sessionKey: inactiveSessionKey)
-
-        #expect(deleted)
-        #expect(viewModel.stream(for: inactiveSessionKey) == nil)
-        #expect(chatService.deleteStreamCallCount == 1)
-        #expect(chatService.lastDeletedSessionKey == inactiveSessionKey)
-        #expect(chatService.fetchedSessionStatusKeys.contains(inactiveSessionKey) == false)
-        #expect(toastManager.debugMessages.contains("Could not send; not connected.") == false)
-        #expect(toastManager.debugMessages.contains("Not connected to server") == false)
-    }
-
     @Test("user_info event updates admin state")
     @MainActor
     func userInfoEventUpdatesAdminState() async throws {

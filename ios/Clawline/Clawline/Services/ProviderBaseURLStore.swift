@@ -115,6 +115,30 @@ enum ProviderWebSocketURLBuilder {
 }
 
 enum ProviderHTTPURLResolver {
+    static func uploadURL(from baseURL: URL) -> URL {
+        apiBaseURL(from: baseURL).appendingPathComponent("upload")
+    }
+
+    static func downloadURL(from baseURL: URL, assetId: String) throws -> URL {
+        guard !assetId.isEmpty else {
+            throw AttachmentError.invalidData
+        }
+        guard var components = URLComponents(url: apiBaseURL(from: baseURL), resolvingAgainstBaseURL: false) else {
+            throw AttachmentError.invalidData
+        }
+        guard let encodedAssetId = encodePathComponent(assetId) else {
+            throw AttachmentError.invalidData
+        }
+        let basePath = components.percentEncodedPath.hasSuffix("/")
+            ? String(components.percentEncodedPath.dropLast())
+            : components.percentEncodedPath
+        components.percentEncodedPath = "\(basePath)/download/\(encodedAssetId)"
+        guard let url = components.url else {
+            throw AttachmentError.invalidData
+        }
+        return url
+    }
+
     static func apiBaseURL(from baseURL: URL) -> URL {
         guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
               components.scheme?.lowercased() == "http",
@@ -140,5 +164,11 @@ enum ProviderHTTPURLResolver {
             || normalized == "::1"
             || normalized.hasSuffix(".local")
             || normalized.hasPrefix("127.")
+    }
+
+    private static func encodePathComponent(_ value: String) -> String? {
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "/")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed)
     }
 }

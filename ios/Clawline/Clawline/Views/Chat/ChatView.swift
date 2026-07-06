@@ -335,6 +335,17 @@ enum StreamPopupFocusHandoff {
     }
 }
 
+enum AttachmentMenuPresentationPolicy {
+    enum Action: Equatable {
+        case present
+        case resetThenPresent
+    }
+
+    static func action(isCurrentlyPresented: Bool) -> Action {
+        isCurrentlyPresented ? .resetThenPresent : .present
+    }
+}
+
 enum StreamSwitchKeyboardFocusPolicy {
     static func shouldRestoreComposerAfterSwitch(
         wasSoftwareKeyboardVisible: Bool
@@ -405,6 +416,7 @@ struct ChatView: View {
     @State private var shouldRestoreFocusAfterStreamPopup = false
     @State private var streamPopupKeyboardDismissalTask: Task<Void, Never>?
     @State private var streamPopupComposerFocusTask: Task<Void, Never>?
+    @State private var attachmentMenuPresentationTask: Task<Void, Never>?
     @State private var streamSwitchComposerFocusRestore: StreamSwitchComposerFocusRestore?
     @State private var streamSwitchComposerFocusRestoreToken = 0
     @State private var scrollButtonStateBySessionKey: [String: ScrollButtonState] = [:]
@@ -2416,7 +2428,7 @@ struct ChatView: View {
                 onCancel: { viewModel.cancelSend() },
                 onReconnect: { viewModel.reconnect() },
                 onAdd: {
-                    isAttachmentMenuPresented = true
+                    presentAttachmentMenu()
                 },
                 attachmentMenuContent: {
                     AnyView(
@@ -3344,6 +3356,28 @@ struct ChatView: View {
             guard streamPopupRouteController.route == .closed else { return }
             focusRequestID &+= 1
             streamPopupComposerFocusTask = nil
+        }
+    }
+
+    @MainActor
+    private func presentAttachmentMenu() {
+        attachmentMenuPresentationTask?.cancel()
+        attachmentMenuPresentationTask = nil
+        if streamPopupRouteController.isPopupPresented {
+            closeStreamPopup(restoreComposerFocusIfNeeded: false)
+        }
+
+        switch AttachmentMenuPresentationPolicy.action(isCurrentlyPresented: isAttachmentMenuPresented) {
+        case .present:
+            isAttachmentMenuPresented = true
+        case .resetThenPresent:
+            isAttachmentMenuPresented = false
+            attachmentMenuPresentationTask = Task { @MainActor in
+                await Task.yield()
+                guard !Task.isCancelled else { return }
+                isAttachmentMenuPresented = true
+                attachmentMenuPresentationTask = nil
+            }
         }
     }
 

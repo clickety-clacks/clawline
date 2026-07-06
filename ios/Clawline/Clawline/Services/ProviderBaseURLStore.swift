@@ -113,3 +113,32 @@ enum ProviderWebSocketURLBuilder {
         return urls
     }
 }
+
+enum ProviderHTTPURLResolver {
+    static func apiBaseURL(from baseURL: URL) -> URL {
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
+              components.scheme?.lowercased() == "http",
+              let host = components.host,
+              !isLocalHTTPHost(host) else {
+            return baseURL
+        }
+
+        components.scheme = "https"
+        if host.lowercased() == "100.85.66.60" {
+            components.host = "tars.tail4105e8.ts.net"
+        }
+        if components.port == 18800 {
+            components.port = 19443
+        }
+        return components.url ?? baseURL
+    }
+
+    private static func isLocalHTTPHost(_ host: String) -> Bool {
+        let normalized = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]")).lowercased()
+        return normalized == "localhost"
+            || normalized == "0.0.0.0"
+            || normalized == "::1"
+            || normalized.hasSuffix(".local")
+            || normalized.hasPrefix("127.")
+    }
+}

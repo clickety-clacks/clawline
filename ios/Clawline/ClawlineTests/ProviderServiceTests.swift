@@ -905,6 +905,83 @@ struct ProviderServiceTests {
         #expect(sessions.map(\.sessionKey) == ["agent:main:clawline:user:s_trackable"])
     }
 
+    @Test("Trackable sessions fetch uses HTTPS provider API URL for non-local HTTP base")
+    func trackableSessionsFetchUsesHTTPSProviderAPIURLForNonLocalHTTPBase() async throws {
+        let baseURL = URL(string: "http://100.85.66.60:18800")!
+        final class RequestBox: @unchecked Sendable {
+            var url: URL?
+            var authorization: String?
+        }
+        let requestBox = RequestBox()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            requestBox.url = request.url
+            requestBox.authorization = request.value(forHTTPHeaderField: "Authorization")
+            let data = #"""
+            {
+              "sessions": [
+                {
+                  "sessionKey": "agent:heimdal:main",
+                  "displayName": "Heimdal Main",
+                  "updatedAt": 1700000000000
+                }
+              ]
+            }
+            """#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+
+        let sessions = try await streamAPIClient.fetchTrackableSessions(token: "jwt")
+
+        #expect(sessions.map(\.sessionKey) == ["agent:heimdal:main"])
+        #expect(requestBox.url?.absoluteString == "https://tars.tail4105e8.ts.net:19443/api/trackable-sessions")
+        #expect(requestBox.authorization == "Bearer jwt")
+    }
+
+    @Test("Trackable sessions fetch preserves local HTTP provider API URL")
+    func trackableSessionsFetchPreservesLocalHTTPProviderAPIURL() async throws {
+        let baseURL = URL(string: "http://127.0.0.1:18800")!
+        final class RequestBox: @unchecked Sendable {
+            var url: URL?
+        }
+        let requestBox = RequestBox()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            requestBox.url = request.url
+            let data = #"{ "sessions": [] }"#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+
+        let sessions = try await streamAPIClient.fetchTrackableSessions(token: nil)
+
+        #expect(sessions.isEmpty)
+        #expect(requestBox.url?.absoluteString == "http://127.0.0.1:18800/api/trackable-sessions")
+    }
+
     @Test("Fetch streams decodes adopted flag and defaults missing field to false")
     func fetchStreamsDecodesAdoptedFlag() async throws {
         let mockSocket = MockWebSocketClient()

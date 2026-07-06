@@ -284,7 +284,6 @@ private final class InteractiveHTMLWebKit: NSObject {
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "InteractiveHTMLWebKit")
 
     private var cachedRuleList: WKContentRuleList?
-    private let processPool = WKProcessPool()
     private var compiling = false
     private var pending: [() -> Void] = []
 
@@ -333,7 +332,6 @@ private final class InteractiveHTMLWebKit: NSObject {
     private func makeWebView(ruleList: WKContentRuleList?, handler: WKScriptMessageHandler) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
-        configuration.processPool = processPool
 
         let userContent = WKUserContentController()
         userContent.removeAllUserScripts()

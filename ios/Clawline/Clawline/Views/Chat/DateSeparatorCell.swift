@@ -8,8 +8,16 @@ import UIKit
 final class DateSeparatorCell: UICollectionViewCell {
     static let reuseIdentifier = "DateSeparatorCell"
     static let itemIdPrefix = "__date_separator__|"
-    static let topPadding: CGFloat = 24
-    static let bottomPadding: CGFloat = 8
+    static let topPadding: CGFloat = 16
+    static let bottomPadding: CGFloat = 16
+
+    static var separatorFont: UIFont {
+        UIFont.clawline(.dateSeparator)
+    }
+
+    static var separatorHeight: CGFloat {
+        ceil(separatorFont.lineHeight + topPadding + bottomPadding)
+    }
 
     private let label = UILabel()
 
@@ -19,9 +27,9 @@ final class DateSeparatorCell: UICollectionViewCell {
         backgroundColor = .clear
 
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.textAlignment = .left
+        label.textAlignment = .center
         label.numberOfLines = 1
-        label.font = UIFont.clawline(.uiLabel, weight: .semibold)
+        label.font = Self.separatorFont
         label.adjustsFontForContentSizeCategory = true
         contentView.addSubview(label)
 

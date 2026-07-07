@@ -4691,10 +4691,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
         if DateSeparatorCell.isDateSeparatorItemID(id) {
             let rowWidth = availableContentWidth()
-            let lineHeight = UIFont.clawline(.uiLabel, weight: .semibold).lineHeight
             return CGSize(
                 width: rowWidth,
-                height: ceil(lineHeight + DateSeparatorCell.topPadding + DateSeparatorCell.bottomPadding)
+                height: DateSeparatorCell.separatorHeight
             )
         }
 

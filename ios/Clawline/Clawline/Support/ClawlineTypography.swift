@@ -14,6 +14,7 @@ enum ClawlineTextRole {
     case secondaryLabel
     case senderName
     case timestamp
+    case dateSeparator
     case sectionHeader
     case subsectionHeader
 
@@ -27,7 +28,7 @@ enum ClawlineTextRole {
             return .subheadline
         case .secondaryLabel:
             return .footnote
-        case .senderName:
+        case .senderName, .dateSeparator:
             return .caption
         case .timestamp:
             return .caption2
@@ -48,7 +49,7 @@ enum ClawlineTextRole {
             return .subheadline
         case .secondaryLabel:
             return .footnote
-        case .senderName:
+        case .senderName, .dateSeparator:
             return .caption1
         case .timestamp:
             return .caption2
@@ -65,7 +66,7 @@ enum ClawlineTextRole {
             return .semibold
         case .mediumMessage:
             return .medium
-        case .senderName:
+        case .senderName, .dateSeparator:
             return .semibold
         case .sectionHeader:
             return .bold
@@ -82,7 +83,7 @@ enum ClawlineTextRole {
             return .semibold
         case .mediumMessage:
             return .medium
-        case .senderName:
+        case .senderName, .dateSeparator:
             return .semibold
         case .sectionHeader:
             return .bold

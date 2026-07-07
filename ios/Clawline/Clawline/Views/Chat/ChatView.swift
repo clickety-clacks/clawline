@@ -40,6 +40,24 @@ enum CrossChatShortcutLabelAvailability {
     }
 }
 
+enum CrossChatNotificationShortcutIndicatorAvailability {
+    static var current: Bool {
+#if (os(iOS) || os(visionOS)) && canImport(GameController)
+        current(coalescedKeyboardPresent: GCKeyboard.coalesced != nil)
+#else
+        false
+#endif
+    }
+
+    static func current(coalescedKeyboardPresent: Bool) -> Bool {
+#if (os(iOS) || os(visionOS)) && canImport(GameController)
+        coalescedKeyboardPresent
+#else
+        false
+#endif
+    }
+}
+
 #if DEBUG
 @MainActor
 private final class T099OnDisappearProbeStore {
@@ -6691,7 +6709,7 @@ private struct CrossChatNotificationOverlay: View {
     let showsDockedHitTarget: Bool
     let onVerticalDockDragDelta: (CGFloat) -> Void
     let onNavigateToSource: (String) -> Void
-    @State private var showShortcutLabels = CrossChatShortcutLabelAvailability.current
+    @State private var showShortcutLabels = CrossChatNotificationShortcutIndicatorAvailability.current
     @State private var actionMenuSelection: CrossChatNotificationActionMenuItem = .goToChat
     @State private var scrollViewsBySourceChatId: [String: WeakScrollViewBox] = [:]
     @State private var previewingCollapsedSourceChatIds: Set<String> = []
@@ -7086,7 +7104,7 @@ private struct CrossChatNotificationOverlay: View {
             .transition(Self.notificationTransition)
             .animation(isCollapsed ? Self.hideAnimation : Self.revealAnimation, value: isCollapsed)
             .onAppear {
-                showShortcutLabels = CrossChatShortcutLabelAvailability.current
+                showShortcutLabels = CrossChatNotificationShortcutIndicatorAvailability.current
                 viewModel.closeOverflowingCrossChatNotificationReplies(visibleSourceChatIds: Set(visibleBubbles.map(\.sourceChatId)))
                 if isCollapsed && !isDebugSkippingCollapsedPreview {
                     startCollapsedPreview(sourceChatIds: visibleBubbles.map(\.sourceChatId))
@@ -7103,12 +7121,12 @@ private struct CrossChatNotificationOverlay: View {
                 clearAllGestureAxisLocks()
                 selectionActiveSourceChatIds = []
             }
-#if os(iOS) && !targetEnvironment(macCatalyst) && canImport(GameController)
+#if (os(iOS) || os(visionOS)) && canImport(GameController)
             .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidConnect)) { _ in
-                showShortcutLabels = CrossChatShortcutLabelAvailability.current
+                showShortcutLabels = CrossChatNotificationShortcutIndicatorAvailability.current
             }
             .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidDisconnect)) { _ in
-                showShortcutLabels = CrossChatShortcutLabelAvailability.current
+                showShortcutLabels = CrossChatNotificationShortcutIndicatorAvailability.current
             }
 #endif
             .onReceive(NotificationCenter.default.publisher(for: .clawlineScrollNotificationDownCommand)) { _ in

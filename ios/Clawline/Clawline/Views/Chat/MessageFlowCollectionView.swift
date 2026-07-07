@@ -5878,9 +5878,17 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     private func canApplyBubbleSizingV2RemeasureNow() -> Bool {
-        // If the user scrolled up to read, don't reflow under their finger/eyes.
-        // Also require scroll-at-rest so finger-lift + deceleration can't trigger mid-motion reflow.
-        isNearBottom(extraMargin: 240) && isBubbleSizingV2ScrollAtRest()
+        Self.shouldApplyBubbleSizingV2Remeasure(
+            isNearBottom: isNearBottom(extraMargin: 240),
+            isScrollAtRest: isBubbleSizingV2ScrollAtRest()
+        )
+    }
+
+    static func shouldApplyBubbleSizingV2Remeasure(isNearBottom _: Bool, isScrollAtRest: Bool) -> Bool {
+        // Height cache updates must not wait for the row to become visible again. Once scrolling
+        // is settled, the viewport-anchor compensation below preserves the reader's position while
+        // making offscreen/cached row geometry truthful before the next scrollback.
+        isScrollAtRest
     }
 
     private func scheduleBubbleSizingV2DeferredFlushAfterRest() {

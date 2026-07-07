@@ -142,7 +142,56 @@ struct MessageFlowCacheSeamIntegrityTests {
         )
         #expect(
             contents.contains("MessageBubbleGeometry.adjacentMessageRowSpacing(metrics: metrics)"),
-            "T1485 proof: compact row gap comes from the shared bubble geometry invariant."
+            "T1485 proof: message row gap comes from the shared bubble geometry invariant."
+        )
+        #expect(
+            contents.contains("static func shouldApplyBubbleSizingV2Remeasure(isNearBottom _: Bool, isScrollAtRest: Bool) -> Bool"),
+            "T1193 proof: V2 remeasure flushing should be controlled by a testable first-pass cache policy."
+        )
+    }
+
+    @Test("T1193: V2 sizing and visible cells consume one authoritative layout state")
+    func bubbleSizingV2SizingAndRenderingShareAuthoritativeLayoutState() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // ClawlineTests
+            .deletingLastPathComponent() // Clawline
+            .appendingPathComponent("Clawline/Views/Chat/MessageFlowCollectionView.swift")
+        let contents = try String(contentsOf: sourceURL, encoding: .utf8)
+        let lines = contents.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+
+        guard let sizeForItemStart = lines.firstIndex(where: { $0.contains("private func sizeForItem(at indexPath: IndexPath)") }),
+              let sizeForItemEnd = lines[sizeForItemStart...].firstIndex(where: { $0.contains("private func measureUIKitBubbleSize") }),
+              let cellProviderStart = lines.firstIndex(where: { $0.contains("collectionView.dequeueReusableCell(") && $0.contains("MessageBubbleUIKitCell") }),
+              let cellProviderEnd = lines[cellProviderStart...].firstIndex(where: { $0.contains("cell?.configure(") }),
+              let authorityStart = lines.firstIndex(where: { $0.contains("private func authoritativeBubbleSizingV2LayoutState") }),
+              let authorityEnd = lines[authorityStart...].firstIndex(where: { $0.contains("private func bubbleSizingV2LayoutState") }) else {
+            Issue.record("Unable to locate the V2 sizing, visible rendering, or authoritative geometry sections.")
+            return
+        }
+
+        let sizeForItemWindow = lines[sizeForItemStart..<sizeForItemEnd].joined(separator: "\n")
+        let cellProviderWindow = lines[cellProviderStart..<cellProviderEnd].joined(separator: "\n")
+        let authorityWindow = lines[authorityStart..<authorityEnd].joined(separator: "\n")
+
+        #expect(
+            sizeForItemWindow.contains("authoritativeBubbleSizingV2LayoutState("),
+            "sizeForItem must resolve the shared authoritative V2 layout state instead of independently producing a plan."
+        )
+        #expect(
+            cellProviderWindow.contains("authoritativeBubbleSizingV2LayoutState("),
+            "Visible cells must consume the same authoritative V2 layout state used by first-pass sizing."
+        )
+        #expect(
+            !cellProviderWindow.contains("bubbleSizingV2Plan("),
+            "Visible cells must not run a second V2 planning algorithm and silently self-heal after scroll."
+        )
+        #expect(
+            authorityWindow.contains("bubbleSizingV2Plan(") && authorityWindow.contains("bubbleSizingV2LayoutState("),
+            "The geometry authority should be the only place that joins plan resolution with measured/render layout state."
+        )
+        #expect(
+            contents.contains("private let bubbleSizingV2LayoutStateCache"),
+            "The shared authority must cache the complete LayoutState, not only a size, so rendering consumes the measured plan."
         )
     }
 

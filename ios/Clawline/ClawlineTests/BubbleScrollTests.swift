@@ -103,6 +103,111 @@ struct BubbleScrollTests {
         #expect(measurementDetectors.allSatisfy { $0.isEmpty })
     }
 
+    @Test("T1193: Collection rows are tallest bubble plus row spacing without stretching peer bubbles")
+    func collectionRowHeightIsOwnedByTallestBubbleWithoutStretchingPeers() {
+        let result = MessageFlowRowLayoutEngine.layout(
+            items: [
+                .init(index: 0, size: CGSize(width: 90, height: 42)),
+                .init(index: 1, size: CGSize(width: 80, height: 88)),
+                .init(index: 2, size: CGSize(width: 120, height: 56)),
+                .init(index: 3, size: CGSize(width: 70, height: 64))
+            ],
+            contentWidth: 220,
+            sectionInset: UIEdgeInsets(top: 7, left: 5, bottom: 11, right: 5),
+            minimumInteritemSpacing: 3,
+            rowSpacing: { previous, next in previous == 1 && next == 2 ? 17 : 13 }
+        )
+        let frames = Dictionary(uniqueKeysWithValues: result.items.map { ($0.index, $0.frame) })
+        let firstRowTallestBubble = max(frames[0]?.height ?? 0, frames[1]?.height ?? 0)
+        let secondRowTallestBubble = max(frames[2]?.height ?? 0, frames[3]?.height ?? 0)
+        let expectedSecondRowY: CGFloat = 7 + firstRowTallestBubble + 17
+        let expectedContentHeight = expectedSecondRowY + secondRowTallestBubble + 11
+
+        #expect(abs((frames[0]?.height ?? 0) - 42) < 0.5)
+        #expect(abs((frames[1]?.height ?? 0) - 88) < 0.5)
+        #expect(abs((frames[2]?.height ?? 0) - 56) < 0.5)
+        #expect(abs((frames[3]?.height ?? 0) - 64) < 0.5)
+        #expect((frames[0]?.height ?? 0) < firstRowTallestBubble)
+        #expect((frames[2]?.height ?? 0) < secondRowTallestBubble)
+        #expect(abs((frames[2]?.minY ?? 0) - expectedSecondRowY) < 0.5)
+        #expect(abs((frames[3]?.minY ?? 0) - expectedSecondRowY) < 0.5)
+        #expect(abs(result.contentSize.height - expectedContentHeight) < 0.5)
+    }
+
+    @Test("T1193: Cached item-height reflow uses row-owned delta and leaves bubble heights content-owned")
+    func cachedRowHeightChangeReflowsByTallestBubbleDeltaWithoutStretchingPeers() {
+        let before = MessageFlowRowLayoutEngine.layout(
+            items: [
+                .init(index: 0, size: CGSize(width: 86, height: 40)),
+                .init(index: 1, size: CGSize(width: 92, height: 70)),
+                .init(index: 2, size: CGSize(width: 100, height: 52))
+            ],
+            contentWidth: 210,
+            sectionInset: UIEdgeInsets(top: 4, left: 4, bottom: 6, right: 4),
+            minimumInteritemSpacing: 4,
+            rowSpacing: { _, _ in 12 }
+        )
+        let beforeFrames = Dictionary(uniqueKeysWithValues: before.items.map { ($0.index, $0.frame) })
+        guard let updated = MessageFlowRowLayoutEngine.applyItemHeightChange(
+            frames: beforeFrames,
+            contentHeight: before.contentSize.height,
+            index: 0,
+            delta: 55
+        ) else {
+            Issue.record("T1193 cached row height update unexpectedly fell back to a rebuild")
+            return
+        }
+
+        let oldTallest = max(beforeFrames[0]?.height ?? 0, beforeFrames[1]?.height ?? 0)
+        let newTallest = max(updated.frames[0]?.height ?? 0, updated.frames[1]?.height ?? 0)
+        let expectedRowDelta = newTallest - oldTallest
+
+        #expect(abs((updated.frames[0]?.height ?? 0) - 95) < 0.5)
+        #expect(abs((updated.frames[1]?.height ?? 0) - 70) < 0.5)
+        #expect(abs((updated.frames[2]?.height ?? 0) - 52) < 0.5)
+        #expect((updated.frames[1]?.height ?? 0) < newTallest)
+        #expect(abs(((updated.frames[2]?.minY ?? 0) - (beforeFrames[2]?.minY ?? 0)) - expectedRowDelta) < 0.5)
+        #expect(abs(updated.contentHeight - (before.contentSize.height + expectedRowDelta)) < 0.5)
+    }
+
+    @Test("T1193: Message row spacing uses the standard left-edge visual padding token")
+    func messageRowSpacingMatchesLeftEdgePaddingToken() {
+        let compact = ChatFlowTheme.Metrics(isCompact: true)
+        let regular = ChatFlowTheme.Metrics(isCompact: false)
+
+        #expect(MessageBubbleGeometry.adjacentMessageRowSpacing(metrics: compact) == compact.containerPadding)
+        #expect(MessageBubbleGeometry.adjacentMessageRowSpacing(metrics: regular) == regular.containerPadding)
+        #expect(
+            MessageBubbleGeometry.adjacentMessageRowSpacing(metrics: regular)
+                == MessageFlowCollectionViewController.flowSectionInset(
+                    containerPadding: regular.containerPadding,
+                    trailingContentInset: 0
+                ).left
+        )
+    }
+
+    @Test("T1193: V2 remeasure can update offscreen cached geometry before scrollback visibility")
+    func bubbleSizingV2RemeasurePolicyDoesNotWaitForNearBottomAtRest() {
+        #expect(
+            MessageFlowCollectionViewController.shouldApplyBubbleSizingV2Remeasure(
+                isNearBottom: false,
+                isScrollAtRest: true
+            )
+        )
+        #expect(
+            MessageFlowCollectionViewController.shouldApplyBubbleSizingV2Remeasure(
+                isNearBottom: true,
+                isScrollAtRest: true
+            )
+        )
+        #expect(
+            !MessageFlowCollectionViewController.shouldApplyBubbleSizingV2Remeasure(
+                isNearBottom: true,
+                isScrollAtRest: false
+            )
+        )
+    }
+
     @Test("BubbleSizingV2 short bubbles honor the plan min width instead of the legacy 120pt floor")
     @MainActor
     func bubbleSizingV2ShortBubbleUsesPlanMinWidthConstraint() {

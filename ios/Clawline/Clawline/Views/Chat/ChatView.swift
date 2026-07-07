@@ -40,6 +40,28 @@ enum CrossChatShortcutLabelAvailability {
     }
 }
 
+enum HardwareKeyboardAvailability {
+    static var current: Bool {
+#if targetEnvironment(macCatalyst)
+        true
+#elseif (os(iOS) || os(visionOS)) && canImport(GameController)
+        current(coalescedKeyboardPresent: GCKeyboard.coalesced != nil)
+#else
+        false
+#endif
+    }
+
+    static func current(coalescedKeyboardPresent: Bool) -> Bool {
+#if targetEnvironment(macCatalyst)
+        true
+#elseif (os(iOS) || os(visionOS)) && canImport(GameController)
+        coalescedKeyboardPresent
+#else
+        false
+#endif
+    }
+}
+
 #if DEBUG
 @MainActor
 private final class T099OnDisappearProbeStore {
@@ -136,7 +158,7 @@ enum StreamPopupSearchFocus: Equatable {
 
 enum StreamPopupRoute: Equatable {
     case closed
-    case popup(searchFocus: StreamPopupSearchFocus)
+    case popup(presentationID: Int, searchFocus: StreamPopupSearchFocus)
     case trackPicker
 }
 
@@ -244,6 +266,8 @@ enum CrossChatNotificationNavigationDockPolicy {
 final class StreamPopupRouteController {
     private(set) var route: StreamPopupRoute = .closed
     private var searchFocusRequestID = 0
+    private var popupPresentationID = 0
+    private var closingPresentationID: Int?
 
     var isPopupPresented: Bool {
         if case .popup = route {
@@ -256,25 +280,51 @@ final class StreamPopupRouteController {
         route == .trackPicker
     }
 
+    var currentPopupPresentationID: Int? {
+        guard case .popup(let presentationID, _) = route else { return nil }
+        return presentationID
+    }
+
     var popupSearchFocusRequestID: Int? {
-        guard case .popup(.request(let id)) = route else { return nil }
+        guard case .popup(_, .request(let id)) = route else { return nil }
         return id
     }
 
+    var isSuppressingReopenFromClosingPresentation: Bool {
+        closingPresentationID != nil
+    }
+
     func openPopup(focusSearch: Bool) {
+        closingPresentationID = nil
+        popupPresentationID &+= 1
         if focusSearch {
             searchFocusRequestID &+= 1
-            route = .popup(searchFocus: .request(id: searchFocusRequestID))
+            route = .popup(presentationID: popupPresentationID, searchFocus: .request(id: searchFocusRequestID))
         } else {
-            route = .popup(searchFocus: .none)
+            route = .popup(presentationID: popupPresentationID, searchFocus: .none)
         }
     }
 
     func closePopup() {
+        guard let presentationID = currentPopupPresentationID else {
+            route = .closed
+            return
+        }
+        closingPresentationID = presentationID
         route = .closed
     }
 
+    func finishClosingSuppression(for presentationID: Int?) {
+        guard closingPresentationID == presentationID else { return }
+        closingPresentationID = nil
+    }
+
+    func clearClosingSuppression() {
+        closingPresentationID = nil
+    }
+
     func presentTrackPicker() {
+        closingPresentationID = nil
         route = .trackPicker
     }
 
@@ -284,13 +334,28 @@ final class StreamPopupRouteController {
 
     func consumeSearchFocusRequest() {
         guard popupSearchFocusRequestID != nil else { return }
-        route = .popup(searchFocus: .none)
+        guard let presentationID = currentPopupPresentationID else { return }
+        route = .popup(presentationID: presentationID, searchFocus: .none)
     }
 }
 
 enum StreamPopupFocusHandoff {
+    static func shouldFocusSearchOnOpen(
+        isSoftwareKeyboardVisible: Bool,
+        isHardwareKeyboardAttached: Bool
+    ) -> Bool {
+        StreamPopupFocusPolicy.shouldFocusSearchOnOpen(
+            isSoftwareKeyboardVisible: isSoftwareKeyboardVisible,
+            isHardwareKeyboardAvailable: isHardwareKeyboardAttached
+        )
+    }
+
     static func isSoftwareKeyboardVisible(keyboardHeight: CGFloat, safeAreaBottom: CGFloat) -> Bool {
         max(0, keyboardHeight - safeAreaBottom) > 0.5
+    }
+
+    static func shouldOpenFromDotsTap(isSuppressingReopenFromClosingPresentation: Bool) -> Bool {
+        !isSuppressingReopenFromClosingPresentation
     }
 }
 
@@ -362,6 +427,7 @@ struct ChatView: View {
 #endif
     @State private var shouldRestoreFocusAfterPicker = false
     @State private var streamPopupFocusCoordinator = StreamPopupFocusCoordinator()
+    @State private var streamPopupClosingSuppressionTask: Task<Void, Never>?
     @State private var streamSwitchComposerFocusRestore: StreamSwitchComposerFocusRestore?
     @State private var streamSwitchComposerFocusRestoreToken = 0
     @State private var scrollButtonStateBySessionKey: [String: ScrollButtonState] = [:]
@@ -475,6 +541,10 @@ struct ChatView: View {
             keyboardHeight: keyboardHeight,
             safeAreaBottom: Self.currentKeyWindowSafeAreaBottom()
         )
+    }
+
+    private var currentHardwareKeyboardAvailability: Bool {
+        HardwareKeyboardAvailability.current
     }
 
     private var fontScaleChangeSequence: Int {
@@ -3254,7 +3324,7 @@ struct ChatView: View {
     private func openStreamPopupForCurrentKeyboardState() {
         let focusTarget = StreamPopupFocusPolicy.focusTargetOnOpen(
             isSoftwareKeyboardVisible: isKeyboardVisible,
-            isHardwareKeyboardAvailable: CrossChatShortcutLabelAvailability.current
+            isHardwareKeyboardAvailable: currentHardwareKeyboardAvailability
         )
         openStreamPopup(focusTarget: focusTarget)
     }
@@ -3276,6 +3346,8 @@ struct ChatView: View {
             displacedComposerFocus: displacedComposerFocus
         )
         let focusSearch = focusTarget == .searchField
+        streamPopupClosingSuppressionTask?.cancel()
+        streamPopupClosingSuppressionTask = nil
         streamPopupRouteController.openPopup(focusSearch: focusSearch)
         streamPopupFocusCoordinator.reconcileKeyboardVisibilityDuringPresentation(
             isVisible: currentSoftwareKeyboardVisibility
@@ -3299,6 +3371,7 @@ struct ChatView: View {
             return
         }
         let shouldRestoreComposer = StreamPopupFocusCoordinator.shouldRestoreComposer(for: dismissed)
+        let closingPresentationID = streamPopupRouteController.currentPopupPresentationID
 
         if shouldRestoreComposer {
             if preserveComposerFocusDuringDismissal {
@@ -3319,6 +3392,9 @@ struct ChatView: View {
         } else {
             streamPopupRouteController.closePopup()
         }
+        if let closingPresentationID {
+            suppressStreamPopupReopenFromClosingTap(presentationID: closingPresentationID)
+        }
     }
 
     @MainActor
@@ -3327,6 +3403,8 @@ struct ChatView: View {
         // dismissal; composer focus must not be restored from this path.
         streamPopupFocusCoordinator.recordDismissal(reason: .trackPickerHandoff)
         streamPopupFocusCoordinator.cancelPendingComposerRestore()
+        streamPopupClosingSuppressionTask?.cancel()
+        streamPopupClosingSuppressionTask = nil
         prepareForAttachmentPicker()
         streamPopupRouteController.presentTrackPicker()
     }
@@ -3344,6 +3422,23 @@ struct ChatView: View {
         ) { [self] in
             grantSpatialPromptFocusShortcutTargetLease()
             focusRequestID &+= 1
+        }
+    }
+
+    @MainActor
+    private func suppressStreamPopupReopenFromClosingTap(presentationID: Int?) {
+        streamPopupClosingSuppressionTask?.cancel()
+        streamPopupClosingSuppressionTask = Task { @MainActor in
+            await Task.yield()
+            do {
+                try await Task.sleep(for: .milliseconds(220))
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
+            streamPopupRouteController.finishClosingSuppression(for: presentationID)
+            streamPopupClosingSuppressionTask = nil
         }
     }
 
@@ -3681,8 +3776,12 @@ private struct StreamPopupTrigger: View {
             onTap: {
                 if routeController.isPopupPresented {
                     onClosePopupFromDotsIndicator()
-                } else {
+                } else if StreamPopupFocusHandoff.shouldOpenFromDotsTap(
+                    isSuppressingReopenFromClosingPresentation: routeController.isSuppressingReopenFromClosingPresentation
+                ) {
                     onOpenPopup()
+                } else {
+                    routeController.clearClosingSuppression()
                 }
             },
             onScrubPreview: onPreviewScrubStream,
@@ -9724,10 +9823,10 @@ extension StreamPopupRoute {
         switch self {
         case .closed:
             return "closed"
-        case .popup(.none):
-            return "popup:none"
-        case .popup(.request(let id)):
-            return "popup:request:\(id)"
+        case .popup(let presentationID, .none):
+            return "popup:\(presentationID):none"
+        case .popup(let presentationID, .request(let id)):
+            return "popup:\(presentationID):request:\(id)"
         case .trackPicker:
             return "trackPicker"
         }

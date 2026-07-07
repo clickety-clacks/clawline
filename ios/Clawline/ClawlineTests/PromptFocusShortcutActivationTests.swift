@@ -1304,13 +1304,13 @@ struct PromptFocusShortcutActivationTests {
             sourceStates: [(sourceChatId: "notification-0", isReplying: false)],
             keyboardOwnershipStore: beforeReply,
             selectedSessionKey: "chat-a",
-            streamPopupRoute: .popup(searchFocus: .request(id: 1))
+            streamPopupRoute: .popup(presentationID: 1, searchFocus: .request(id: 1))
         )
         let popupFilteringIdentity = CrossChatNotificationShortcutLifecycle.identity(
             sourceStates: [(sourceChatId: "notification-0", isReplying: false)],
             keyboardOwnershipStore: beforeReply,
             selectedSessionKey: "chat-a",
-            streamPopupRoute: .popup(searchFocus: .none)
+            streamPopupRoute: .popup(presentationID: 1, searchFocus: .none)
         )
         let recoveredIdentity = CrossChatNotificationShortcutLifecycle.identity(
             sourceStates: [(sourceChatId: "notification-0", isReplying: false)],

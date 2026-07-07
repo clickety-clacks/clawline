@@ -566,7 +566,7 @@ struct StreamPageDotsViewTests {
 
         routeController.openPopup(focusSearch: false)
 
-        #expect(routeController.route == .popup(searchFocus: .none))
+        #expect(routeController.currentPopupPresentationID != nil)
         #expect(routeController.isPopupPresented)
         #expect(routeController.popupSearchFocusRequestID == nil)
 
@@ -575,12 +575,12 @@ struct StreamPageDotsViewTests {
 
         #expect(initialSearchFocusRequestID != nil)
         if let initialSearchFocusRequestID {
-            #expect(routeController.route == .popup(searchFocus: .request(id: initialSearchFocusRequestID)))
+            #expect(routeController.popupSearchFocusRequestID == initialSearchFocusRequestID)
         }
 
         routeController.consumeSearchFocusRequest()
 
-        #expect(routeController.route == .popup(searchFocus: .none))
+        #expect(routeController.isPopupPresented)
         #expect(routeController.popupSearchFocusRequestID == nil)
 
         routeController.presentTrackPicker()
@@ -642,6 +642,84 @@ struct StreamPageDotsViewTests {
                 isSoftwareKeyboardVisible: false,
                 isHardwareKeyboardAvailable: false
             ) == .idle
+        )
+    }
+
+    @Test("T1136 popup close suppression survives repeated close requests")
+    func popupCloseSuppressionSurvivesRepeatedCloseRequests() {
+        let routeController = StreamPopupRouteController()
+        routeController.openPopup(focusSearch: true)
+        let presentationID = routeController.currentPopupPresentationID
+
+        routeController.closePopup()
+
+        #expect(routeController.route == .closed)
+        #expect(routeController.isSuppressingReopenFromClosingPresentation)
+
+        routeController.closePopup()
+
+        #expect(routeController.route == .closed)
+        #expect(routeController.isSuppressingReopenFromClosingPresentation)
+
+        routeController.finishClosingSuppression(for: presentationID)
+
+        #expect(routeController.isSuppressingReopenFromClosingPresentation == false)
+    }
+
+    @Test("T1136 stale closing suppression is not cleared by unrelated finish")
+    func staleClosingSuppressionIsNotClearedByUnrelatedFinish() {
+        let routeController = StreamPopupRouteController()
+        routeController.openPopup(focusSearch: false)
+        routeController.closePopup()
+
+        routeController.finishClosingSuppression(for: nil)
+
+        #expect(routeController.isSuppressingReopenFromClosingPresentation)
+    }
+
+    @Test("T1136 stream popup search focus follows input availability")
+    func streamPopupSearchFocusFollowsInputAvailability() {
+        #expect(
+            StreamPopupFocusHandoff.shouldFocusSearchOnOpen(
+                isSoftwareKeyboardVisible: true,
+                isHardwareKeyboardAttached: false
+            )
+        )
+        #expect(
+            StreamPopupFocusHandoff.shouldFocusSearchOnOpen(
+                isSoftwareKeyboardVisible: false,
+                isHardwareKeyboardAttached: true
+            )
+        )
+        #expect(
+            StreamPopupFocusHandoff.shouldFocusSearchOnOpen(
+                isSoftwareKeyboardVisible: false,
+                isHardwareKeyboardAttached: false
+            ) == false
+        )
+    }
+
+    @Test("T1136 hardware keyboard availability follows platform input")
+    func hardwareKeyboardAvailabilityFollowsPlatformInput() {
+        #expect(HardwareKeyboardAvailability.current(coalescedKeyboardPresent: true))
+#if targetEnvironment(macCatalyst)
+        #expect(HardwareKeyboardAvailability.current(coalescedKeyboardPresent: false))
+#else
+        #expect(HardwareKeyboardAvailability.current(coalescedKeyboardPresent: false) == false)
+#endif
+    }
+
+    @Test("T1136 dots tap cannot reopen while popup close suppression is active")
+    func streamPopupDotsTapCannotReopenWhileCloseSuppressionIsActive() {
+        #expect(
+            StreamPopupFocusHandoff.shouldOpenFromDotsTap(
+                isSuppressingReopenFromClosingPresentation: false
+            )
+        )
+        #expect(
+            StreamPopupFocusHandoff.shouldOpenFromDotsTap(
+                isSuppressingReopenFromClosingPresentation: true
+            ) == false
         )
     }
 

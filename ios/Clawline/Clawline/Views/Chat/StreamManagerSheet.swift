@@ -148,6 +148,13 @@ struct StreamManagerSheet: View {
         resolvedHardwareKeyboardShortcutsAvailable
     }
 
+    private var selectorShortcutBridgeShouldOwnFirstResponder: Bool {
+        isShortcutOwnershipActive
+            && selectorShortcutsAvailable
+            && searchFocusRequestID == nil
+            && !isSearchFieldFocused
+    }
+
     private var shouldRenderSearchTextField: Bool {
         isSearchFieldFocusEnabled
             || StreamPopupSearchPresentationFocusPolicy
@@ -437,7 +444,7 @@ struct StreamManagerSheet: View {
         StreamSelectorShortcutKeyCommandBridge(
             selectableSessionKeys: selectorShortcutsAvailable ? selectableShortcutSessionKeys : [],
             isSearchFieldFocused: isSearchFieldFocused,
-            isShortcutOwnershipActive: isShortcutOwnershipActive
+            shouldOwnFirstResponder: selectorShortcutBridgeShouldOwnFirstResponder
         )
         .frame(width: 1, height: 1)
         .opacity(0.001)
@@ -1176,28 +1183,28 @@ private struct StreamSelectorShortcutKeyCommandBridge: UIViewRepresentable {
     /// selector shortcuts own input AND the search field is not currently
     /// focused. During dismissal and composer restoration this is false, so
     /// the bridge cannot opportunistically grab first responder.
-    let isShortcutOwnershipActive: Bool
+    let shouldOwnFirstResponder: Bool
 
     func makeUIView(context: Context) -> KeyCommandView {
         let view = KeyCommandView()
         view.selectableSessionKeys = selectableSessionKeys
         view.isSearchFieldFocused = isSearchFieldFocused
-        view.isShortcutOwnershipActive = isShortcutOwnershipActive
+        view.shouldOwnFirstResponder = shouldOwnFirstResponder
         return view
     }
 
     func updateUIView(_ uiView: KeyCommandView, context: Context) {
         uiView.selectableSessionKeys = selectableSessionKeys
         uiView.isSearchFieldFocused = isSearchFieldFocused
-        uiView.isShortcutOwnershipActive = isShortcutOwnershipActive
+        uiView.shouldOwnFirstResponder = shouldOwnFirstResponder
         uiView.refreshKeyCommandsIfNeeded()
-        uiView.activateIfEligible()
+        uiView.reconcileFirstResponderOwnership()
     }
 
     final class KeyCommandView: UIView {
         var selectableSessionKeys: [String] = []
         var isSearchFieldFocused = false
-        var isShortcutOwnershipActive = false
+        var shouldOwnFirstResponder = false
         private var keyCommandSignature: [String] = []
 
         override var canBecomeFirstResponder: Bool { true }
@@ -1216,19 +1223,19 @@ private struct StreamSelectorShortcutKeyCommandBridge: UIViewRepresentable {
 
         override func didMoveToWindow() {
             super.didMoveToWindow()
-            activateIfEligible()
+            reconcileFirstResponderOwnership()
         }
 
-        func activateIfEligible() {
-            // R1136-ARCH-06 / E6: subordinate activation. The bridge must not
-            // become first responder unless the parent coordinator permits it
-            // AND the search field is not currently focused. This stops the
-            // hidden responder from stealing focus from the search field or
-            // composer during dismissal and composer restoration.
-            guard isShortcutOwnershipActive, !isSearchFieldFocused else { return }
+        func reconcileFirstResponderOwnership() {
+            guard shouldOwnFirstResponder, !isSearchFieldFocused else {
+                if isFirstResponder {
+                    resignFirstResponder()
+                }
+                return
+            }
             DispatchQueue.main.async { [weak self] in
                 guard let self,
-                      self.isShortcutOwnershipActive,
+                      self.shouldOwnFirstResponder,
                       !self.isSearchFieldFocused else { return }
                 self.becomeFirstResponder()
             }

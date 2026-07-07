@@ -397,6 +397,53 @@ struct TextLinkURLTemplateRulesTests {
         })
     }
 
+
+    @Test("T1578: expanded detail has fallback content instead of an empty modal")
+    func expandedDetailShowsFallbackForUnrenderableSelectedBubble() {
+        let message = Message(
+            id: "t1578-empty-detail",
+            role: .assistant,
+            content: "   \n",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal",
+            sender: "CLU"
+        )
+        let presentation = MessagePresentation(
+            parts: [],
+            copyableReadableText: nil,
+            wordCount: 0,
+            hasTextualContent: false,
+            isEmojiOnly: false,
+            hasMediaOnly: false,
+            detectedURLs: [],
+            detectedURLCount: 0,
+            hasSingleURL: false
+        )
+        let blocks = ExpandedMessageSheet.renderedBlocks(
+            message: message,
+            presentation: presentation,
+            baseFont: UIFont.clawline(.bodyText),
+            inkColor: .label,
+            isDark: false
+        )
+
+        #expect(blocks.isEmpty)
+        #expect(ExpandedMessageSheet.shouldShowFallbackDetail(
+            renderedBlocks: blocks,
+            message: message,
+            presentation: presentation
+        ))
+        #expect(ExpandedMessageSheet.fallbackDetailText(
+            message: message,
+            presentation: presentation
+        ).contains("No detail content"))
+        #expect(ExpandedMessageSheet.minimumRegularDetailSize.width >= 420)
+        #expect(ExpandedMessageSheet.minimumRegularDetailSize.height >= 320)
+    }
+
     @Test("T1369: expanded detail resolves selected snapshot to canonical message text")
     @MainActor
     func expandedDetailResolvesSelectedSnapshotToCanonicalMessageText() {

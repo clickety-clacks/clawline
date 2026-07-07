@@ -64,6 +64,8 @@ struct ExpandedMessageSheet: View {
             + (regularContentHorizontalPadding * 2)
     }
 
+    static let minimumRegularDetailSize = CGSize(width: 420, height: 320)
+
     var body: some View {
         let _ = fontScaleChangeSequence
         NavigationStack {
@@ -95,6 +97,10 @@ struct ExpandedMessageSheet: View {
         }
         .offset(x: dragOffset)
         .opacity(1.0 - Double(abs(dragOffset)) / 300.0)
+        .frame(
+            minWidth: isCompact ? 0 : Self.minimumRegularDetailSize.width,
+            minHeight: Self.minimumRegularDetailSize.height
+        )
         .gesture(
             DragGesture()
                 .onChanged { value in
@@ -212,6 +218,17 @@ struct ExpandedMessageSheet: View {
             ForEach(Array(mediaParts.enumerated()), id: \.offset) { item in
                 mediaPartView(item.element)
             }
+
+            if Self.shouldShowFallbackDetail(
+                renderedBlocks: renderedBlocks,
+                message: message,
+                presentation: presentation
+            ) {
+                DetailFallbackRow(
+                    text: Self.fallbackDetailText(message: message, presentation: presentation),
+                    colorScheme: effectiveColorScheme
+                )
+            }
         }
         .font(.clawline(.bodyText))
         .foregroundColor(ChatFlowTheme.ink(effectiveColorScheme))
@@ -287,6 +304,37 @@ struct ExpandedMessageSheet: View {
         return presentation.copyableReadableText ?? message.content
     }
 
+    static func fallbackDetailText(message: Message, presentation: MessagePresentation) -> String {
+        let source = markdownSource(message: message, presentation: presentation)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !source.isEmpty {
+            return source
+        }
+        if !presentation.parts.isEmpty {
+            return "This bubble has content that cannot be previewed here."
+        }
+        return "No detail content is available for this bubble."
+    }
+
+    static func shouldShowFallbackDetail(
+        renderedBlocks: [RenderedMarkdownBlock],
+        message: Message,
+        presentation: MessagePresentation
+    ) -> Bool {
+        if !renderedBlocks.isEmpty { return false }
+        if presentation.isEmojiOnly, emojiOnlyText(from: presentation) != nil { return false }
+
+        let hasRenderedNonTextPart = presentation.parts.contains { part in
+            switch part {
+            case .linkPreview, .remoteImage, .image, .gallery, .file, .terminalSession, .interactiveHTML:
+                return true
+            case .text, .markdown, .table, .code, .inlineEmoji:
+                return false
+            }
+        }
+        return !hasRenderedNonTextPart
+    }
+
     private var fileAttachments: [Attachment] {
         presentation.parts.compactMap { part in
             if case .file(let attachment) = part { return attachment }
@@ -343,9 +391,9 @@ struct ExpandedMessageSheet: View {
                         .fill(Color(uiColor: .secondarySystemFill))
                         .frame(height: 180)
                 case .failure:
-                    EmptyView()
+                    DetailFallbackRow(text: "Image unavailable: \(url.absoluteString)", colorScheme: effectiveColorScheme)
                 @unknown default:
-                    EmptyView()
+                    DetailFallbackRow(text: "Image unavailable", colorScheme: effectiveColorScheme)
                 }
             }
         case .image(let attachment):
@@ -355,11 +403,25 @@ struct ExpandedMessageSheet: View {
                     .scaledToFit()
                     .frame(maxHeight: 300)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
+            } else {
+                DetailFallbackRow(
+                    text: "Image attachment unavailable",
+                    colorScheme: effectiveColorScheme
+                )
             }
         case .gallery(let attachments):
-            ForEach(attachments) { attachment in
-                if let data = attachment.data, let uiImage = UIImage(data: data) {
-                    Image(uiImage: uiImage)
+            let decodedImages = attachments.compactMap { attachment -> UIImage? in
+                guard let data = attachment.data else { return nil }
+                return UIImage(data: data)
+            }
+            if decodedImages.isEmpty {
+                DetailFallbackRow(
+                    text: "Image gallery unavailable",
+                    colorScheme: effectiveColorScheme
+                )
+            } else {
+                ForEach(Array(decodedImages.enumerated()), id: \.offset) { item in
+                    Image(uiImage: item.element)
                         .resizable()
                         .scaledToFit()
                         .frame(maxHeight: 300)
@@ -425,6 +487,24 @@ private struct TerminalBubbleExpandedRepresentable: UIViewRepresentable {
             context.coordinator.lastTerminalSessionId = descriptor.terminalSessionId
             context.coordinator.lastFontScaleChangeSequence = fontScaleChangeSequence
         }
+    }
+}
+
+private struct DetailFallbackRow: View {
+    let text: String
+    let colorScheme: ColorScheme
+
+    var body: some View {
+        Text(text)
+            .font(.clawline(.bodyText))
+            .foregroundColor(ChatFlowTheme.ink(colorScheme))
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(ChatFlowTheme.ink(colorScheme).opacity(colorScheme == .dark ? 0.08 : 0.06))
+            )
     }
 }
 

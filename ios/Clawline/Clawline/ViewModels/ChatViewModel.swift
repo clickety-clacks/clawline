@@ -389,6 +389,8 @@ final class ChatViewModel: ChatViewModelHosting {
     private var suppressedCrossChatNotificationEntryKeysBySourceChatId: [String: Set<String>] = [:]
     var crossChatNotificationDismissAnimator: CrossChatNotificationDismissAnimator?
     private var unavailableCrossChatNotificationSourceIds: Set<String> = []
+    private var crossChatNotificationInteractionFrozenSourceChatId: String?
+    private var deferredCrossChatNotificationMutations: [() -> Void] = []
     private var syntheticSessionKeys: Set<String> = []
     private var didRestoreActiveSessionKey = false
 
@@ -1624,7 +1626,37 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
 
+    func beginCrossChatNotificationPopupInteraction(sourceChatId: String) {
+        crossChatNotificationInteractionFrozenSourceChatId = sourceChatId
+    }
+
+    func endCrossChatNotificationPopupInteraction(sourceChatId: String?) {
+        guard crossChatNotificationInteractionFrozenSourceChatId == sourceChatId
+                || sourceChatId == nil else {
+            return
+        }
+        crossChatNotificationInteractionFrozenSourceChatId = nil
+        let deferredMutations = deferredCrossChatNotificationMutations
+        deferredCrossChatNotificationMutations = []
+        for mutation in deferredMutations {
+            mutation()
+        }
+    }
+
+    private func deferCrossChatNotificationMutationIfNeeded(_ mutation: @escaping () -> Void) -> Bool {
+        guard crossChatNotificationInteractionFrozenSourceChatId != nil else {
+            return false
+        }
+        deferredCrossChatNotificationMutations.append(mutation)
+        return true
+    }
+
     func dismissCrossChatNotification(sourceChatId: String, markSourceRead: Bool = true) {
+        if deferCrossChatNotificationMutationIfNeeded({ [weak self] in
+            self?.dismissCrossChatNotification(sourceChatId: sourceChatId, markSourceRead: markSourceRead)
+        }) {
+            return
+        }
         if markSourceRead {
             markSessionRead(sourceChatId, preferServerTail: true)
         }
@@ -2667,6 +2699,11 @@ final class ChatViewModel: ChatViewModelHosting {
             }
             return
         }
+        if deferCrossChatNotificationMutationIfNeeded({ [weak self] in
+            self?.applyCrossChatAssistantNotificationIfNeeded(for: message, batchEpoch: nil, notificationSequence: notificationSequence)
+        }) {
+            return
+        }
         notificationBatchCommitCoordinator.applyLiveCandidate(
             candidate,
             to: &crossChatNotificationBubblesBySourceChatId
@@ -2682,6 +2719,11 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func commitCrossChatNotificationBatchIfReady(epoch: Int, reachedTruncationBoundary: Bool) {
+        if deferCrossChatNotificationMutationIfNeeded({ [weak self] in
+            self?.commitCrossChatNotificationBatchIfReady(epoch: epoch, reachedTruncationBoundary: reachedTruncationBoundary)
+        }) {
+            return
+        }
         guard let committedSnapshot = notificationBatchCommitCoordinator.commitIfReady(
             epoch: epoch,
             reachedTruncationBoundary: reachedTruncationBoundary,

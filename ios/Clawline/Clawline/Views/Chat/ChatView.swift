@@ -7216,8 +7216,7 @@ private struct CrossChatNotificationOverlay: View {
                 if isCollapsed {
                     restoreDock()
                 }
-                actionMenuSelection = .goToChat
-                actionMenuSourceChatId = sourceChatId
+                openActionMenu(sourceChatId: sourceChatId)
             }
             .onReceive(NotificationCenter.default.publisher(for: .clawlineReplyNotificationCommand)) { notification in
                 guard let index = notification.object as? Int,
@@ -7619,8 +7618,7 @@ private struct CrossChatNotificationOverlay: View {
             if isCollapsed {
                 restoreDock()
             }
-            actionMenuSelection = .goToChat
-            actionMenuSourceChatId = sourceChatId
+            openActionMenu(sourceChatId: sourceChatId)
         case .notificationAssignedReply(let index):
             guard case .handled(.notificationBubble(let sourceChatId)) = route.outcome else { return }
             guard visibleBubbles.indices.contains(index),
@@ -7906,9 +7904,20 @@ private struct CrossChatNotificationOverlay: View {
         return 5_000_000_000
     }
 
+    private func openActionMenu(sourceChatId: String) {
+        if actionMenuSourceChatId != sourceChatId {
+            viewModel.endCrossChatNotificationPopupInteraction(sourceChatId: actionMenuSourceChatId)
+        }
+        actionMenuSelection = .goToChat
+        actionMenuSourceChatId = sourceChatId
+        viewModel.beginCrossChatNotificationPopupInteraction(sourceChatId: sourceChatId)
+    }
+
     private func closeActionMenu() {
+        let closingSourceChatId = actionMenuSourceChatId
         actionMenuSourceChatId = nil
         actionMenuSelection = .goToChat
+        viewModel.endCrossChatNotificationPopupInteraction(sourceChatId: closingSourceChatId)
     }
 
     private func handleActionMenuAction(

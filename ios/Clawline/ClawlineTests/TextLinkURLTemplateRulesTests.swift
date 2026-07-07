@@ -84,6 +84,50 @@ struct TextLinkURLTemplateRulesTests {
         #expect(linkTarget("T123", in: rendered)?.absoluteString == "https://tars.tail4105e8.ts.net:19443/tracker.html?id=T123")
     }
 
+    @Test("T190: detected URL followed by a backtick excludes the backtick from link range and URL")
+    @MainActor
+    func detectedURLFollowedByBacktickExcludesBoundary() throws {
+        let rendered = try #require(makeRendered("Open https://example.com/path` then continue."))
+        let linkRange = range("https://example.com/path", in: rendered)
+        let backtickRange = range("`", in: rendered)
+
+        #expect(linkTarget("https://example.com/path", in: rendered)?.absoluteString == "https://example.com/path")
+        #expect(rendered.attribute(.link, at: backtickRange.location, effectiveRange: nil) == nil)
+        #expect(rendered.attribute(.link, at: NSMaxRange(linkRange) - 1, effectiveRange: nil) != nil)
+    }
+
+    @Test("T190: detected URL keeps normal URL punctuation before a boundary")
+    @MainActor
+    func detectedURLKeepsNormalURLPunctuationBeforeBoundary() throws {
+        let rendered = try #require(makeRendered("Open https://example.com/search?q=a,b.c` now."))
+
+        #expect(linkTarget("https://example.com/search?q=a,b.c", in: rendered)?.absoluteString == "https://example.com/search?q=a,b.c")
+        #expect(rendered.attribute(.link, at: range("`", in: rendered).location, effectiveRange: nil) == nil)
+    }
+
+    @Test("T1513: Spatial Links submenu exposes detected links using rendered text-link attributes")
+    @MainActor
+    func spatialLinksSubmenuExposesDetectedLinks() throws {
+        let rendered = try withConfiguredRules([.janusTrackerExample]) {
+            try #require(makeRendered("See T1513 and https://example.com/details."))
+        }
+        let menu = try #require(MessageDetectedTextLinkMenuBuilder.linksSubmenu(
+            from: rendered,
+            isSpatial: true,
+            actionHandler: { _ in }
+        ))
+
+        #expect(menu.title == "Links")
+        #expect(menu.children.count == 2)
+        #expect(MessageDetectedTextLinkMenuBuilder.linksSubmenu(from: rendered, isSpatial: false, actionHandler: { _ in }) == nil)
+        #expect(MessageDetectedTextLinkMenuBuilder.linksSubmenu(from: makeRendered("No links here."), isSpatial: true, actionHandler: { _ in }) == nil)
+
+        let links = MessageDetectedTextLinkMenuBuilder.detectedTextLinks(from: rendered)
+        #expect(links.map(\.title) == ["T1513", "https://example.com/details"])
+        #expect(links.first?.url.absoluteString == "https://tars.tail4105e8.ts.net:19443/tracker.html?id=T1513")
+        #expect(links.first?.isGenerated == true)
+    }
+
     @Test("V1135-01: explicit links to generated URLs are not treated as generated")
     @MainActor
     func explicitLinksToGeneratedURLsAreNotTreatedAsGenerated() throws {
@@ -873,9 +917,9 @@ struct TextLinkURLTemplateRulesTests {
         #expect(received?.2 == anchor)
     }
 
-    @Test("D11/R1135-11: popup resolved URL presentation uses clear outer background and web content")
+    @Test("D11/R1135-11/T1341: popup resolved URL chrome keeps clear outer background and overlaid close control")
     @MainActor
-    func popupResolvedURLPresentationUsesClearOuterBackgroundAndWebContent() throws {
+    func popupResolvedURLPresentationUsesClearOuterBackgroundAndOverlaidCloseControl() throws {
         let popupURL = try #require(URL(string: "https://example.com/popup/P1192"))
         let controller = TextLinkResolvedURLContentViewController(
             url: popupURL,
@@ -896,7 +940,19 @@ struct TextLinkURLTemplateRulesTests {
         let webView = try #require(webViews(in: controller.view).first)
         #expect(webView.frame.width >= 320)
         #expect(webView.frame.height >= 280)
-        #expect(!buttons(in: controller.view).contains { !$0.isHidden })
+        let closeButton = try #require(buttons(in: controller.view).first { !$0.isHidden })
+        #expect(closeButton.accessibilityLabel == "Close resolved URL")
+
+        let webFrame = webView.convert(webView.bounds, to: controller.view)
+        let closeFrame = closeButton.convert(closeButton.bounds, to: controller.view)
+        #expect(webFrame.intersects(closeFrame))
+        #expect(closeFrame.minY < webFrame.minY)
+        #expect(closeFrame.maxX > webFrame.maxX)
+
+        let visibleFloatingPoint = CGPoint(x: closeFrame.maxX - 4, y: closeFrame.midY)
+        #expect(!webFrame.contains(visibleFloatingPoint))
+        #expect(closeFrame.contains(visibleFloatingPoint))
+        #expect(controller.view.hitTest(visibleFloatingPoint, with: nil) === closeButton)
     }
 
     @Test("T1192: popup layout keeps edge hover point inside content")

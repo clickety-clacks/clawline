@@ -40,6 +40,24 @@ enum CrossChatShortcutLabelAvailability {
     }
 }
 
+enum CrossChatNotificationShortcutIndicatorAvailability {
+    static var current: Bool {
+#if (os(iOS) || os(visionOS)) && canImport(GameController)
+        current(coalescedKeyboardPresent: GCKeyboard.coalesced != nil)
+#else
+        false
+#endif
+    }
+
+    static func current(coalescedKeyboardPresent: Bool) -> Bool {
+#if (os(iOS) || os(visionOS)) && canImport(GameController)
+        coalescedKeyboardPresent
+#else
+        false
+#endif
+    }
+}
+
 #if DEBUG
 @MainActor
 private final class T099OnDisappearProbeStore {
@@ -335,6 +353,17 @@ enum StreamPopupFocusHandoff {
     }
 }
 
+enum AttachmentMenuPresentationPolicy {
+    enum Action: Equatable {
+        case present
+        case resetThenPresent
+    }
+
+    static func action(isCurrentlyPresented: Bool) -> Action {
+        isCurrentlyPresented ? .resetThenPresent : .present
+    }
+}
+
 enum StreamSwitchKeyboardFocusPolicy {
     static func shouldRestoreComposerAfterSwitch(
         wasSoftwareKeyboardVisible: Bool
@@ -405,6 +434,7 @@ struct ChatView: View {
     @State private var shouldRestoreFocusAfterStreamPopup = false
     @State private var streamPopupKeyboardDismissalTask: Task<Void, Never>?
     @State private var streamPopupComposerFocusTask: Task<Void, Never>?
+    @State private var attachmentMenuPresentationTask: Task<Void, Never>?
     @State private var streamSwitchComposerFocusRestore: StreamSwitchComposerFocusRestore?
     @State private var streamSwitchComposerFocusRestoreToken = 0
     @State private var scrollButtonStateBySessionKey: [String: ScrollButtonState] = [:]
@@ -2416,7 +2446,7 @@ struct ChatView: View {
                 onCancel: { viewModel.cancelSend() },
                 onReconnect: { viewModel.reconnect() },
                 onAdd: {
-                    isAttachmentMenuPresented = true
+                    presentAttachmentMenu()
                 },
                 attachmentMenuContent: {
                     AnyView(
@@ -3344,6 +3374,28 @@ struct ChatView: View {
             guard streamPopupRouteController.route == .closed else { return }
             focusRequestID &+= 1
             streamPopupComposerFocusTask = nil
+        }
+    }
+
+    @MainActor
+    private func presentAttachmentMenu() {
+        attachmentMenuPresentationTask?.cancel()
+        attachmentMenuPresentationTask = nil
+        if streamPopupRouteController.isPopupPresented {
+            closeStreamPopup(restoreComposerFocusIfNeeded: false)
+        }
+
+        switch AttachmentMenuPresentationPolicy.action(isCurrentlyPresented: isAttachmentMenuPresented) {
+        case .present:
+            isAttachmentMenuPresented = true
+        case .resetThenPresent:
+            isAttachmentMenuPresented = false
+            attachmentMenuPresentationTask = Task { @MainActor in
+                await Task.yield()
+                guard !Task.isCancelled else { return }
+                isAttachmentMenuPresented = true
+                attachmentMenuPresentationTask = nil
+            }
         }
     }
 
@@ -4307,21 +4359,56 @@ private struct CancelCurrentPromptBubbleShape: Shape {
         )
         let tailLeftX = rect.minX + clampedTailCenterX - tailWidth / 2
         let tailRightX = rect.minX + clampedTailCenterX + tailWidth / 2
+        let tailTip = CGPoint(
+            x: rect.minX + clampedTailCenterX,
+            y: tailEdge == .top ? rect.minY : rect.maxY
+        )
 
-        var path = Path(roundedRect: bodyRect, cornerRadius: radius, style: .continuous)
-        var tail = Path()
-        switch tailEdge {
-        case .top:
-            tail.move(to: CGPoint(x: tailLeftX, y: bodyRect.minY + 1))
-            tail.addLine(to: CGPoint(x: rect.minX + clampedTailCenterX, y: rect.minY))
-            tail.addLine(to: CGPoint(x: tailRightX, y: bodyRect.minY + 1))
-        case .bottom:
-            tail.move(to: CGPoint(x: tailLeftX, y: bodyRect.maxY - 1))
-            tail.addLine(to: CGPoint(x: rect.minX + clampedTailCenterX, y: rect.maxY))
-            tail.addLine(to: CGPoint(x: tailRightX, y: bodyRect.maxY - 1))
+        var path = Path()
+        path.move(to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.minY))
+        if tailEdge == .top {
+            path.addLine(to: CGPoint(x: tailLeftX, y: bodyRect.minY))
+            path.addLine(to: tailTip)
+            path.addLine(to: CGPoint(x: tailRightX, y: bodyRect.minY))
         }
-        tail.closeSubpath()
-        path.addPath(tail)
+        path.addLine(to: CGPoint(x: bodyRect.maxX - radius, y: bodyRect.minY))
+        path.addArc(
+            center: CGPoint(x: bodyRect.maxX - radius, y: bodyRect.minY + radius),
+            radius: radius,
+            startAngle: .degrees(-90),
+            endAngle: .degrees(0),
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: bodyRect.maxX, y: bodyRect.maxY - radius))
+        path.addArc(
+            center: CGPoint(x: bodyRect.maxX - radius, y: bodyRect.maxY - radius),
+            radius: radius,
+            startAngle: .degrees(0),
+            endAngle: .degrees(90),
+            clockwise: false
+        )
+        if tailEdge == .bottom {
+            path.addLine(to: CGPoint(x: tailRightX, y: bodyRect.maxY))
+            path.addLine(to: tailTip)
+            path.addLine(to: CGPoint(x: tailLeftX, y: bodyRect.maxY))
+        }
+        path.addLine(to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.maxY))
+        path.addArc(
+            center: CGPoint(x: bodyRect.minX + radius, y: bodyRect.maxY - radius),
+            radius: radius,
+            startAngle: .degrees(90),
+            endAngle: .degrees(180),
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: bodyRect.minX, y: bodyRect.minY + radius))
+        path.addArc(
+            center: CGPoint(x: bodyRect.minX + radius, y: bodyRect.minY + radius),
+            radius: radius,
+            startAngle: .degrees(180),
+            endAngle: .degrees(270),
+            clockwise: false
+        )
+        path.closeSubpath()
         return path
     }
 }
@@ -6691,7 +6778,7 @@ private struct CrossChatNotificationOverlay: View {
     let showsDockedHitTarget: Bool
     let onVerticalDockDragDelta: (CGFloat) -> Void
     let onNavigateToSource: (String) -> Void
-    @State private var showShortcutLabels = CrossChatShortcutLabelAvailability.current
+    @State private var showShortcutLabels = CrossChatNotificationShortcutIndicatorAvailability.current
     @State private var actionMenuSelection: CrossChatNotificationActionMenuItem = .goToChat
     @State private var scrollViewsBySourceChatId: [String: WeakScrollViewBox] = [:]
     @State private var previewingCollapsedSourceChatIds: Set<String> = []
@@ -7086,7 +7173,7 @@ private struct CrossChatNotificationOverlay: View {
             .transition(Self.notificationTransition)
             .animation(isCollapsed ? Self.hideAnimation : Self.revealAnimation, value: isCollapsed)
             .onAppear {
-                showShortcutLabels = CrossChatShortcutLabelAvailability.current
+                showShortcutLabels = CrossChatNotificationShortcutIndicatorAvailability.current
                 viewModel.closeOverflowingCrossChatNotificationReplies(visibleSourceChatIds: Set(visibleBubbles.map(\.sourceChatId)))
                 if isCollapsed && !isDebugSkippingCollapsedPreview {
                     startCollapsedPreview(sourceChatIds: visibleBubbles.map(\.sourceChatId))
@@ -7103,12 +7190,12 @@ private struct CrossChatNotificationOverlay: View {
                 clearAllGestureAxisLocks()
                 selectionActiveSourceChatIds = []
             }
-#if os(iOS) && !targetEnvironment(macCatalyst) && canImport(GameController)
+#if (os(iOS) || os(visionOS)) && canImport(GameController)
             .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidConnect)) { _ in
-                showShortcutLabels = CrossChatShortcutLabelAvailability.current
+                showShortcutLabels = CrossChatNotificationShortcutIndicatorAvailability.current
             }
             .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidDisconnect)) { _ in
-                showShortcutLabels = CrossChatShortcutLabelAvailability.current
+                showShortcutLabels = CrossChatNotificationShortcutIndicatorAvailability.current
             }
 #endif
             .onReceive(NotificationCenter.default.publisher(for: .clawlineScrollNotificationDownCommand)) { _ in
@@ -7129,8 +7216,7 @@ private struct CrossChatNotificationOverlay: View {
                 if isCollapsed {
                     restoreDock()
                 }
-                actionMenuSelection = .goToChat
-                actionMenuSourceChatId = sourceChatId
+                openActionMenu(sourceChatId: sourceChatId)
             }
             .onReceive(NotificationCenter.default.publisher(for: .clawlineReplyNotificationCommand)) { notification in
                 guard let index = notification.object as? Int,
@@ -7532,8 +7618,7 @@ private struct CrossChatNotificationOverlay: View {
             if isCollapsed {
                 restoreDock()
             }
-            actionMenuSelection = .goToChat
-            actionMenuSourceChatId = sourceChatId
+            openActionMenu(sourceChatId: sourceChatId)
         case .notificationAssignedReply(let index):
             guard case .handled(.notificationBubble(let sourceChatId)) = route.outcome else { return }
             guard visibleBubbles.indices.contains(index),
@@ -7819,9 +7904,20 @@ private struct CrossChatNotificationOverlay: View {
         return 5_000_000_000
     }
 
+    private func openActionMenu(sourceChatId: String) {
+        if actionMenuSourceChatId != sourceChatId {
+            viewModel.endCrossChatNotificationPopupInteraction(sourceChatId: actionMenuSourceChatId)
+        }
+        actionMenuSelection = .goToChat
+        actionMenuSourceChatId = sourceChatId
+        viewModel.beginCrossChatNotificationPopupInteraction(sourceChatId: sourceChatId)
+    }
+
     private func closeActionMenu() {
+        let closingSourceChatId = actionMenuSourceChatId
         actionMenuSourceChatId = nil
         actionMenuSelection = .goToChat
+        viewModel.endCrossChatNotificationPopupInteraction(sourceChatId: closingSourceChatId)
     }
 
     private func handleActionMenuAction(
@@ -9115,6 +9211,9 @@ final class NotificationReplyUITextView: UITextView {
             modifierFlags: [],
             action: #selector(didPressEscape)
         )
+        let emacsCommands = [
+            UIKeyCommand(input: "w", modifierFlags: [.control], action: #selector(didPressCtrlW))
+        ]
         let modifiedReturnCommands = KeyboardCommandBridge.textInputSpecs.compactMap { spec -> UIKeyCommand? in
             guard spec.intent == .textModifiedNewline else { return nil }
             return UIKeyCommand(
@@ -9123,7 +9222,7 @@ final class NotificationReplyUITextView: UITextView {
                 action: #selector(didPressModifiedReturn)
             )
         }
-        return prioritizedNotificationCommands + [escapeCommand] + modifiedReturnCommands + (super.keyCommands ?? [])
+        return prioritizedNotificationCommands + [escapeCommand] + modifiedReturnCommands + emacsCommands + (super.keyCommands ?? [])
     }
 
     override func didMoveToWindow() {
@@ -9166,12 +9265,96 @@ final class NotificationReplyUITextView: UITextView {
         insertPlainText("\n")
     }
 
+    @objc private func didPressCtrlW(_ sender: UIKeyCommand) {
+        deletePreviousWordForReplyShortcut()
+    }
+
+    override func insertText(_ text: String) {
+        if text == "\u{17}" {
+            _ = deletePreviousWordForReplyShortcut()
+            return
+        }
+        super.insertText(text)
+    }
+
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if presses.contains(where: isControlWPress(_:)),
+           deletePreviousWordForReplyShortcut() {
+            return
+        }
+        super.pressesBegan(presses, with: event)
+    }
+
+    @discardableResult
+    private func deletePreviousWordForReplyShortcut() -> Bool {
+        guard isEditable, isFirstResponder, isOwnedReplyShortcutRoute else { return false }
+        guard let range = NotificationReplyPreviousWordDeletion.deleteRange(
+            in: text ?? "",
+            selectedRange: selectedRange
+        ) else { return false }
+        replacePlainText(in: range, with: "")
+        return true
+    }
+
+    private var isOwnedReplyShortcutRoute: Bool {
+        guard case .handled(.notificationReply(let routedSourceChatId)) = KeyboardCommandRouter
+            .route(intent: .textModifiedNewline, store: keyboardOwnershipStore)
+            .outcome else { return false }
+        return routedSourceChatId == sourceChatId
+    }
+
+    private func isControlWPress(_ press: UIPress) -> Bool {
+        guard let key = press.key else { return false }
+        return NotificationReplyControlWShortcut.matches(
+            charactersIgnoringModifiers: key.charactersIgnoringModifiers,
+            modifierFlags: key.modifierFlags
+        )
+    }
+
     private func insertPlainText(_ text: String) {
+        replacePlainText(in: selectedRange, with: text)
+    }
+
+    private func replacePlainText(in range: NSRange, with text: String) {
         let attributed = NSAttributedString(string: text, attributes: typingAttributes)
-        let range = selectedRange
         textStorage.replaceCharacters(in: range, with: attributed)
         selectedRange = NSRange(location: range.location + attributed.length, length: 0)
         delegate?.textViewDidChange?(self)
+    }
+}
+
+struct NotificationReplyControlWShortcut {
+    static func matches(charactersIgnoringModifiers: String, modifierFlags: UIKeyModifierFlags) -> Bool {
+        let modifiers = modifierFlags.intersection([.command, .shift, .alternate, .control])
+        return modifiers == [.control]
+            && charactersIgnoringModifiers.lowercased() == "w"
+    }
+}
+
+struct NotificationReplyPreviousWordDeletion {
+    static func deleteRange(in text: String, selectedRange: NSRange) -> NSRange? {
+        guard let range = Range(selectedRange, in: text) else { return nil }
+        guard selectedRange.length == 0 else { return selectedRange }
+        let cursor = range.lowerBound
+        guard selectedRange.location > 0 else { return nil }
+
+        var deleteStartIndex = cursor
+        while deleteStartIndex > text.startIndex {
+            let previousIndex = text.index(before: deleteStartIndex)
+            if !text[previousIndex].isWhitespace { break }
+            deleteStartIndex = previousIndex
+        }
+
+        while deleteStartIndex > text.startIndex {
+            let previousIndex = text.index(before: deleteStartIndex)
+            if text[previousIndex].isWhitespace { break }
+            deleteStartIndex = previousIndex
+        }
+
+        let lowerBound = deleteStartIndex.utf16Offset(in: text)
+        let length = selectedRange.location - lowerBound
+        guard length > 0 else { return nil }
+        return NSRange(location: lowerBound, length: length)
     }
 }
 

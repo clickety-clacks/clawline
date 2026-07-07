@@ -46,6 +46,65 @@ struct MessageBubbleRenderedGeometry {
     let dynamicContentFrame: CGRect
 }
 
+struct MessageDetectedTextLink {
+    let title: String
+    let url: URL
+    let characterRange: NSRange
+    let displayMode: TextLinkResolvedURLDisplayMode
+    let isGenerated: Bool
+}
+
+enum MessageDetectedTextLinkMenuBuilder {
+    static func detectedTextLinks(from attributed: NSAttributedString?) -> [MessageDetectedTextLink] {
+        guard let attributed, attributed.length > 0 else { return [] }
+        let text = attributed.string as NSString
+        let fullRange = NSRange(location: 0, length: attributed.length)
+        var links: [MessageDetectedTextLink] = []
+
+        attributed.enumerateAttribute(.link, in: fullRange, options: []) { value, range, _ in
+            guard range.length > 0 else { return }
+            let url: URL?
+            if let value = value as? URL {
+                url = value
+            } else if let value = value as? String {
+                url = URL(string: value)
+            } else {
+                url = nil
+            }
+            guard let url else { return }
+            let title = text.substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { return }
+            let isGenerated = TextLinkURLTemplateRules.isGeneratedLink(in: attributed, characterRange: range)
+            links.append(MessageDetectedTextLink(
+                title: title,
+                url: url,
+                characterRange: range,
+                displayMode: TextLinkURLTemplateRules.displayMode(in: attributed, characterRange: range),
+                isGenerated: isGenerated
+            ))
+        }
+
+        return links
+    }
+
+    static func linksSubmenu(
+        from attributed: NSAttributedString?,
+        isSpatial: Bool,
+        actionHandler: @escaping (MessageDetectedTextLink) -> Void
+    ) -> UIMenu? {
+        guard isSpatial else { return nil }
+        let links = detectedTextLinks(from: attributed)
+        guard !links.isEmpty else { return nil }
+
+        let actions = links.map { link in
+            UIAction(title: link.title, image: UIImage(systemName: "link")) { _ in
+                actionHandler(link)
+            }
+        }
+        return UIMenu(title: "Links", image: UIImage(systemName: "link"), children: actions)
+    }
+}
+
 enum MessageBubbleGeometry {
     static let typingBubbleWidth: CGFloat = 240
     static let typingBubbleHeight: CGFloat = 86
@@ -495,7 +554,7 @@ final class MessageBubbleUIKitContainerView: UIView {
         bubbleView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(bubbleView)
 
-        bubbleBottomConstraint = bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor)
+        bubbleBottomConstraint = bubbleView.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor)
         NSLayoutConstraint.activate([
             bubbleView.leadingAnchor.constraint(equalTo: leadingAnchor),
             bubbleView.topAnchor.constraint(equalTo: topAnchor),
@@ -2395,7 +2454,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             withHorizontalFittingPriority: .required,
             verticalFittingPriority: .fittingSizeLevel
         )
-        return max(0, measured.height)
+        return max(0, measured.height, dynamicContentStack.bounds.height)
     }
 
     @objc private func handleBodyTap(_ recognizer: UITapGestureRecognizer) {
@@ -2631,11 +2690,40 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             )
             actions.append(command)
         }
+        if let linksMenu = MessageDetectedTextLinkMenuBuilder.linksSubmenu(
+            from: bodyLabel.attributedText,
+            isSpatial: Self.isSpatialPlatform,
+            actionHandler: { [weak self] link in
+                self?.openDetectedTextLink(link)
+            }
+        ) {
+            actions.append(linksMenu)
+        }
         return actions.isEmpty ? nil : UIMenu(children: actions)
     }
 
     @objc private func handleToggleShowOnlyUserMessagesCommand(_ sender: UICommand) {
         onToggleShowOnlyUserMessages?()
+    }
+
+    private func openDetectedTextLink(_ link: MessageDetectedTextLink) {
+        if link.isGenerated {
+            _ = GeneratedTextLinkActivationRouter.activateGeneratedLinkTap(
+                link.url,
+                displayMode: link.displayMode,
+                from: bodyLabel
+            )
+            return
+        }
+        UIApplication.shared.open(link.url)
+    }
+
+    private static var isSpatialPlatform: Bool {
+#if os(visionOS)
+        true
+#else
+        false
+#endif
     }
 
     @available(iOS 17.0, macCatalyst 17.0, visionOS 1.0, *)
@@ -3763,6 +3851,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
     private var messageSnippet: String = ""
     private var lastMismatch: (bounds: CGRect, bubble: CGRect)?
     private var lastDebugGeometry: (bounds: CGRect, bubble: CGRect, content: CGRect, body: CGRect)?
+    private var lastLayoutRequestMessageId: String?
     private var onRequestLayout: ((String) -> Void)?
     private var flashOverlayView: UIView?
 
@@ -3817,6 +3906,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
         messageId = message.id
         messageSessionKey = message.sessionKey
         messageSnippet = String(message.content.prefix(80))
+        lastLayoutRequestMessageId = nil
         let guardedRequestLayout: (String) -> Void = { [weak self] requestedId in
             guard let self, self.messageId == requestedId, self.messageSessionKey == message.sessionKey else { return }
             onRequestLayout?(requestedId)
@@ -3860,6 +3950,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
         messageSnippet = ""
         lastMismatch = nil
         lastDebugGeometry = nil
+        lastLayoutRequestMessageId = nil
         onRequestLayout = nil
     }
 
@@ -3950,6 +4041,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
         let xDelta = abs(bubbleInCell.minX - bounds.minX)
         guard heightDelta > 1 || widthDelta > 1 || yDelta > 1 || xDelta > 1 else {
             lastMismatch = nil
+            lastLayoutRequestMessageId = nil
             return
         }
         if let lastMismatch,
@@ -3970,6 +4062,10 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
         Self.logger.info("UIKit bubble mismatch id=\(id) session=\(sessionKey) snippet=\"\(snippet)\"")
         Self.logger.info("UIKit bubble mismatch bounds=\(boundsDesc)")
         Self.logger.info("UIKit bubble mismatch bubble=\(bubbleDesc)")
+        if heightDelta > 8, !id.isEmpty, lastLayoutRequestMessageId != id {
+            lastLayoutRequestMessageId = id
+            onRequestLayout?(id)
+        }
     }
 
     private func emitT1193RowBoundsDebugIfNeeded() {

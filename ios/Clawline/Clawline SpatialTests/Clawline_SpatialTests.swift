@@ -91,8 +91,8 @@ struct Clawline_SpatialTests {
         #expect(collectionView?.backgroundView == nil)
     }
 
-    @Test("Spatial footer resting bottom removes footer reveal gap")
-    func spatialFooterRestingBottomRemovesFooterRevealGap() {
+    @Test("Spatial footer resting bottom excludes footer reveal range")
+    func spatialFooterRestingBottomExcludesFooterRevealRange() {
         let contentHeight: CGFloat = 1_200
         let boundsHeight: CGFloat = 700
         let topInset: CGFloat = 40
@@ -100,13 +100,11 @@ struct Clawline_SpatialTests {
         let footerHeight = SessionMetadataFooterCell.fadeRevealRange
             + SessionMetadataFooterCell.bottomPadding
 
-        #expect(MessageFlowCollectionViewController.excludesFooterRevealRangeAtRestingBottom == false)
-        #expect(MessageFlowCollectionViewController.hidesFooterAtRestingBottom == false)
-
         let restingContentHeight = MessageFlowCollectionViewController.restingBottomContentHeight(
             contentSizeHeight: contentHeight,
             footerHeight: footerHeight,
-            hasFooter: true
+            hasFooter: true,
+            excludesFooterRevealRange: MessageFlowCollectionViewController.excludesFooterRevealRangeAtRestingBottom
         )
         let restingBottom = MessageFlowCollectionViewController.bottomOffsetMaxY(
             contentHeight: restingContentHeight,
@@ -121,13 +119,22 @@ struct Clawline_SpatialTests {
             bottomInset: bottomInset
         )
 
-        #expect(restingContentHeight == contentHeight)
-        #expect(restingBottom == trueBottom)
+        #expect(MessageFlowCollectionViewController.excludesFooterRevealRangeAtRestingBottom)
+        #expect(MessageFlowCollectionViewController.hidesFooterAtRestingBottom)
+        #expect(contentHeight - restingContentHeight == footerHeight)
+        #expect(trueBottom - restingBottom == footerHeight)
         #expect(MessageFlowCollectionViewController.footerRevealAlpha(
             contentOffsetY: restingBottom,
             restingBottomOffsetY: restingBottom,
-            trueBottomOffsetY: trueBottom
-        ) == 1)
+            trueBottomOffsetY: trueBottom,
+            hidesFooterAtRestingBottom: MessageFlowCollectionViewController.hidesFooterAtRestingBottom
+        ) == 0)
+        #expect(MessageFlowCollectionViewController.footerRevealAlpha(
+            contentOffsetY: restingBottom + 1,
+            restingBottomOffsetY: restingBottom,
+            trueBottomOffsetY: trueBottom,
+            hidesFooterAtRestingBottom: MessageFlowCollectionViewController.hidesFooterAtRestingBottom
+        ) > 0)
     }
 
     private func makeWindow() -> UIWindow {

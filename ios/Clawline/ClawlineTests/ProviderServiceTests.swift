@@ -905,6 +905,195 @@ struct ProviderServiceTests {
         #expect(sessions.map(\.sessionKey) == ["agent:main:clawline:user:s_trackable"])
     }
 
+    @Test("Trackable sessions fetch uses HTTPS provider API URL for non-local HTTP base")
+    func trackableSessionsFetchUsesHTTPSProviderAPIURLForNonLocalHTTPBase() async throws {
+        let baseURL = URL(string: "http://100.85.66.60:18800")!
+        final class RequestBox: @unchecked Sendable {
+            var url: URL?
+            var authorization: String?
+        }
+        let requestBox = RequestBox()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            requestBox.url = request.url
+            requestBox.authorization = request.value(forHTTPHeaderField: "Authorization")
+            let data = #"""
+            {
+              "sessions": [
+                {
+                  "sessionKey": "agent:heimdal:main",
+                  "displayName": "Heimdal Main",
+                  "updatedAt": 1700000000000
+                }
+              ]
+            }
+            """#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+
+        let sessions = try await streamAPIClient.fetchTrackableSessions(token: "jwt")
+
+        #expect(sessions.map(\.sessionKey) == ["agent:heimdal:main"])
+        #expect(requestBox.url?.absoluteString == "https://tars.tail4105e8.ts.net:19443/api/trackable-sessions")
+        #expect(requestBox.authorization == "Bearer jwt")
+    }
+
+    @Test("Trackable sessions fetch preserves local HTTP provider API URL")
+    func trackableSessionsFetchPreservesLocalHTTPProviderAPIURL() async throws {
+        let baseURL = URL(string: "http://127.0.0.1:18800")!
+        final class RequestBox: @unchecked Sendable {
+            var url: URL?
+        }
+        let requestBox = RequestBox()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            requestBox.url = request.url
+            let data = #"{ "sessions": [] }"#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+
+        let sessions = try await streamAPIClient.fetchTrackableSessions(token: nil)
+
+        #expect(sessions.isEmpty)
+        #expect(requestBox.url?.absoluteString == "http://127.0.0.1:18800/api/trackable-sessions")
+    }
+
+    @MainActor
+    @Test("Upload uses HTTPS provider API URL for non-local HTTP base")
+    func uploadUsesHTTPSProviderAPIURLForNonLocalHTTPBase() async throws {
+        let baseURL = URL(string: "http://100.85.66.60:18800")!
+        final class RequestBox: @unchecked Sendable {
+            var url: URL?
+            var authorization: String?
+        }
+        let auth = ProviderServiceTestAuthManager(token: "jwt")
+        let requestBox = RequestBox()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            requestBox.url = request.url
+            requestBox.authorization = request.value(forHTTPHeaderField: "Authorization")
+            let data = #"{ "assetId": "asset_1", "mimeType": "image/png" }"#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(url: request.url ?? baseURL, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let service = UploadService(
+            auth: auth,
+            baseURLProvider: { baseURL },
+            session: URLSession(configuration: configuration)
+        )
+
+        let assetId = try await service.upload(data: Data([0x01]), mimeType: "image/png", filename: "probe.png")
+
+        #expect(assetId == "asset_1")
+        #expect(requestBox.url?.absoluteString == "https://tars.tail4105e8.ts.net:19443/upload")
+        #expect(requestBox.authorization == "Bearer jwt")
+    }
+
+    @MainActor
+    @Test("Download uses HTTPS provider API URL for non-local HTTP base")
+    func downloadUsesHTTPSProviderAPIURLForNonLocalHTTPBase() async throws {
+        let baseURL = URL(string: "http://100.85.66.60:18800")!
+        final class RequestBox: @unchecked Sendable {
+            var url: URL?
+            var authorization: String?
+        }
+        let auth = ProviderServiceTestAuthManager(token: "jwt")
+        let requestBox = RequestBox()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            requestBox.url = request.url
+            requestBox.authorization = request.value(forHTTPHeaderField: "Authorization")
+            return (
+                HTTPURLResponse(url: request.url ?? baseURL, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                Data([0x02])
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let service = UploadService(
+            auth: auth,
+            baseURLProvider: { baseURL },
+            session: URLSession(configuration: configuration)
+        )
+
+        let data = try await service.download(assetId: "asset/with space")
+
+        #expect(data == Data([0x02]))
+        #expect(requestBox.url?.absoluteString == "https://tars.tail4105e8.ts.net:19443/download/asset%2Fwith%20space")
+        #expect(requestBox.authorization == "Bearer jwt")
+    }
+
+    @MainActor
+    @Test("Upload and download preserve localhost HTTP provider base")
+    func uploadAndDownloadPreserveLocalhostHTTPProviderBase() async throws {
+        let baseURL = URL(string: "http://localhost:18800")!
+        final class RequestBox: @unchecked Sendable {
+            var urls: [URL?] = []
+        }
+        let auth = ProviderServiceTestAuthManager(token: "jwt")
+        let requestBox = RequestBox()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            requestBox.urls.append(request.url)
+            if request.httpMethod == "POST" {
+                let data = #"{ "assetId": "local_asset", "mimeType": "image/png" }"#.data(using: .utf8) ?? Data()
+                return (
+                    HTTPURLResponse(url: request.url ?? baseURL, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    data
+                )
+            }
+            return (
+                HTTPURLResponse(url: request.url ?? baseURL, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                Data([0x03])
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let service = UploadService(
+            auth: auth,
+            baseURLProvider: { baseURL },
+            session: URLSession(configuration: configuration)
+        )
+
+        let assetId = try await service.upload(data: Data([0x01]), mimeType: "image/png", filename: nil)
+        let data = try await service.download(assetId: "local_asset")
+
+        #expect(assetId == "local_asset")
+        #expect(data == Data([0x03]))
+        #expect(requestBox.urls.map { $0?.absoluteString } == [
+            "http://localhost:18800/upload",
+            "http://localhost:18800/download/local_asset"
+        ])
+    }
+
     @Test("Fetch streams decodes adopted flag and defaults missing field to false")
     func fetchStreamsDecodesAdoptedFlag() async throws {
         let mockSocket = MockWebSocketClient()
@@ -1395,6 +1584,79 @@ struct ProviderServiceTests {
         #expect(emittedKey == deletedKey)
     }
 
+    @Test("T142: Delete stream uses HTTP control plane without target WebSocket")
+    func deleteStreamUsesControlPlaneWithoutTargetWebSocket() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let inactiveSessionKey = "agent:main:openclaw:user:s_inactive_delete"
+        var capturedRequest: URLRequest?
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            capturedRequest = request
+            let data = #"""
+            {
+              "deletedSessionKey": "agent:main:openclaw:user:s_inactive_delete"
+            }
+            """#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL },
+            authTokenProvider: { "jwt" },
+            streamAPIClient: streamAPIClient
+        )
+
+        let deletedKey = try await service.deleteStream(
+            sessionKey: inactiveSessionKey,
+            idempotencyKey: "req_t142_delete"
+        )
+
+        let request = try #require(capturedRequest)
+        #expect(deletedKey == inactiveSessionKey)
+        #expect(connector.connectedURL == nil)
+        #expect(mockSocket.sentTexts.isEmpty)
+        #expect(request.httpMethod == "DELETE")
+        #expect(request.url?.path == "/api/streams/agent%3Amain%3Aopenclaw%3Auser%3As_inactive_delete")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer jwt")
+        let body = try #require(request.httpBody ?? Self.bodyData(from: request.httpBodyStream))
+        let payload = try JSONSerialization.jsonObject(with: body) as? [String: String]
+        #expect(payload?["idempotencyKey"] == "req_t142_delete")
+    }
+
+    private static func bodyData(from stream: InputStream?) -> Data? {
+        guard let stream else { return nil }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 1024)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count < 0 {
+                return nil
+            }
+            if count == 0 {
+                break
+            }
+            data.append(buffer, count: count)
+        }
+        return data
+    }
+
     @Test("Chat service emits incremental read-state updates")
     func chatIncrementalReadStateEvents() async throws {
         let mockSocket = MockWebSocketClient()
@@ -1529,6 +1791,39 @@ private final class MockWebSocketConnector: WebSocketConnecting {
     func connect(to url: URL) async throws -> any WebSocketClient {
         connectedURL = url
         return client
+    }
+}
+
+@MainActor
+private final class ProviderServiceTestAuthManager: AuthManaging {
+    var isAuthenticated: Bool
+    var currentUserId: String?
+    var token: String?
+    var isAdmin: Bool = false
+
+    init(token: String? = nil, userId: String? = "user_1") {
+        self.token = token
+        self.currentUserId = userId
+        isAuthenticated = token != nil
+    }
+
+    func storeCredentials(token: String, userId: String) {
+        self.token = token
+        currentUserId = userId
+        isAuthenticated = true
+    }
+
+    func updateAdminStatus(_ isAdmin: Bool) {
+        self.isAdmin = isAdmin
+    }
+
+    func refreshAdminStatusFromToken() {}
+
+    func clearCredentials() {
+        token = nil
+        currentUserId = nil
+        isAuthenticated = false
+        isAdmin = false
     }
 }
 

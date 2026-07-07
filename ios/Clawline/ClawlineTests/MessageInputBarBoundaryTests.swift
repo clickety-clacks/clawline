@@ -126,6 +126,16 @@ struct MessageInputBarBoundaryTests {
         #expect(!MessageInputBar.shouldRequestFocusOnEditorTap(isKeyboardVisible: true))
     }
 
+    @Test("T1566 attachment plus presents from a closed menu")
+    func attachmentPlusPresentsFromClosedMenu() {
+        #expect(AttachmentMenuPresentationPolicy.action(isCurrentlyPresented: false) == .present)
+    }
+
+    @Test("T1566 attachment plus refreshes a stale presented route")
+    func attachmentPlusRefreshesStalePresentedRoute() {
+        #expect(AttachmentMenuPresentationPolicy.action(isCurrentlyPresented: true) == .resetThenPresent)
+    }
+
     @Test("Focus trigger cycles first responder only when keyboard collapsed under focus")
     func focusTriggerCyclesFirstResponderOnlyForHiddenKeyboard() {
         #expect(

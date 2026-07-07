@@ -2369,6 +2369,31 @@ struct BubbleScrollTests {
         #expect(abs(policy.heightCap - 1029) <= 0.5)
     }
 
+    @Test("T1579: visionOS single-link cap preserves 75% available-height behavior")
+    func visionOSSingleLinkCapPreservesSeventyFivePercentAvailableHeight() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let env = BubbleSizingV2.Environment(
+            containerWidth: 1200,
+            containerHeight: 1600,
+            singleLinkContainerHeight: 1600,
+            topInset: 20,
+            bottomInset: 160,
+            truncationBottomInset: 0,
+            isVisionOS: true,
+            metricsFingerprint: BubbleSizingV2.metricsFingerprint(metrics: metrics, traitCollection: UITraitCollection())
+        )
+
+        let policy = BubbleSizingV2.BubbleHeightPolicy.resolve(
+            metrics: metrics,
+            env: env,
+            isSingleLinkPreview: true,
+            prefersScreenAwareHeightCap: true,
+            allowsOuterScroll: false
+        )
+
+        #expect(abs(policy.heightCap - 1029) <= 0.5)
+    }
+
     @Test("T032: Salient highlight style-only updates avoid layout reflow callbacks")
     @MainActor
     func salientHighlightAvoidsLayoutReflowWhenHeightStable() async throws {

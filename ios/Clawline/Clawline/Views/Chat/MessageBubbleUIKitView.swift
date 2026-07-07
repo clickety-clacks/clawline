@@ -554,7 +554,7 @@ final class MessageBubbleUIKitContainerView: UIView {
         bubbleView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(bubbleView)
 
-        bubbleBottomConstraint = bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor)
+        bubbleBottomConstraint = bubbleView.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor)
         NSLayoutConstraint.activate([
             bubbleView.leadingAnchor.constraint(equalTo: leadingAnchor),
             bubbleView.topAnchor.constraint(equalTo: topAnchor),
@@ -2454,7 +2454,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             withHorizontalFittingPriority: .required,
             verticalFittingPriority: .fittingSizeLevel
         )
-        return max(0, measured.height)
+        return max(0, measured.height, dynamicContentStack.bounds.height)
     }
 
     @objc private func handleBodyTap(_ recognizer: UITapGestureRecognizer) {
@@ -3851,6 +3851,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
     private var messageSnippet: String = ""
     private var lastMismatch: (bounds: CGRect, bubble: CGRect)?
     private var lastDebugGeometry: (bounds: CGRect, bubble: CGRect, content: CGRect, body: CGRect)?
+    private var lastLayoutRequestMessageId: String?
     private var onRequestLayout: ((String) -> Void)?
     private var flashOverlayView: UIView?
 
@@ -3905,6 +3906,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
         messageId = message.id
         messageSessionKey = message.sessionKey
         messageSnippet = String(message.content.prefix(80))
+        lastLayoutRequestMessageId = nil
         let guardedRequestLayout: (String) -> Void = { [weak self] requestedId in
             guard let self, self.messageId == requestedId, self.messageSessionKey == message.sessionKey else { return }
             onRequestLayout?(requestedId)
@@ -3948,6 +3950,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
         messageSnippet = ""
         lastMismatch = nil
         lastDebugGeometry = nil
+        lastLayoutRequestMessageId = nil
         onRequestLayout = nil
     }
 
@@ -4038,6 +4041,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
         let xDelta = abs(bubbleInCell.minX - bounds.minX)
         guard heightDelta > 1 || widthDelta > 1 || yDelta > 1 || xDelta > 1 else {
             lastMismatch = nil
+            lastLayoutRequestMessageId = nil
             return
         }
         if let lastMismatch,
@@ -4058,6 +4062,10 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
         Self.logger.info("UIKit bubble mismatch id=\(id) session=\(sessionKey) snippet=\"\(snippet)\"")
         Self.logger.info("UIKit bubble mismatch bounds=\(boundsDesc)")
         Self.logger.info("UIKit bubble mismatch bubble=\(bubbleDesc)")
+        if heightDelta > 8, !id.isEmpty, lastLayoutRequestMessageId != id {
+            lastLayoutRequestMessageId = id
+            onRequestLayout?(id)
+        }
     }
 
     private func emitT1193RowBoundsDebugIfNeeded() {

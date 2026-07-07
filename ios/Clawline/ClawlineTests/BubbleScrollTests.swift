@@ -921,6 +921,171 @@ struct BubbleScrollTests {
         #expect(abs(scroll.contentOffset.y) < 0.5)
     }
 
+    @Test("T1487: Rendered markdown attributed strings carry no trailing newline slack")
+    @MainActor
+    func renderedMarkdownStringsCarryNoTrailingNewlineSlack() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let cases: [(id: String, content: String)] = [
+            ("plain-user", "So it's deployable"),
+            ("assistant-para", "First paragraph of a real reply.\n\nSecond paragraph continues here."),
+            ("assistant-list", "Here is a checklist:\n\n- first item\n- second item\n- third item"),
+            ("assistant-code", "Example code:\n\n```swift\nlet value = 42\n```"),
+            ("assistant-heading", "## Section\n\nContent under the heading."),
+            ("trailing-newline-source", "Message with trailing newline.\n"),
+        ]
+
+        for entry in cases {
+            let content = UnifiedMarkdownRenderer.makeContent(
+                messageText: entry.content,
+                context: MarkdownMessageRenderContext(
+                    role: .assistant,
+                    messageID: entry.id,
+                    metrics: metrics
+                ),
+                baseFont: UIFont.clawline(.bodyText),
+                inkColor: .black,
+                lineSpacing: 4,
+                stripDetectedURLs: false,
+                isDark: false
+            )
+
+            for block in content.renderedBlocks {
+                guard case .attributedText(let attributed) = block else { continue }
+                let hasTrailingNewline = attributed.string.last?.isNewline == true
+                #expect(
+                    !hasTrailingNewline,
+                    "\(entry.id): rendered attributed string ends with newline: \(attributed.string.debugDescription)"
+                )
+            }
+        }
+    }
+
+    @Test("T1487: Markdown text view fitting height matches trailing-stripped height")
+    @MainActor
+    func markdownTextViewFittingHeightMatchesTrailingStripped() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let cases: [(id: String, content: String)] = [
+            ("plain-user", "So it's deployable"),
+            ("assistant-para", "First paragraph of a real reply.\n\nSecond paragraph continues here."),
+            ("assistant-list", "Here is a checklist:\n\n- first item\n- second item\n- third item"),
+            ("assistant-code", "Example code:\n\n```swift\nlet value = 42\n```"),
+            ("trailing-newline-source", "Message with trailing newline.\n"),
+        ]
+        let measureWidth: CGFloat = 300
+
+        for entry in cases {
+            let content = UnifiedMarkdownRenderer.makeContent(
+                messageText: entry.content,
+                context: MarkdownMessageRenderContext(
+                    role: .assistant,
+                    messageID: entry.id,
+                    metrics: metrics
+                ),
+                baseFont: UIFont.clawline(.bodyText),
+                inkColor: .black,
+                lineSpacing: 4,
+                stripDetectedURLs: false,
+                isDark: false
+            )
+
+            for block in content.renderedBlocks {
+                guard case .attributedText(let attributed) = block else { continue }
+
+                let textView = UITextView()
+                UnifiedMarkdownRenderer.configureTextView(textView, delegate: nil)
+                textView.attributedText = attributed
+                let currentHeight = textView.sizeThatFits(
+                    CGSize(width: measureWidth, height: .greatestFiniteMagnitude)
+                ).height
+
+                let mutable = NSMutableAttributedString(attributedString: attributed)
+                while mutable.length > 0,
+                      let lastScalar = mutable.string.unicodeScalars.last,
+                      CharacterSet.whitespacesAndNewlines.contains(lastScalar) {
+                    mutable.deleteCharacters(in: NSRange(location: mutable.length - 1, length: 1))
+                }
+                textView.attributedText = mutable
+                let strippedHeight = textView.sizeThatFits(
+                    CGSize(width: measureWidth, height: .greatestFiniteMagnitude)
+                ).height
+
+                let hiddenSlack = currentHeight - strippedHeight
+                #expect(
+                    hiddenSlack <= 1.0,
+                    "\(entry.id): trailing newline slack = \(hiddenSlack)pt (current=\(currentHeight), stripped=\(strippedHeight))"
+                )
+            }
+        }
+    }
+
+    @Test("T1487: Markdown text-only bubble glyph bottom stays tight to bubble bottom")
+    @MainActor
+    func markdownTextOnlyBubbleGlyphBottomStaysTight() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let cases: [(id: String, content: String, role: Message.Role)] = [
+            ("plain-user", "So it's deployable", .user),
+            ("assistant-para", "First paragraph of a real reply.\n\nSecond paragraph continues here.", .assistant),
+            ("assistant-list", "Here is a checklist:\n\n- first item\n- second item\n- third item", .assistant),
+        ]
+
+        for entry in cases {
+            let message = Message(
+                id: entry.id,
+                role: entry.role,
+                content: entry.content,
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: "agent:main:clawline:flynn:s_111df227"
+            )
+            let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+            let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 360, height: 1))
+            bubble.configure(
+                message: message,
+                presentation: presentation,
+                sizeClass: MessageFlowRules.sizeClass(for: presentation),
+                metrics: metrics,
+                maxWidth: 360,
+                truncationHeightOverride: 1000,
+                bubbleSizingV2: nil,
+                showsHeader: false,
+                paddingScale: 1,
+                minWidthOverride: nil,
+                maxWidthOverride: nil,
+                useContinuousCorners: true,
+                isDark: false,
+                onRequestExpand: nil,
+                onRequestLayout: nil,
+                onInteractiveCallback: nil
+            )
+            let measured = bubble.systemLayoutSizeFitting(
+                CGSize(width: 360, height: UIView.layoutFittingCompressedSize.height),
+                withHorizontalFittingPriority: .required,
+                verticalFittingPriority: .fittingSizeLevel
+            )
+            bubble.frame = CGRect(origin: .zero, size: measured)
+            bubble.setNeedsLayout()
+            bubble.layoutIfNeeded()
+            bubble.layoutIfNeeded()
+
+            let bodyTexts = textViews(in: bubble)
+            guard let lastTextView = bodyTexts.max(by: {
+                $0.convert($0.bounds, to: bubble).maxY < $1.convert($1.bounds, to: bubble).maxY
+            }) else {
+                Issue.record("No body text view found for \(entry.id)")
+                continue
+            }
+
+            let glyphFrame = renderedGlyphFrame(for: lastTextView, in: bubble)
+            let glyphToBubbleBottom = bubble.bounds.maxY - glyphFrame.maxY
+            #expect(
+                glyphToBubbleBottom <= metrics.bubblePaddingBottom + 2.5,
+                "\(entry.id): glyph-to-bottom gap = \(glyphToBubbleBottom), expected <= \(metrics.bubblePaddingBottom + 2.5)"
+            )
+        }
+    }
+
     @Test("T1193: Production text bubble metrics stay compact")
     func productionTextBubbleMetricsStayCompact() {
         let compact = ChatFlowTheme.Metrics(isCompact: true)
@@ -1100,14 +1265,14 @@ struct BubbleScrollTests {
         #expect(bottomChrome <= metrics.bubblePaddingBottom + 12)
     }
 
-    @Test("T1193: live cell mismatch is diagnostic, not production remeasurement")
+    @Test("T1487: oversized normal-message cells request live remeasurement")
     @MainActor
-    func liveCellMismatchDoesNotRequestProductionRemeasurement() async {
+    func oversizedNormalMessageCellRequestsLiveRemeasurement() async {
         let metrics = ChatFlowTheme.Metrics(isCompact: true)
         let message = Message(
-            id: "t1193-live-cell-mismatch",
-            role: .assistant,
-            content: "A compact Ansible transcript bubble should not let a stale tall cell remain the row height owner.",
+            id: "t1487-oversized-cell",
+            role: .user,
+            content: "So it's deployable",
             timestamp: Date(),
             streaming: false,
             attachments: [],
@@ -1146,12 +1311,12 @@ struct BubbleScrollTests {
 
         let geometry = renderedBubbleView(in: cell)?.renderedGeometryForTests(in: cell.contentView)
         #expect(geometry?.bubbleFrame.height ?? cell.bounds.height < cell.bounds.height - 100)
-        #expect(requestedIds.isEmpty)
+        #expect(requestedIds == [message.id])
     }
 
-    @Test("T1193: stale cell mismatch does not request layout after session reuse")
+    @Test("T1487: stale cell mismatch does not request previous session layout after reuse")
     @MainActor
-    func staleCellMismatchDoesNotRequestLayoutAfterSessionReuse() async {
+    func staleCellMismatchDoesNotRequestPreviousSessionLayoutAfterReuse() async {
         let metrics = ChatFlowTheme.Metrics(isCompact: true)
         let messageId = "t1193-live-cell-reuse-mismatch"
         let originalMessage = Message(
@@ -1229,8 +1394,159 @@ struct BubbleScrollTests {
         )
         await Task.yield()
 
-        #expect(originalRequestedIds.isEmpty)
+        #expect(originalRequestedIds == [messageId])
         #expect(reusedRequestedIds.isEmpty)
+    }
+
+    @Test("T1465: mixed rendered transcript rows keep natural bubble heights")
+    @MainActor
+    func mixedRenderedTranscriptRowsKeepNaturalBubbleHeights() throws {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let maxWidth: CGFloat = 360
+        let cases: [(id: String, role: Message.Role, content: String)] = [
+            ("t1465-user-short", .user, "So it's deployable"),
+            ("t1465-assistant-markdown", .assistant, "First paragraph of a real reply.\n\nSecond paragraph continues here."),
+            ("t1465-user-multiline", .user, "Here is a user message that wraps naturally over multiple lines without needing a viewport cap."),
+            ("t1465-assistant-list", .assistant, "Checklist:\n\n- first item\n- second item\n- third item")
+        ]
+        var y: CGFloat = 0
+        let transcript = UIView(frame: CGRect(x: 0, y: 0, width: maxWidth, height: 1))
+        transcript.backgroundColor = .systemBackground
+        var rows: [[String: Any]] = []
+
+        for entry in cases {
+            let message = Message(
+                id: entry.id,
+                role: entry.role,
+                content: entry.content,
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: "agent:main:clawline:flynn:s_111df227"
+            )
+            let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+            let naturalBubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: maxWidth, height: 1))
+            naturalBubble.configure(
+                message: message,
+                presentation: presentation,
+                sizeClass: MessageFlowRules.sizeClass(for: presentation),
+                metrics: metrics,
+                maxWidth: maxWidth,
+                truncationHeightOverride: 1000,
+                bubbleSizingV2: nil,
+                showsHeader: false,
+                paddingScale: 1,
+                minWidthOverride: nil,
+                maxWidthOverride: nil,
+                useContinuousCorners: true,
+                isDark: false,
+                onRequestExpand: nil,
+                onRequestLayout: nil,
+                onInteractiveCallback: nil
+            )
+            let naturalSize = naturalBubble.systemLayoutSizeFitting(
+                CGSize(width: maxWidth, height: UIView.layoutFittingCompressedSize.height),
+                withHorizontalFittingPriority: .required,
+                verticalFittingPriority: .fittingSizeLevel
+            )
+
+            var requestedIds: [String] = []
+            let oversizedCellHeight = ceil(naturalSize.height + 48)
+            let cell = MessageBubbleUIKitCell(frame: CGRect(x: 0, y: y, width: maxWidth, height: oversizedCellHeight))
+            cell.contentView.frame = cell.bounds
+            cell.configure(
+                message: message,
+                presentation: presentation,
+                sendIndicatorState: nil,
+                isCompact: false,
+                maxWidth: naturalSize.width,
+                showsHeader: false,
+                isDark: false,
+                onRequestExpand: nil,
+                onRequestLayout: { requestedIds.append($0) },
+                onInteractiveCallback: nil,
+                onInsertIntoPrompt: nil,
+                onReferenceMessage: nil,
+                onResend: nil
+            )
+            transcript.addSubview(cell)
+            transcript.setNeedsLayout()
+            transcript.layoutIfNeeded()
+            cell.setNeedsLayout()
+            cell.layoutIfNeeded()
+            cell.contentView.setNeedsLayout()
+            cell.contentView.layoutIfNeeded()
+            cell.layoutIfNeeded()
+
+            guard let geometry = renderedBubbleView(in: cell)?.renderedGeometryForTests(in: cell.contentView) else {
+                Issue.record("Expected rendered bubble geometry for \(entry.id)")
+                continue
+            }
+            let bodyStack = markdownBodyStack(in: cell.contentView, arrangedSubviewCountAtLeast: 1)
+            let bodyFrame = bodyStack.map { $0.convert($0.bounds, to: cell.contentView) } ?? .zero
+            let textFrames = textViews(in: cell.contentView).map { renderedGlyphFrame(for: $0, in: cell.contentView) }
+            let textUnion = textFrames.reduce(nil) { partial, frame in
+                partial.map { $0.union(frame) } ?? frame
+            } ?? .zero
+            let viewport = innerBubbleScrollView(in: cell.contentView)
+            let widthConstraintSummary = allConstraints(in: cell.contentView)
+                .filter { ($0.identifier ?? "").contains("MessageBubbleUIKitView") }
+                .map { constraint in
+                    [
+                        "identifier": constraint.identifier ?? "",
+                        "constant": constraint.constant,
+                        "priority": constraint.priority.rawValue
+                    ] as [String: Any]
+                }
+
+            #expect(abs(geometry.bubbleFrame.height - naturalSize.height) <= 1.5)
+            #expect(geometry.bubbleFrame.height < cell.contentView.bounds.height - 8)
+            #expect(requestedIds == [message.id])
+
+            rows.append([
+                "id": entry.id,
+                "role": String(describing: entry.role),
+                "cellFrame": rectDictionary(cell.frame),
+                "cellBounds": rectDictionary(cell.contentView.bounds),
+                "bubbleFrame": rectDictionary(geometry.bubbleFrame),
+                "bodyFrame": rectDictionary(bodyFrame),
+                "textFrame": rectDictionary(textUnion),
+                "measuredContentHeight": naturalBubble.measuredDynamicContentHeight(fittingWidth: maxWidth),
+                "viewportFrame": rectDictionary(viewport?.convert(viewport?.bounds ?? .zero, to: cell.contentView) ?? .zero),
+                "viewportContentInset": insetDictionary(viewport?.contentInset ?? .zero),
+                "bubbleInsets": [
+                    "top": metrics.bubblePaddingTop,
+                    "bottom": metrics.bubblePaddingBottom,
+                    "horizontal": metrics.bubblePaddingHorizontal
+                ],
+                "widthConstraints": widthConstraintSummary
+            ])
+            y += oversizedCellHeight + metrics.flowGap
+        }
+
+        transcript.frame.size.height = y
+        let timestamp = Int(Date().timeIntervalSince1970)
+        let artifactDirectory = ProcessInfo.processInfo.environment["T1465_ROW_SIZING_ARTIFACT_DIR"]
+            ?? ProcessInfo.processInfo.environment["TEST_RUNNER_T1465_ROW_SIZING_ARTIFACT_DIR"]
+            ?? NSTemporaryDirectory()
+        let directory = URL(fileURLWithPath: artifactDirectory, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let jsonURL = directory.appendingPathComponent("clawline-t1465-row-sizing-\(timestamp).json")
+        let pngURL = directory.appendingPathComponent("clawline-t1465-row-sizing-\(timestamp).png")
+        let payload: [String: Any] = [
+            "source": "BubbleScrollTests.mixedRenderedTranscriptRowsKeepNaturalBubbleHeights",
+            "bsRefs": ["BS-01", "BS-02", "BS-03", "BS-04", "BS-05", "BS-06", "BS-07", "BS-08", "BS-09"],
+            "invariant": "cell/row height must not stretch normal plain/markdown bubbles beyond natural rendered height",
+            "rows": rows
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: jsonURL)
+        let image = UIGraphicsImageRenderer(bounds: transcript.bounds).image { _ in
+            transcript.drawHierarchy(in: transcript.bounds, afterScreenUpdates: true)
+        }
+        try image.pngData()?.write(to: pngURL)
+        print("T1465_ROW_SIZING_ARTIFACT json=\(jsonURL.path) png=\(pngURL.path)")
     }
 
     @Test("T1193: Rendered text bubble bottom chrome is tighter than top chrome")
@@ -2532,6 +2848,24 @@ struct BubbleScrollTests {
             height: usedRect.height
         )
         return textView.convert(glyphFrame, to: targetView)
+    }
+
+    private func rectDictionary(_ rect: CGRect) -> [String: CGFloat] {
+        [
+            "x": rect.origin.x,
+            "y": rect.origin.y,
+            "width": rect.size.width,
+            "height": rect.size.height
+        ]
+    }
+
+    private func insetDictionary(_ inset: UIEdgeInsets) -> [String: CGFloat] {
+        [
+            "top": inset.top,
+            "left": inset.left,
+            "bottom": inset.bottom,
+            "right": inset.right
+        ]
     }
 
     @MainActor

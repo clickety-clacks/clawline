@@ -3051,11 +3051,19 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     static var excludesFooterRevealRangeAtRestingBottom: Bool {
+#if os(visionOS)
+        false
+#else
         true
+#endif
     }
 
     static var hidesFooterAtRestingBottom: Bool {
+#if os(visionOS)
+        false
+#else
         true
+#endif
     }
 
     static func bottomOffsetMaxY(

@@ -102,18 +102,3 @@ protocol ChatServicing: AnyObject {
     func renameStream(sessionKey: String, displayName: String) async throws -> StreamSession
     func deleteStream(sessionKey: String, idempotencyKey: String?) async throws -> String
 }
-
-protocol DirectChatConnecting: AnyObject {
-    var incomingMessages: AsyncStream<Message> { get }
-    var connectionState: AsyncStream<ConnectionState> { get }
-    var serviceEvents: AsyncStream<ChatServiceEvent> { get }
-
-    func connect(token: String, lastMessageId: String?) async throws
-    func disconnect()
-    func send(
-        id: String,
-        content: String,
-        attachments: [WireAttachment],
-        sessionKey: String?
-    ) async throws
-}

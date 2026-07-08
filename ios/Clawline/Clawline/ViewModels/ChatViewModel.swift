@@ -217,10 +217,6 @@ enum PromptProcessingStage: String, Equatable {
     case failed
 }
 
-protocol ChatViewModelHosting: AnyObject {
-    func handleSceneDidBecomeActive()
-}
-
 struct LiveAgentProgress: Equatable {
     let sessionKey: String
     let runId: String?
@@ -307,7 +303,7 @@ enum ImageAttachmentPreparer {
 
 @Observable
 @MainActor
-final class ChatViewModel: ChatViewModelHosting {
+final class ChatViewModel {
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessagePipeline")
     private let instanceId = UUID().uuidString
     @MainActor
@@ -384,7 +380,9 @@ final class ChatViewModel: ChatViewModelHosting {
     private(set) var streamDotStateBySession: [String: StreamDotState] = [:]
     private(set) var lastReadMessageIdBySession: [String: String] = [:]
     private(set) var streamTailStateBySession: [String: StreamTailState] = [:]
-    private(set) var crossChatNotificationBubblesBySourceChatId: [String: CrossChatNotificationBubble] = [:]
+    private(set) var crossChatNotificationBubblesBySourceChatId: [String: CrossChatNotificationBubble] = [:] {
+        didSet { refreshCrossChatNotificationBubbles() }
+    }
     private var notificationBatchCommitCoordinator = NotificationBatchCommitCoordinator()
     private var suppressedCrossChatNotificationEntryKeysBySourceChatId: [String: Set<String>] = [:]
     var crossChatNotificationDismissAnimator: CrossChatNotificationDismissAnimator?
@@ -741,10 +739,15 @@ final class ChatViewModel: ChatViewModelHosting {
     }
     var inputContent: NSAttributedString = NSAttributedString() {
         didSet {
+            let hasSendableContent = !inputContent.isEffectivelyEmpty
+            if inputHasSendableContent != hasSendableContent {
+                inputHasSendableContent = hasSendableContent
+            }
             pruneAttachmentData()
             pruneMessageReferenceData()
         }
     }
+    private(set) var inputHasSendableContent = false
     var attachmentData: [UUID: PendingAttachment] = [:]
     private var messageReferenceData: [UUID: PendingMessageReference] = [:]
     private(set) var pendingAttachmentStageCount: Int = 0
@@ -784,7 +787,7 @@ final class ChatViewModel: ChatViewModelHosting {
         pendingAttachmentStageCount == 0
             && transportSendButtonConnectionState == .connected
             && sendProvisioningState(for: engineActiveSessionKey) == .ready
-            && !inputContent.isEffectivelyEmpty
+            && inputHasSendableContent
     }
 
     let toastManager: ToastManager
@@ -804,6 +807,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private var lifecycleOutputsSubscription: AsyncStream<ConnectionLifecycleOutput>?
     private var lifecycleStartupGateDebugSubscription: AsyncStream<StartupGateDebugEvent>?
     private var sessionMessages: [String: [Message]] = [:]
+    private var messageListRevisionBySession: [String: Int] = [:]
     private var forceReReadGenerationBySession: [String: Int] = [:]
     private var pendingLocalMessages: [PendingLocalMessage] = []
     private var ackedPendingLocalMessageIDs: Set<String> = []
@@ -870,6 +874,10 @@ final class ChatViewModel: ChatViewModelHosting {
 
     func forceReReadGeneration(for sessionKey: String) -> Int {
         forceReReadGenerationBySession[sessionKey] ?? 0
+    }
+
+    func messageListRevision(for sessionKey: String) -> Int {
+        messageListRevisionBySession[sessionKey] ?? 0
     }
 
     private func armForceReRead(for sessionKey: String) {
@@ -1617,8 +1625,10 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
 
-    var crossChatNotificationBubbles: [CrossChatNotificationBubble] {
-        crossChatNotificationBubblesBySourceChatId.values.sorted {
+    private(set) var crossChatNotificationBubbles: [CrossChatNotificationBubble] = []
+
+    private func refreshCrossChatNotificationBubbles() {
+        crossChatNotificationBubbles = crossChatNotificationBubblesBySourceChatId.values.sorted {
             if $0.lastAssistantActivityAt == $1.lastAssistantActivityAt {
                 return $0.sourceChatId < $1.sourceChatId
             }
@@ -3232,6 +3242,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private func applyMessagesWrite(_ newMessages: [Message], for sessionKey: String) {
         let oldCount = sessionMessages[sessionKey]?.count ?? 0
         sessionMessages[sessionKey] = newMessages
+        messageListRevisionBySession[sessionKey, default: 0] &+= 1
         let newCount = newMessages.count
         if oldCount > 0, newCount == 0 {
             StreamSwitchTiming.log("stream_messages_unloaded oldCount=\(oldCount) newCount=0", sessionKey: sessionKey)

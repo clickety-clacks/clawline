@@ -223,7 +223,8 @@ struct MarkdownTableView: View {
     }
 
     private var gridContent: some View {
-        Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+        let widths = columnWidths
+        return Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
             if let header = model.header {
                 GridRow {
                     ForEach(Array(header.enumerated()), id: \.offset) { column, cell in
@@ -232,7 +233,7 @@ struct MarkdownTableView: View {
                             columnIndex: column,
                             cell: cell,
                             alignment: model.columns[column].alignment,
-                            columnWidth: columnWidths[column],
+                            columnWidth: widths[column],
                             isHeader: true
                         )
                     }
@@ -256,7 +257,7 @@ struct MarkdownTableView: View {
                             columnIndex: column,
                             cell: cell,
                             alignment: model.columns[column].alignment,
-                            columnWidth: columnWidths[column],
+                            columnWidth: widths[column],
                             isHeader: false
                         )
                         .overlay(alignment: .trailing) {

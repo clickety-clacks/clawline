@@ -149,6 +149,10 @@ struct StreamManagerSheet: View {
     }
 
     private var selectorShortcutBridgeShouldOwnFirstResponder: Bool {
+        // T1136: when the search field is the requested focus target, the
+        // hidden key-command bridge must not remain first responder. Otherwise
+        // typing on the hardware keyboard goes to selector shortcuts instead
+        // of filtering the stream list.
         isShortcutOwnershipActive
             && selectorShortcutsAvailable
             && searchFocusRequestID == nil

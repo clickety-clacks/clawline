@@ -59,6 +59,10 @@ enum CrossChatNotificationShortcutIndicatorAvailability {
 }
 
 enum HardwareKeyboardAvailability {
+    // Chat-selector opening policy needs the physical keyboard state, not the
+    // shortcut-label policy. On iPhone/iPad/visionOS this keeps a dots tap from
+    // focusing the search field, and summoning the software keyboard, unless a
+    // real hardware keyboard is attached.
     static var current: Bool {
 #if targetEnvironment(macCatalyst)
         true
@@ -3352,6 +3356,9 @@ struct ChatView: View {
 
     @MainActor
     private func openStreamPopupForCurrentKeyboardState() {
+        // T1136 contract: with a hardware keyboard, opening the selector should
+        // focus/select search so typing filters immediately; without one, leave
+        // search unfocused so the software keyboard stays hidden.
         let focusTarget = StreamPopupFocusPolicy.focusTargetOnOpen(
             isSoftwareKeyboardVisible: isKeyboardVisible,
             isHardwareKeyboardAvailable: currentHardwareKeyboardAvailability
@@ -3423,6 +3430,9 @@ struct ChatView: View {
             streamPopupRouteController.closePopup()
         }
         if let closingPresentationID {
+            // The dots indicator receives the same tap sequence that closes the
+            // popover. Suppress one reopen window so a close tap does not
+            // immediately create a fresh selector and steal focus again.
             suppressStreamPopupReopenFromClosingTap(presentationID: closingPresentationID)
         }
     }

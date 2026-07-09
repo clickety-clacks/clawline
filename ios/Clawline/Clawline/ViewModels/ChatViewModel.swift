@@ -462,7 +462,12 @@ final class ChatViewModel {
     }
 
     var activeStream: ChatStream {
-        SessionRegistry.shared.stream(for: engineActiveSessionKey)
+        switch streamsBySessionKey[engineActiveSessionKey]?.kind {
+        case "dm", "global_dm":
+            return .admin
+        default:
+            return .personal
+        }
     }
 
     var canUseTrackFeature: Bool {

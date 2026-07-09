@@ -41,18 +41,6 @@ final class SessionRegistry {
         return value
     }
 
-    func orderedSessionKeys() -> [String] {
-        lock.lock()
-        let values = streamsBySessionKey.values.sorted { lhs, rhs in
-            if lhs.orderIndex == rhs.orderIndex {
-                return lhs.sessionKey < rhs.sessionKey
-            }
-            return lhs.orderIndex < rhs.orderIndex
-        }
-        lock.unlock()
-        return values.map(\.sessionKey)
-    }
-
     func adoptedSessionKeys() -> [String] {
         lock.lock()
         let values = streamsBySessionKey.values

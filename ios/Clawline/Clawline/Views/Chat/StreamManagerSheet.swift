@@ -94,7 +94,10 @@ struct StreamManagerSheet: View {
         max(baselineMaximumPopoverWidth, floor(maxAvailableWidth * 0.8))
     }
 
-    private var idealPopoverWidth: CGFloat {
+    private func idealPopoverWidth(
+        filteredStreams: [StreamSession],
+        filteredPendingCreateRows: [PendingCreateRow]
+    ) -> CGFloat {
         let visibleNames = filteredStreams.map(\.displayName) + filteredPendingCreateRows.map(\.displayName)
         let titleFont = UIFont.clawline(.subsectionHeader)
         let longestTitleWidth = visibleNames
@@ -190,6 +193,19 @@ struct StreamManagerSheet: View {
 
     var body: some View {
         let _ = settings.fontScaleChangeSequence
+        // Hoisted once per body evaluation; the filter chain and shortcut map
+        // must not be re-derived per row (O(N^2)) or per width measurement.
+        let filteredStreams = self.filteredStreams
+        let filteredPendingCreateRows = self.filteredPendingCreateRows
+        let selectableShortcutKeys = selectableShortcutSessionKeys(
+            shortcutsAvailable: selectorShortcutsAvailable,
+            filteredSessionKeys: filteredStreams.map(\.sessionKey)
+        )
+        let listItemCount = filteredStreams.count + filteredPendingCreateRows.count
+        let idealWidth = idealPopoverWidth(
+            filteredStreams: filteredStreams,
+            filteredPendingCreateRows: filteredPendingCreateRows
+        )
         let idealVerticalLayout = StreamSelectorLayout.popupVerticalLayout(
             itemCount: listItemCount,
             showsCreateInlineRow: false,
@@ -221,7 +237,8 @@ struct StreamManagerSheet: View {
                     ForEach(filteredStreams) { stream in
                         streamRow(
                             for: stream,
-                            dotState: rowDotStates[stream.sessionKey] ?? .inactive
+                            dotState: rowDotStates[stream.sessionKey] ?? .inactive,
+                            selectableShortcutKeys: selectableShortcutKeys
                         )
                     }
 
@@ -294,7 +311,7 @@ struct StreamManagerSheet: View {
         .frame(height: heightFrame.fixedHeight, alignment: .top)
         .frame(
             minWidth: minimumPopoverWidth,
-            idealWidth: idealPopoverWidth,
+            idealWidth: idealWidth,
             maxWidth: maximumPopoverWidth
         )
         .frame(
@@ -485,8 +502,12 @@ struct StreamManagerSheet: View {
     }
 
     @ViewBuilder
-    private func streamRow(for stream: StreamSession, dotState: StreamDotState) -> some View {
-        rowContent(for: stream, dotState: dotState)
+    private func streamRow(
+        for stream: StreamSession,
+        dotState: StreamDotState,
+        selectableShortcutKeys: [String]
+    ) -> some View {
+        rowContent(for: stream, dotState: dotState, selectableShortcutKeys: selectableShortcutKeys)
             .frame(height: listRowHeight, alignment: .center)
             .listRowInsets(
                 EdgeInsets(
@@ -531,7 +552,11 @@ struct StreamManagerSheet: View {
     }
 
     @ViewBuilder
-    private func rowContent(for stream: StreamSession, dotState: StreamDotState) -> some View {
+    private func rowContent(
+        for stream: StreamSession,
+        dotState: StreamDotState,
+        selectableShortcutKeys: [String]
+    ) -> some View {
         if activeEditor == .renaming(stream.sessionKey) {
             TextField("Stream name", text: $draftName)
                 .font(.clawline(.subsectionHeader))
@@ -574,20 +599,23 @@ struct StreamManagerSheet: View {
                             .controlSize(.small)
                             .tint(.secondary)
                     }
-                    shortcutLabel(for: stream)
+                    shortcutLabel(for: stream, selectableShortcutKeys: selectableShortcutKeys)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(isWorking || isRemovingStream(stream.sessionKey))
-            .accessibilityHint(accessibilityShortcutLabel(for: stream).map { "Shortcut \($0)" } ?? "")
+            .accessibilityHint(
+                accessibilityShortcutLabel(for: stream, selectableShortcutKeys: selectableShortcutKeys)
+                    .map { "Shortcut \($0)" } ?? ""
+            )
         }
     }
 
     @ViewBuilder
-    private func shortcutLabel(for stream: StreamSession) -> some View {
-        if let label = shortcutLabelText(for: stream) {
+    private func shortcutLabel(for stream: StreamSession, selectableShortcutKeys: [String]) -> some View {
+        if let label = shortcutLabelText(for: stream, selectableShortcutKeys: selectableShortcutKeys) {
             Text(label)
                 .font(.clawline(.secondaryLabel))
                 .monospacedDigit()
@@ -806,12 +834,22 @@ struct StreamManagerSheet: View {
     }
 
     private func selectableShortcutSessionKeys(shortcutsAvailable: Bool) -> [String] {
+        selectableShortcutSessionKeys(
+            shortcutsAvailable: shortcutsAvailable,
+            filteredSessionKeys: filteredStreamSessionKeys
+        )
+    }
+
+    private func selectableShortcutSessionKeys(
+        shortcutsAvailable: Bool,
+        filteredSessionKeys: [String]
+    ) -> [String] {
         let renamingSessionKey: String? = {
             guard case .renaming(let sessionKey) = activeEditor else { return nil }
             return sessionKey
         }()
         return StreamSelectorShortcutMap.selectableSessionKeys(
-            filteredSessionKeys: filteredStreamSessionKeys,
+            filteredSessionKeys: filteredSessionKeys,
             shortcutsAvailable: shortcutsAvailable,
             isWorking: isWorking,
             removingSessionKeys: removingSessionKeys,
@@ -819,17 +857,18 @@ struct StreamManagerSheet: View {
         )
     }
 
-    private func shortcutLabelText(for stream: StreamSession) -> String? {
+    private func shortcutLabelText(for stream: StreamSession, selectableShortcutKeys: [String]) -> String? {
         guard selectorShortcutsAvailable,
               let slot = StreamSelectorShortcutMap.slot(
                 forSessionKey: stream.sessionKey,
-                selectableSessionKeys: selectableShortcutSessionKeys
+                selectableSessionKeys: selectableShortcutKeys
               ) else { return nil }
         return StreamSelectorShortcutMap.shortcutLabel(forSlot: slot)
     }
 
-    private func accessibilityShortcutLabel(for stream: StreamSession) -> String? {
-        shortcutLabelText(for: stream).map(StreamSelectorShortcutMap.accessibilityLabel(forShortcutLabel:))
+    private func accessibilityShortcutLabel(for stream: StreamSession, selectableShortcutKeys: [String]) -> String? {
+        shortcutLabelText(for: stream, selectableShortcutKeys: selectableShortcutKeys)
+            .map(StreamSelectorShortcutMap.accessibilityLabel(forShortcutLabel:))
     }
 
     private func renameStream(_ stream: StreamSession) async {

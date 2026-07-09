@@ -16,6 +16,7 @@ struct MarkdownTableView: View {
 
     @Environment(\.openURL) private var openURLAction
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.displayScale) private var displayScale
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
 
@@ -27,6 +28,39 @@ struct MarkdownTableView: View {
     @State private var containerWidth: CGFloat = 0
     @State private var scrollProxy: ScrollViewProxy?
     @State private var headerHeight: CGFloat = 0
+    @State private var columnWidthCache: ColumnWidthCache?
+
+    private struct ColumnWidthCacheKey: Hashable {
+        let messageID: String
+        let rowOffset: Int
+        let rowCount: Int
+        let columnCount: Int
+        let headerText: [String]
+        let columnAlignments: [ColumnAlignmentKey]
+        let containerWidthPixels: Int
+        let bodyFontSizePixels: Int
+        let isExpanded: Bool
+        let colorScheme: ColorScheme
+    }
+
+    private enum ColumnAlignmentKey: Hashable {
+        case leading
+        case center
+        case trailing
+
+        init(_ alignment: ColumnAlignment) {
+            switch alignment {
+            case .leading: self = .leading
+            case .center: self = .center
+            case .trailing: self = .trailing
+            }
+        }
+    }
+
+    private struct ColumnWidthCache: Equatable {
+        let key: ColumnWidthCacheKey
+        let widths: [CGFloat]
+    }
 
     private var headerFill: Color { Color(uiColor: headerFillColor) }
     private var backgroundFill: Color { Color(uiColor: backgroundFillColor) }
@@ -106,7 +140,7 @@ struct MarkdownTableView: View {
         return model.columns.enumerated().map { index, _ in "Column \(index + 1)" }
     }
 
-    private var columnWidths: [CGFloat] {
+    private var computedColumnWidths: [CGFloat] {
         var widths: [CGFloat] = Array(repeating: 0, count: model.columns.count)
         if let header = model.header {
             for (idx, cell) in header.prefix(model.columns.count).enumerated() {
@@ -119,6 +153,28 @@ struct MarkdownTableView: View {
             }
         }
         return widths
+    }
+
+    private var tableWidthCacheKey: ColumnWidthCacheKey {
+        ColumnWidthCacheKey(
+            messageID: model.messageID,
+            rowOffset: model.rowOffset,
+            rowCount: model.rows.count,
+            columnCount: model.columns.count,
+            headerText: model.header?.map(\.plainText) ?? [],
+            columnAlignments: model.columns.map { ColumnAlignmentKey($0.alignment) },
+            containerWidthPixels: Int((containerWidth * displayScale).rounded()),
+            bodyFontSizePixels: Int((metrics.bodyFontSize * displayScale).rounded()),
+            isExpanded: isExpanded,
+            colorScheme: colorScheme
+        )
+    }
+
+    private var columnWidths: [CGFloat] {
+        if let columnWidthCache, columnWidthCache.key == tableWidthCacheKey {
+            return columnWidthCache.widths
+        }
+        return computedColumnWidths
     }
 
     private var contentWidth: CGFloat {
@@ -192,9 +248,18 @@ struct MarkdownTableView: View {
             )
             .frame(width: 0, height: 0)
         )
+        .onAppear { refreshColumnWidthCache() }
+        .onChange(of: tableWidthCacheKey) { _, _ in refreshColumnWidthCache() }
         .onChange(of: isExpanded) { _, newValue in handleExpansionChange(newValue) }
         .onChange(of: model.rows.count) { _, _ in clampFocusedCell() }
         .onDisappear { keyboardFocus = false }
+    }
+
+
+    private func refreshColumnWidthCache() {
+        let key = tableWidthCacheKey
+        guard columnWidthCache?.key != key else { return }
+        columnWidthCache = ColumnWidthCache(key: key, widths: computedColumnWidths)
     }
 
     private var scrollContainer: some View {

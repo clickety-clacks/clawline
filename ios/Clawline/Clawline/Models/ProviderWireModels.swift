@@ -177,7 +177,7 @@ struct ClientStreamReadPayload: Codable, Equatable {
     }
 }
 
-struct ServerMessagePayload: Codable, Equatable {
+nonisolated struct ServerMessagePayload: Codable, Equatable, Sendable {
     let type: String
     let id: String
     let llmVisibleMessageId: String?
@@ -214,8 +214,8 @@ struct ServerMessagePayload: Codable, Equatable {
 
     // Support multiple server metadata shapes for "who is speaking" without hardcoding names.
     // Some servers historically send `sender: "assistant"` which is a role marker, not a display name.
-    private enum FromField: Decodable {
-        struct FromObject: Decodable {
+    private enum FromField: Decodable, Sendable {
+        struct FromObject: Decodable, Sendable {
             let name: String?
             let displayName: String?
             let id: String?

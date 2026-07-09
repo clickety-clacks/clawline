@@ -2787,7 +2787,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         )
         let snapshotMessages = StreamMessageSearch.filteredMessages(from: collapsedVisibleMessages, query: streamSearchQuery)
         lastMessages = messages
-        let effectiveStream = SessionKey.stream(for: effectiveSessionKey)
+        let effectiveStream = viewModel.streamType(for: effectiveSessionKey)
         lastEffectiveStream = effectiveStream
         webBubbleCoordinator.currentStream = effectiveStream
         let snapshotMessageIds = snapshotMessages.map(\.id)
@@ -4281,6 +4281,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             }
             cell?.configure(
                 message: message,
+                stream: viewModel.streamType(for: message.sessionKey),
                 presentation: presentation,
                 sendIndicatorState: sendIndicatorState,
                 isCompact: self.isCompact,
@@ -4864,6 +4865,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     private func measureUIKitBubbleSize(message: Message,
+                                        stream: ChatStream? = nil,
                                         presentation: MessagePresentation,
                                         sendIndicatorState: MessageSendIndicatorState?,
                                         maxWidth: CGFloat,
@@ -4879,6 +4881,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let sizeClass = MessageFlowRules.sizeClass(for: presentation)
         uiKitBubbleSizer.configure(
             message: message,
+            stream: stream ?? viewModel?.streamType(for: message.sessionKey) ?? .personal,
             presentation: presentation,
             sizeClass: sizeClass,
             metrics: metrics,
@@ -5188,6 +5191,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         // Pass 0: configure at max width so preferredWidth() can read padding and label sizes.
         uiKitBubbleSizer.configure(
             message: message,
+            stream: viewModel?.streamType(for: message.sessionKey) ?? .personal,
             presentation: presentation,
             sizeClass: plan.sizeClass,
             metrics: metrics,
@@ -5254,6 +5258,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         )
         uiKitBubbleSizer.configure(
             message: message,
+            stream: viewModel?.streamType(for: message.sessionKey) ?? .personal,
             presentation: presentation,
             sizeClass: plan.sizeClass,
             metrics: metrics,
@@ -5300,6 +5305,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         )
         uiKitBubbleSizer.configure(
             message: message,
+            stream: viewModel?.streamType(for: message.sessionKey) ?? .personal,
             presentation: presentation,
             sizeClass: plan.sizeClass,
             metrics: metrics,

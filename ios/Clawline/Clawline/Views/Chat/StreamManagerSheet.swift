@@ -19,6 +19,7 @@ enum StreamPopupSearchPresentationFocusPolicy {
 
 struct StreamManagerSheet: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.displayScale) private var displayScale
     @Environment(\.settingsManager) private var settings
 
     @Bindable var viewModel: ChatViewModel
@@ -61,7 +62,29 @@ struct StreamManagerSheet: View {
     @State private var isSearchFieldFocusEnabled = false
     @State private var localSearchFocusRequestID = 0
     @State private var isSearchFieldFocused = false
+    @State private var popoverWidthCache: PopoverWidthCache?
+    @State private var rowHighlightCache: [RowHighlightCacheKey: StreamSelectorLayout.SelectionHighlightStyle] = [:]
     @FocusState private var focusedEditor: EditorMode?
+
+    private struct PopoverWidthCacheKey: Hashable {
+        let streamNames: [String]
+        let pendingNames: [String]
+        let maximumWidthPixels: Int
+        let showsShortcutLabels: Bool
+        let fontScaleChangeSequence: Int
+    }
+
+    private struct PopoverWidthCache: Equatable {
+        let key: PopoverWidthCacheKey
+        let width: CGFloat
+    }
+
+    private struct RowHighlightCacheKey: Hashable {
+        let sessionKey: String
+        let isSelected: Bool
+        let colorScheme: ColorScheme
+        let isSpatial: Bool
+    }
 
     private enum EditorMode: Hashable {
         case renaming(String)
@@ -202,10 +225,19 @@ struct StreamManagerSheet: View {
             filteredSessionKeys: filteredStreams.map(\.sessionKey)
         )
         let listItemCount = filteredStreams.count + filteredPendingCreateRows.count
-        let idealWidth = idealPopoverWidth(
-            filteredStreams: filteredStreams,
-            filteredPendingCreateRows: filteredPendingCreateRows
+        let popoverWidthCacheKey = PopoverWidthCacheKey(
+            streamNames: filteredStreams.map(\.displayName),
+            pendingNames: filteredPendingCreateRows.map(\.displayName),
+            maximumWidthPixels: Int((maximumPopoverWidth * displayScale).rounded()),
+            showsShortcutLabels: selectorShortcutsAvailable,
+            fontScaleChangeSequence: settings.fontScaleChangeSequence
         )
+        let idealWidth = popoverWidthCache?.key == popoverWidthCacheKey
+            ? popoverWidthCache?.width ?? baselineIdealPopoverWidth
+            : idealPopoverWidth(
+                filteredStreams: filteredStreams,
+                filteredPendingCreateRows: filteredPendingCreateRows
+            )
         let idealVerticalLayout = StreamSelectorLayout.popupVerticalLayout(
             itemCount: listItemCount,
             showsCreateInlineRow: false,
@@ -345,6 +377,20 @@ struct StreamManagerSheet: View {
                 onSearchFocusChange: { [self] focused in reportSearchFocus(focused) }
             )
         )
+        .onAppear {
+            refreshStreamManagerCaches(
+                key: popoverWidthCacheKey,
+                filteredStreams: filteredStreams,
+                filteredPendingCreateRows: filteredPendingCreateRows
+            )
+        }
+        .onChange(of: popoverWidthCacheKey) { _, key in
+            refreshStreamManagerCaches(
+                key: key,
+                filteredStreams: filteredStreams,
+                filteredPendingCreateRows: filteredPendingCreateRows
+            )
+        }
         .onChange(of: searchQuery) { _, _ in
             syncSelectionWithFilteredStreams()
             publishShortcutOwnership()
@@ -369,14 +415,7 @@ struct StreamManagerSheet: View {
 #endif
         .alert(
             pendingRemovalTitle,
-            isPresented: Binding(
-                get: { pendingRemovalStream != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        pendingRemovalStream = nil
-                    }
-                }
-            ),
+            isPresented: pendingRemovalPresented,
             presenting: pendingRemovalStream
         ) { stream in
             Button("Cancel", role: .cancel) {}
@@ -385,6 +424,18 @@ struct StreamManagerSheet: View {
                 Task { await removeStream(stream) }
             }
         }
+    }
+
+
+    private var pendingRemovalPresented: Binding<Bool> {
+        Binding(
+            get: { pendingRemovalStream != nil },
+            set: { isPresented in
+                if !isPresented {
+                    pendingRemovalStream = nil
+                }
+            }
+        )
     }
 
     private var bottomActionBar: some View {
@@ -626,12 +677,52 @@ struct StreamManagerSheet: View {
         }
     }
 
+
+    private func refreshStreamManagerCaches(
+        key: PopoverWidthCacheKey,
+        filteredStreams: [StreamSession],
+        filteredPendingCreateRows: [PendingCreateRow]
+    ) {
+        if popoverWidthCache?.key != key {
+            popoverWidthCache = PopoverWidthCache(
+                key: key,
+                width: idealPopoverWidth(
+                    filteredStreams: filteredStreams,
+                    filteredPendingCreateRows: filteredPendingCreateRows
+                )
+            )
+        }
+        rowHighlightCache = Dictionary(uniqueKeysWithValues: filteredStreams.map { stream in
+            let key = RowHighlightCacheKey(
+                sessionKey: stream.sessionKey,
+                isSelected: selectedStreamSessionKey == stream.sessionKey,
+                colorScheme: colorScheme,
+                isSpatial: Self.isSpatialPlatform
+            )
+            return (
+                key,
+                StreamSelectorLayout.selectionHighlightStyle(
+                    isSelected: key.isSelected,
+                    isDark: key.colorScheme == .dark,
+                    isSpatial: key.isSpatial
+                )
+            )
+        })
+    }
+
     private func rowBackground(for stream: StreamSession) -> some View {
-        let highlight = StreamSelectorLayout.selectionHighlightStyle(
+        let key = RowHighlightCacheKey(
+            sessionKey: stream.sessionKey,
             isSelected: selectedStreamSessionKey == stream.sessionKey,
-            isDark: colorScheme == .dark,
+            colorScheme: colorScheme,
             isSpatial: Self.isSpatialPlatform
         )
+        let highlight = rowHighlightCache[key]
+            ?? StreamSelectorLayout.selectionHighlightStyle(
+                isSelected: key.isSelected,
+                isDark: key.colorScheme == .dark,
+                isSpatial: key.isSpatial
+            )
         return RoundedRectangle(cornerRadius: 12, style: .continuous)
             .fill(Color.primary.opacity(highlight.fillOpacity))
             .overlay {
@@ -1341,7 +1432,20 @@ struct TrackPickerSheet: View {
     @State private var selectedTrackCandidateSessionKey: String?
     @State private var trackSearchQuery = ""
     @State private var isWorking = false
+    @State private var trackPickerHighlightCache: [TrackPickerHighlightCacheKey: TrackPickerHighlightCacheValue] = [:]
     @FocusState private var isTrackSearchFieldFocused: Bool
+
+    private struct TrackPickerHighlightCacheKey: Hashable {
+        let sessionKey: String
+        let displayName: String
+        let query: String
+        let colorScheme: ColorScheme
+    }
+
+    private struct TrackPickerHighlightCacheValue {
+        let displayName: AttributedString
+        let sessionKeySnippet: AttributedString
+    }
 
     private let trackPickerRowCornerRadius: CGFloat = 12
     private let trackPickerContentHorizontalPadding: CGFloat = 20
@@ -1404,6 +1508,14 @@ struct TrackPickerSheet: View {
 
     var body: some View {
         let _ = settings.fontScaleChangeSequence
+        let trackHighlightCacheKey = filteredTrackCandidates.map {
+            TrackPickerHighlightCacheKey(
+                sessionKey: $0.sessionKey,
+                displayName: $0.displayName,
+                query: trackSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines),
+                colorScheme: colorScheme
+            )
+        }
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: trackPickerSectionSpacing) {
@@ -1428,6 +1540,8 @@ struct TrackPickerSheet: View {
                 }
             }
         }
+        .onAppear { refreshTrackPickerHighlightCache() }
+        .onChange(of: trackHighlightCacheKey) { _, _ in refreshTrackPickerHighlightCache() }
         .onChange(of: trackCandidates.map(\.sessionKey)) { _, sessionKeys in
             guard let selectedTrackCandidateSessionKey else { return }
             if !sessionKeys.contains(selectedTrackCandidateSessionKey) {
@@ -1616,6 +1730,7 @@ struct TrackPickerSheet: View {
     @ViewBuilder
     private func trackPickerRow(for candidate: ChatViewModel.UntrackedSessionCandidate) -> some View {
         let isSelected = selectedTrackCandidateSessionKey == candidate.sessionKey
+        let highlightedText = trackPickerHighlightedText(for: candidate)
 
         Button {
             selectedTrackCandidateSessionKey = candidate.sessionKey
@@ -1642,11 +1757,11 @@ struct TrackPickerSheet: View {
                 .frame(width: 22, height: 22)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    highlightedTrackPickerDisplayName(for: candidate)
+                    Text(highlightedText.displayName)
                         .font(.clawline(.uiLabel, weight: isSelected ? .semibold : .regular))
                         .lineLimit(1)
 
-                    highlightedTrackPickerSessionKey(for: candidate)
+                    Text(highlightedText.sessionKeySnippet)
                         .font(.clawline(.timestamp, design: .monospaced))
                         .lineLimit(1)
                 }
@@ -1677,38 +1792,60 @@ struct TrackPickerSheet: View {
         .buttonStyle(.plain)
     }
 
-    private func highlightedTrackPickerDisplayName(for candidate: ChatViewModel.UntrackedSessionCandidate) -> Text {
-        highlightedText(
-            candidate.displayName,
-            query: trackSearchQuery,
-            defaultColor: .primary,
-            highlightColor: trackPickerMatchHighlightColor
+    private func refreshTrackPickerHighlightCache() {
+        trackPickerHighlightCache = Dictionary(uniqueKeysWithValues: filteredTrackCandidates.map { candidate in
+            let key = trackPickerHighlightCacheKey(for: candidate)
+            return (key, makeTrackPickerHighlightValue(for: candidate))
+        })
+    }
+
+    private func trackPickerHighlightedText(for candidate: ChatViewModel.UntrackedSessionCandidate) -> TrackPickerHighlightCacheValue {
+        let key = trackPickerHighlightCacheKey(for: candidate)
+        return trackPickerHighlightCache[key] ?? makeTrackPickerHighlightValue(for: candidate)
+    }
+
+    private func trackPickerHighlightCacheKey(for candidate: ChatViewModel.UntrackedSessionCandidate) -> TrackPickerHighlightCacheKey {
+        TrackPickerHighlightCacheKey(
+            sessionKey: candidate.sessionKey,
+            displayName: candidate.displayName,
+            query: trackSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines),
+            colorScheme: colorScheme
         )
     }
 
-    private func highlightedTrackPickerSessionKey(for candidate: ChatViewModel.UntrackedSessionCandidate) -> Text {
+    private func makeTrackPickerHighlightValue(for candidate: ChatViewModel.UntrackedSessionCandidate) -> TrackPickerHighlightCacheValue {
         let snippet = sessionKeySnippet(candidate.sessionKey, query: trackSearchQuery)
-        return highlightedText(
-            snippet.text,
-            highlightedRange: snippet.highlightedRange,
-            defaultColor: .secondary,
-            highlightColor: trackPickerMatchHighlightColor
+        return TrackPickerHighlightCacheValue(
+            displayName: highlightedAttributedString(
+                candidate.displayName,
+                query: trackSearchQuery,
+                defaultColor: .primary,
+                highlightColor: trackPickerMatchHighlightColor
+            ),
+            sessionKeySnippet: highlightedAttributedString(
+                snippet.text,
+                highlightedRange: snippet.highlightedRange,
+                defaultColor: .secondary,
+                highlightColor: trackPickerMatchHighlightColor
+            )
         )
     }
 
-    private func highlightedText(
+    private func highlightedAttributedString(
         _ text: String,
         query: String,
         defaultColor: Color,
         highlightColor: Color
-    ) -> Text {
+    ) -> AttributedString {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty,
             let range = text.range(of: normalized, options: .caseInsensitive)
         else {
-            return Text(text).foregroundColor(defaultColor)
+            var attributed = AttributedString(text)
+            attributed.foregroundColor = defaultColor
+            return attributed
         }
-        return highlightedText(
+        return highlightedAttributedString(
             text,
             highlightedRange: range,
             defaultColor: defaultColor,
@@ -1716,24 +1853,24 @@ struct TrackPickerSheet: View {
         )
     }
 
-    private func highlightedText(
+    private func highlightedAttributedString(
         _ text: String,
         highlightedRange: Range<String.Index>?,
         defaultColor: Color,
         highlightColor: Color
-    ) -> Text {
+    ) -> AttributedString {
         var attributed = AttributedString(text)
         attributed.foregroundColor = defaultColor
 
         guard let highlightedRange,
             let attributedRange = Range(highlightedRange, in: attributed)
         else {
-            return Text(attributed)
+            return attributed
         }
 
         attributed[attributedRange].foregroundColor = highlightColor
         attributed[attributedRange].inlinePresentationIntent = .stronglyEmphasized
-        return Text(attributed)
+        return attributed
     }
 
     private func sessionKeySnippet(_ sessionKey: String, query: String) -> (text: String, highlightedRange: Range<String.Index>?) {

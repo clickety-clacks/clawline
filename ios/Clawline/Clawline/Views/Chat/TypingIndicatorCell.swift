@@ -106,6 +106,7 @@ final class TypingIndicatorCell: UICollectionViewCell {
         progressLabel.textColor = palette.ink.withAlphaComponent(0.82)
         containerView.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sendIndicatorState: nil,
             isCompact: isCompact,

@@ -202,7 +202,7 @@ final class ProviderChatService: ChatServicing {
     private let baseURLProvider: () -> URL?
     private let userIdProvider: () -> String?
     private let authTokenProvider: @Sendable () async -> String?
-    private let adoptedSessionKeysProvider: @Sendable () -> [String]
+    private var adoptedSessionKeysProvider: @Sendable () -> [String]
     private let streamAPIClient: StreamAPIClient
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
@@ -263,6 +263,10 @@ final class ProviderChatService: ChatServicing {
     var connectionState: AsyncStream<ConnectionState> { stateBroadcaster.stream(initial: lastConnectionState) }
     var serviceEvents: AsyncStream<ChatServiceEvent> { serviceEventBroadcaster.stream() }
     var lifecycleTransportEvents: AsyncStream<LifecycleTransportEvent> { lifecycleTransportEventBroadcaster.stream() }
+
+    func setAdoptedSessionKeysProvider(_ provider: @escaping @Sendable () -> [String]) {
+        adoptedSessionKeysProvider = provider
+    }
 
     func fetchStreams() async throws -> [StreamSession] {
         guard let token = await resolveControlPlaneToken() else {
@@ -867,6 +871,12 @@ final class ProviderChatService: ChatServicing {
         }.value
     }
 
+    nonisolated private static func decodeServerMessagePayload(data: Data, decoder _: JSONDecoder) async throws -> ServerMessagePayload {
+        try await Task.detached(priority: .userInitiated) {
+            try JSONDecoder().decode(ServerMessagePayload.self, from: data)
+        }.value
+    }
+
     private func handleAuthResult(data: Data, lifecycleEpoch: Int?, lifecycleConnectionToken: UUID?) {
         let result: AuthResultPayload
         do {
@@ -930,7 +940,7 @@ final class ProviderChatService: ChatServicing {
         }
         let payload: ServerMessagePayload
         do {
-            payload = try decoder.decode(ServerMessagePayload.self, from: data)
+            payload = try await Self.decodeServerMessagePayload(data: data, decoder: decoder)
         } catch {
             logger.warning("Dropping message payload: decode failed error=\(error.localizedDescription, privacy: .public)")
             return

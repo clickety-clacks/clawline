@@ -129,6 +129,30 @@ struct SessionMetadataFooterHitTestingTests {
         }
     }
 
+    @Test("Resting bottom footer search remains visible and hit-testable")
+    func restingBottomFooterSearchRemainsVisibleAndHitTestable() throws {
+        let restingBottom: CGFloat = 440
+        let trueBottom: CGFloat = 500
+        let cell = makeConfiguredCell()
+        cell.alpha = MessageFlowCollectionViewController.initialFooterCellAlpha(
+            contentOffsetY: restingBottom,
+            restingBottomOffsetY: restingBottom,
+            trueBottomOffsetY: trueBottom
+        )
+        let searchField = try footerSearchField(in: cell)
+        let searchCenter = searchField.convert(
+            CGPoint(x: searchField.bounds.midX, y: searchField.bounds.midY),
+            to: cell
+        )
+
+        #expect(MessageFlowCollectionViewController.hidesFooterAtRestingBottom == false)
+        #expect(cell.alpha == 1)
+        #expect(searchField.alpha > 0.01)
+        #expect(searchField.isUserInteractionEnabled)
+        let hitView = try #require(cell.hitTest(searchCenter, with: nil))
+        #expect(hitView === searchField || hitView.isDescendant(of: searchField))
+    }
+
     @Test("Direct label glyph taps resolve to the enabled footer button")
     func directLabelGlyphTapsResolveToTheEnabledFooterButton() throws {
         let cell = makeConfiguredCell()
@@ -345,7 +369,44 @@ struct SessionMetadataFooterHitTestingTests {
     func footerAppendsWhenRenderedItemsAndFooterCapableStatusArePresent() {
         #expect(SessionMetadataFooterCell.shouldAppendFooter(after: ["message-1"], status: makeStatus()))
         #expect(SessionMetadataFooterCell.shouldAppendFooter(after: [], status: makeStatus()) == false)
-        #expect(SessionMetadataFooterCell.shouldAppendFooter(after: ["message-1"], status: nil) == false)
+        #expect(SessionMetadataFooterCell.shouldAppendFooter(after: ["message-1"], status: nil))
+    }
+
+    @Test("Footer chrome persists while session metadata is loading")
+    func footerChromePersistsWhileSessionMetadataIsLoading() throws {
+        let cell = makeConfiguredCell(status: nil)
+
+        _ = try footerSearchField(in: cell)
+        _ = try versionLabel(in: cell)
+        _ = try testMenuButton(in: cell)
+
+        let disabledButtons = footerActionButtons(in: cell)
+        #expect(SessionMetadataFooterCell.height(for: nil) == 120)
+        #expect(SessionMetadataFooterCell.footerText(for: nil) == "Model loading  ·  Thinking loading  ·  Fast loading")
+        #expect(disabledButtons.map(\.accessibilityLabel) == ["Model loading", "Thinking loading", "Fast loading"])
+        #expect(disabledButtons.allSatisfy { !$0.isEnabled })
+    }
+
+    @Test("Footer chrome persists while model metadata is unavailable")
+    func footerChromePersistsWhileModelMetadataIsUnavailable() throws {
+        let status = makeStatus(
+            model: nil,
+            thinkingLevel: nil,
+            fastMode: nil,
+            setModel: .init(supported: false, reason: "model_catalog_unavailable"),
+            setThinking: .init(supported: false, reason: "model_metadata_unavailable"),
+            setFastMode: .init(supported: false, reason: "model_metadata_unavailable")
+        )
+        let cell = makeConfiguredCell(status: status)
+
+        _ = try footerSearchField(in: cell)
+        _ = try versionLabel(in: cell)
+        _ = try testMenuButton(in: cell)
+
+        let disabledButtons = footerActionButtons(in: cell)
+        #expect(SessionMetadataFooterCell.footerText(for: status) == "Model unavailable  ·  Thinking unavailable  ·  Fast unavailable")
+        #expect(disabledButtons.map(\.accessibilityLabel) == ["Model unavailable", "Thinking unavailable", "Fast unavailable"])
+        #expect(disabledButtons.allSatisfy { !$0.isEnabled })
     }
 
     @Test("Popup selectors mark current item with checkmark image instead of text")
@@ -376,7 +437,10 @@ struct SessionMetadataFooterHitTestingTests {
 }
 
 private func makeConfiguredCell(authMode: String? = nil, isDark: Bool = false, isSpatial: Bool = false) -> SessionMetadataFooterCell {
-    let status = makeStatus(authMode: authMode)
+    makeConfiguredCell(status: makeStatus(authMode: authMode), isDark: isDark, isSpatial: isSpatial)
+}
+
+private func makeConfiguredCell(status: SessionStatus?, isDark: Bool = false, isSpatial: Bool = false) -> SessionMetadataFooterCell {
     let cell = SessionMetadataFooterCell(
         frame: CGRect(
             x: 0,
@@ -391,18 +455,26 @@ private func makeConfiguredCell(authMode: String? = nil, isDark: Bool = false, i
     return cell
 }
 
-private func makeStatus(authMode: String? = nil) -> SessionStatus {
+private func makeStatus(
+    authMode: String? = nil,
+    model: String? = "gpt-5.5",
+    thinkingLevel: String? = "high",
+    fastMode: Bool? = true,
+    setModel: SessionStatus.Capability? = .init(supported: true, reason: nil),
+    setThinking: SessionStatus.Capability? = .init(supported: true, reason: nil),
+    setFastMode: SessionStatus.Capability? = .init(supported: true, reason: nil)
+) -> SessionStatus {
     SessionStatus(
         sessionKey: "agent:main:clawline:user:s_test",
         display: .init(
-            model: "gpt-5.5",
+            model: model,
             fallbackModels: ["gpt-5.5", "claude-sonnet-4.6"],
             provider: "openai",
             harness: nil,
             authMode: authMode,
             reasoningLevel: nil,
-            thinkingLevel: "high",
-            fastMode: true,
+            thinkingLevel: thinkingLevel,
+            fastMode: fastMode,
             mode: nil,
             verbosity: nil
         ),
@@ -417,10 +489,10 @@ private func makeStatus(authMode: String? = nil) -> SessionStatus {
         approval: nil,
         capabilities: .init(
             cancelCurrentRun: nil,
-            setModel: .init(supported: true, reason: nil),
-            setThinking: .init(supported: true, reason: nil),
+            setModel: setModel,
+            setThinking: setThinking,
             setReasoning: nil,
-            setFastMode: .init(supported: true, reason: nil),
+            setFastMode: setFastMode,
             setMode: nil,
             setVerbosity: nil,
             canCancelCurrentRun: nil,
@@ -495,6 +567,22 @@ private func footerSearchField(in cell: SessionMetadataFooterCell) throws -> UIT
     try #require(
         allSubviews(in: cell).compactMap { $0 as? UITextField }
             .first { $0.accessibilityLabel == "Search current stream" }
+    )
+}
+
+@MainActor
+private func versionLabel(in cell: SessionMetadataFooterCell) throws -> UILabel {
+    try #require(
+        allSubviews(in: cell).compactMap { $0 as? UILabel }
+            .first { $0.text == SessionMetadataFooterCell.versionBuildText() }
+    )
+}
+
+@MainActor
+private func testMenuButton(in cell: SessionMetadataFooterCell) throws -> UIButton {
+    try #require(
+        allSubviews(in: cell).compactMap { $0 as? UIButton }
+            .first { $0.accessibilityLabel == "Test menu" }
     )
 }
 
@@ -581,13 +669,18 @@ private func sampledTextPixels(in image: UIImage, frame: CGRect) throws -> (coun
 
 @MainActor
 private func footerButtons(in cell: SessionMetadataFooterCell) throws -> [UIButton] {
-    let buttons = allSubviews(in: cell)
-        .compactMap { $0 as? UIButton }
+    let buttons = footerActionButtons(in: cell)
         .filter { $0.isEnabled }
+    #expect(buttons.map(\.accessibilityLabel) == ["gpt-5.5", "Thinking high", "Fast on"])
+    return try #require(buttons.count == 3 ? buttons : nil)
+}
+
+@MainActor
+private func footerActionButtons(in cell: SessionMetadataFooterCell) -> [UIButton] {
+    allSubviews(in: cell)
+        .compactMap { $0 as? UIButton }
         .filter { $0.accessibilityLabel != "Test menu" }
         .sorted {
             $0.convert($0.bounds, to: cell).minX < $1.convert($1.bounds, to: cell).minX
         }
-    #expect(buttons.map(\.accessibilityLabel) == ["gpt-5.5", "Thinking high", "Fast on"])
-    return try #require(buttons.count == 3 ? buttons : nil)
 }

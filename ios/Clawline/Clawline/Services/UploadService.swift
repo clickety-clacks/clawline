@@ -36,12 +36,7 @@ final class UploadService: UploadServicing {
             throw AttachmentError.missingAuth
         }
 
-        var request = URLRequest(url: ProviderHTTPURLResolver.uploadURL(from: baseURL))
-        request.httpMethod = "POST"
         let boundary = "Boundary-" + UUID().uuidString
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-
         let body = makeMultipartBody(
             boundary: boundary,
             fieldName: "file",
@@ -49,19 +44,14 @@ final class UploadService: UploadServicing {
             mimeType: mimeType,
             data: data
         )
-        request.httpBody = body
 
-        let responseData: Data
-        let response: URLResponse
-        do {
-            (responseData, response) = try await session.data(for: request)
-        } catch {
-            logger.error("asset upload request failed error=\(error.localizedDescription, privacy: .public)")
-            throw error
-        }
-        guard let httpResponse = response as? HTTPURLResponse else {
-            logger.error("asset upload returned non-HTTP response")
-            throw AttachmentError.networkFailure
+        let (responseData, httpResponse) = try await performWithTransportFallback(baseURL: baseURL) { apiBase in
+            var request = URLRequest(url: ProviderHTTPURLResolver.uploadURL(fromAPIBase: apiBase))
+            request.httpMethod = "POST"
+            request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.httpBody = body
+            return request
         }
 
         guard (200..<300).contains(httpResponse.statusCode) else {
@@ -106,16 +96,13 @@ final class UploadService: UploadServicing {
             throw AttachmentError.missingAuth
         }
 
-        let downloadURL = try ProviderHTTPURLResolver.downloadURL(from: baseURL, assetId: assetId)
-        logger.info("asset download url=\(downloadURL.absoluteString, privacy: .public)")
-
-        var request = URLRequest(url: downloadURL)
-        request.httpMethod = "GET"
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-
-        let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw AttachmentError.networkFailure
+        let (data, httpResponse) = try await performWithTransportFallback(baseURL: baseURL) { apiBase in
+            let downloadURL = try ProviderHTTPURLResolver.downloadURL(fromAPIBase: apiBase, assetId: assetId)
+            self.logger.info("asset download url=\(downloadURL.absoluteString, privacy: .public)")
+            var request = URLRequest(url: downloadURL)
+            request.httpMethod = "GET"
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            return request
         }
         logger.info("asset download status=\(httpResponse.statusCode, privacy: .public) bytes=\(data.count, privacy: .public)")
         guard (200..<300).contains(httpResponse.statusCode) else {
@@ -128,6 +115,52 @@ final class UploadService: UploadServicing {
             throw AttachmentError.networkFailure
         }
         return data
+    }
+
+    // Last transport candidate that produced an HTTP response; tried first on
+    // subsequent requests so a working direct-HTTP fallback is not re-penalized
+    // by a dead or incomplete HTTPS front on every call.
+    private var stickyAPIBaseURL: URL?
+
+    private func performWithTransportFallback(
+        baseURL: URL,
+        makeRequest: (URL) throws -> URLRequest
+    ) async throws -> (Data, HTTPURLResponse) {
+        var candidates = ProviderHTTPURLResolver.apiBaseURLCandidates(from: baseURL)
+        if let sticky = stickyAPIBaseURL, let stickyIndex = candidates.firstIndex(of: sticky), stickyIndex > 0 {
+            candidates.swapAt(0, stickyIndex)
+        }
+
+        var lastError: Swift.Error?
+        for (index, apiBase) in candidates.enumerated() {
+            let isLastCandidate = index == candidates.count - 1
+            let request = try makeRequest(apiBase)
+            let data: Data
+            let response: URLResponse
+            do {
+                (data, response) = try await session.data(for: request)
+            } catch let error as URLError {
+                if error.code == .cancelled { throw error }
+                logger.error("asset transport failed base=\(apiBase.absoluteString, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+                lastError = error
+                if isLastCandidate { break }
+                continue
+            }
+            guard let httpResponse = response as? HTTPURLResponse else {
+                logger.error("asset transport returned non-HTTP response")
+                throw AttachmentError.networkFailure
+            }
+            if !isLastCandidate,
+               ProviderHTTPURLResolver.isTransportGapResponse(statusCode: httpResponse.statusCode, data: data) {
+                logger.error("asset transport gap base=\(apiBase.absoluteString, privacy: .public) status=\(httpResponse.statusCode, privacy: .public)")
+                lastError = AttachmentError.networkFailure
+                continue
+            }
+            stickyAPIBaseURL = apiBase
+            return (data, httpResponse)
+        }
+
+        throw lastError ?? AttachmentError.networkFailure
     }
 
     private func makeMultipartBody(boundary: String,

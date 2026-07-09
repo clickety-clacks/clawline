@@ -1051,6 +1051,137 @@ struct ProviderServiceTests {
         #expect(requestBox.authorization == "Bearer jwt")
     }
 
+    @Test("API base URL candidates prefer HTTPS front then direct HTTP")
+    func apiBaseURLCandidatesPreferHTTPSFrontThenDirectHTTP() {
+        let baseURL = URL(string: "http://100.85.66.60:18800")!
+        let candidates = ProviderHTTPURLResolver.apiBaseURLCandidates(from: baseURL)
+        #expect(candidates.map(\.absoluteString) == [
+            "https://tars.tail4105e8.ts.net:19443",
+            "http://100.85.66.60:18800"
+        ])
+
+        let localBase = URL(string: "http://127.0.0.1:18800")!
+        #expect(ProviderHTTPURLResolver.apiBaseURLCandidates(from: localBase) == [localBase])
+    }
+
+    @Test("Transport gap classification separates front gaps from provider errors")
+    func transportGapClassificationSeparatesFrontGapsFromProviderErrors() {
+        let plainNotFound = Data("not found".utf8)
+        let providerEnvelope = Data(#"{"error":{"code":"stream_not_found","message":"Stream not found"}}"#.utf8)
+        let uploadEnvelope = Data(#"{"type":"error","code":"auth_failed","message":"Missing authorization"}"#.utf8)
+
+        #expect(ProviderHTTPURLResolver.isTransportGapResponse(statusCode: 404, data: plainNotFound))
+        #expect(ProviderHTTPURLResolver.isTransportGapResponse(statusCode: 404, data: Data()))
+        #expect(ProviderHTTPURLResolver.isTransportGapResponse(statusCode: 502, data: providerEnvelope))
+        #expect(!ProviderHTTPURLResolver.isTransportGapResponse(statusCode: 404, data: providerEnvelope))
+        #expect(!ProviderHTTPURLResolver.isTransportGapResponse(statusCode: 404, data: uploadEnvelope))
+        #expect(!ProviderHTTPURLResolver.isTransportGapResponse(statusCode: 401, data: plainNotFound))
+        #expect(!ProviderHTTPURLResolver.isTransportGapResponse(statusCode: 200, data: plainNotFound))
+    }
+
+    @MainActor
+    @Test("Stream request falls back to direct HTTP when the HTTPS front omits the route")
+    func streamRequestFallsBackToDirectHTTPWhenFrontOmitsRoute() async throws {
+        let baseURL = URL(string: "http://100.85.66.60:18800")!
+        final class RequestBox: @unchecked Sendable {
+            var urls: [String] = []
+        }
+        let requestBox = RequestBox()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        let streamsJSON = #"""
+        {
+          "streams": [
+            {
+              "sessionKey": "agent:main:clawline:flynn:s_direct",
+              "displayName": "Direct",
+              "kind": "main",
+              "orderIndex": 0,
+              "isBuiltIn": true,
+              "createdAt": 1700000000000,
+              "updatedAt": 1700000000000
+            }
+          ]
+        }
+        """#.data(using: .utf8) ?? Data()
+        HTTPStubURLProtocol.requestHandler = { request in
+            let urlString = request.url?.absoluteString ?? ""
+            requestBox.urls.append(urlString)
+            if urlString.hasPrefix("https://tars.tail4105e8.ts.net:19443") {
+                return (
+                    HTTPURLResponse(
+                        url: request.url ?? baseURL,
+                        statusCode: 404,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "text/plain"]
+                    )!,
+                    Data("not found".utf8)
+                )
+            }
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                streamsJSON
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let client = StreamAPIClient(baseURLProvider: { baseURL }, session: URLSession(configuration: configuration))
+
+        let streams = try await client.fetchStreams(token: "jwt")
+
+        #expect(streams.map(\.sessionKey) == ["agent:main:clawline:flynn:s_direct"])
+        #expect(requestBox.urls == [
+            "https://tars.tail4105e8.ts.net:19443/api/streams",
+            "http://100.85.66.60:18800/api/streams"
+        ])
+
+        // Sticky: the next request should try the proven direct base first.
+        let sessions = try await client.fetchStreams(token: "jwt")
+        #expect(sessions.count == 1)
+        #expect(requestBox.urls.count == 3)
+        #expect(requestBox.urls[2] == "http://100.85.66.60:18800/api/streams")
+    }
+
+    @MainActor
+    @Test("Provider error envelopes do not trigger direct HTTP fallback")
+    func providerErrorEnvelopesDoNotTriggerDirectHTTPFallback() async throws {
+        let baseURL = URL(string: "http://100.85.66.60:18800")!
+        final class RequestBox: @unchecked Sendable {
+            var urls: [String] = []
+        }
+        let requestBox = RequestBox()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            requestBox.urls.append(request.url?.absoluteString ?? "")
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(#"{"error":{"code":"stream_not_found","message":"Stream not found"}}"#.utf8)
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let client = StreamAPIClient(baseURLProvider: { baseURL }, session: URLSession(configuration: configuration))
+
+        do {
+            _ = try await client.deleteStream(sessionKey: "agent:x", idempotencyKey: nil, token: "jwt")
+            #expect(Bool(false), "Expected StreamAPIError")
+        } catch let error as StreamAPIError {
+            #expect(error.code == "stream_not_found")
+            #expect(error.statusCode == 404)
+        }
+        #expect(requestBox.urls.count == 1)
+        #expect(requestBox.urls[0].hasPrefix("https://tars.tail4105e8.ts.net:19443"))
+    }
+
     @MainActor
     @Test("Upload and download preserve localhost HTTP provider base")
     func uploadAndDownloadPreserveLocalhostHTTPProviderBase() async throws {

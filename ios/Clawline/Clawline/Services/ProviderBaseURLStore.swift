@@ -115,15 +115,15 @@ enum ProviderWebSocketURLBuilder {
 }
 
 enum ProviderHTTPURLResolver {
-    static func uploadURL(from baseURL: URL) -> URL {
-        apiBaseURL(from: baseURL).appendingPathComponent("upload")
+    static func uploadURL(fromAPIBase apiBase: URL) -> URL {
+        apiBase.appendingPathComponent("upload")
     }
 
-    static func downloadURL(from baseURL: URL, assetId: String) throws -> URL {
+    static func downloadURL(fromAPIBase apiBase: URL, assetId: String) throws -> URL {
         guard !assetId.isEmpty else {
             throw AttachmentError.invalidData
         }
-        guard var components = URLComponents(url: apiBaseURL(from: baseURL), resolvingAgainstBaseURL: false) else {
+        guard var components = URLComponents(url: apiBase, resolvingAgainstBaseURL: false) else {
             throw AttachmentError.invalidData
         }
         guard let encodedAssetId = encodePathComponent(assetId) else {
@@ -155,6 +155,34 @@ enum ProviderHTTPURLResolver {
             components.port = 19443
         }
         return components.url ?? baseURL
+    }
+
+    /// Ordered transport candidates for provider HTTP APIs: the HTTPS-mapped
+    /// front first when one applies, then the direct provider base URL.
+    /// Installs must not require the HTTPS front; callers fall back to the
+    /// next candidate on transport failure or a front gap response.
+    static func apiBaseURLCandidates(from baseURL: URL) -> [URL] {
+        let preferred = apiBaseURL(from: baseURL)
+        guard preferred != baseURL else { return [baseURL] }
+        return [preferred, baseURL]
+    }
+
+    /// A gap response comes from an HTTPS front that does not forward the
+    /// requested route (or cannot reach the provider), as opposed to a real
+    /// provider API error, which is always a JSON envelope
+    /// (`{"error":{...}}` or `{"type":"error",...}`).
+    static func isTransportGapResponse(statusCode: Int, data: Data) -> Bool {
+        switch statusCode {
+        case 502, 503, 504:
+            return true
+        case 404, 405:
+            guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return true
+            }
+            return object["error"] == nil && object["type"] == nil
+        default:
+            return false
+        }
     }
 
     private static func isLocalHTTPHost(_ host: String) -> Bool {

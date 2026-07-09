@@ -157,6 +157,7 @@ struct TerminalBubbleUIKitViewTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: .short,
             metrics: ChatFlowTheme.Metrics(isCompact: false),

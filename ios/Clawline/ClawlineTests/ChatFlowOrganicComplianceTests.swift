@@ -1021,7 +1021,6 @@ struct ChatFlowOrganicComplianceTests {
         #expect(message.timestamp.timeIntervalSince1970 == 1704672000)
         #expect(message.streaming == false)
         #expect(message.sessionKey == "agent:main:clawline:user:main")
-        #expect(message.stream == .personal)
     }
 
     @Test("Doc §7: Client payload excludes role/timestamp")
@@ -1085,7 +1084,6 @@ struct ChatFlowOrganicComplianceTests {
         #expect(message.streaming == payload.streaming)
         #expect(message.attachments == payload.attachments)
         #expect(message.sessionKey == payload.sessionKey)
-        #expect(message.stream == SessionKey.stream(for: payload.sessionKey ?? adminSessionKey))
     }
 
     @Test("Doc §5: MessagePart.isTextual lives with model")

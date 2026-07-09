@@ -328,34 +328,8 @@ struct ProviderServiceTests {
     @Test("Chat connect reports adopted session keys during auth")
     @MainActor
     func chatConnectReportsAdoptedSessionKeysDuringAuth() async throws {
-        SessionRegistry.shared.replace(with: [])
-        defer { SessionRegistry.shared.replace(with: []) }
-
         let adoptedKey = "agent:main:openclaw:user:s_trackme"
-        SessionRegistry.shared.upsert(
-            StreamSession(
-                sessionKey: adoptedKey,
-                displayName: "Tracked Session",
-                kind: "custom",
-                orderIndex: 1,
-                isBuiltIn: false,
-                createdAt: Date(),
-                updatedAt: Date(),
-                trackingMode: .adopted
-            )
-        )
-        SessionRegistry.shared.upsert(
-            StreamSession(
-                sessionKey: "agent:main:clawline:user:main",
-                displayName: "Personal",
-                kind: "main",
-                orderIndex: 0,
-                isBuiltIn: true,
-                createdAt: Date(),
-                updatedAt: Date(),
-                trackingMode: .serverManaged
-            )
-        )
+        let adoptedSessionKeys = [adoptedKey]
 
         let mockSocket = MockWebSocketClient()
         let connector = MockWebSocketConnector(client: mockSocket)
@@ -364,7 +338,7 @@ struct ProviderServiceTests {
             connector: connector,
             deviceId: "device_123",
             baseURLProvider: { baseURL },
-            adoptedSessionKeysProvider: { SessionRegistry.shared.adoptedSessionKeys() }
+            adoptedSessionKeysProvider: { adoptedSessionKeys }
         )
 
         Task {

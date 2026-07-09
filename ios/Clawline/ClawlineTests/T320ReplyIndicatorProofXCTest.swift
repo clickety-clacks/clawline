@@ -221,6 +221,7 @@ private func makeConfiguredBubble(
 
     bubble.configure(
         message: message,
+        stream: .personal,
         presentation: presentation,
         sizeClass: .short,
         metrics: metrics,

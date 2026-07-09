@@ -15,6 +15,7 @@ import Foundation
 @testable import Clawline
 
 @MainActor
+@Suite(.serialized)
 struct StreamPopupFocusCoordinatorTests {
     @Test("R1136-ARCH-04: beginPresentation assigns a fresh presentation ID and clears stale state")
     func beginPresentationAssignsFreshPresentationID() {

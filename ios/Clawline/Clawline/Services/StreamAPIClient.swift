@@ -120,6 +120,10 @@ final class StreamAPIClient {
     private let session: URLSession
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    // Last transport candidate that produced a provider-shaped response; tried
+    // first on subsequent requests so a working direct-HTTP fallback is not
+    // re-penalized by a dead or incomplete HTTPS front on every call.
+    private var stickyAPIBaseURL: URL?
     private static let urlPathComponentAllowed: CharacterSet = {
         CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
     }()
@@ -238,40 +242,71 @@ final class StreamAPIClient {
         guard let baseURL = baseURLProvider() else {
             throw ProviderChatService.Error.missingBaseURL
         }
-        let apiBaseURL = ProviderHTTPURLResolver.apiBaseURL(from: baseURL)
-        guard let url = endpointURL(baseURL: apiBaseURL, path: path, queryItems: queryItems) else {
-            throw ProviderChatService.Error.missingBaseURL
-        }
-        var request = URLRequest(url: url)
-        request.httpMethod = method
-        request.timeoutInterval = 30
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if let token, !token.isEmpty {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        var candidates = ProviderHTTPURLResolver.apiBaseURLCandidates(from: baseURL)
+        if let sticky = stickyAPIBaseURL, let stickyIndex = candidates.firstIndex(of: sticky), stickyIndex > 0 {
+            candidates.swapAt(0, stickyIndex)
         }
 
-        if let body {
-            request.httpBody = try encoder.encode(body)
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        }
+        var lastError: Swift.Error?
+        for (index, apiBaseURL) in candidates.enumerated() {
+            let isLastCandidate = index == candidates.count - 1
+            guard let url = endpointURL(baseURL: apiBaseURL, path: path, queryItems: queryItems) else {
+                throw ProviderChatService.Error.missingBaseURL
+            }
+            var request = URLRequest(url: url)
+            request.httpMethod = method
+            request.timeoutInterval = 30
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            if let token, !token.isEmpty {
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            }
 
-        let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw ProviderChatService.Error.notConnected
-        }
+            if let body {
+                request.httpBody = try encoder.encode(body)
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            }
 
-        guard (200...299).contains(httpResponse.statusCode) else {
-            if let envelope = try? decoder.decode(ErrorEnvelope.self, from: data) {
-                throw StreamAPIError(
-                    code: envelope.error.code,
-                    message: envelope.error.message,
+            let data: Data
+            let response: URLResponse
+            do {
+                (data, response) = try await session.data(for: request)
+            } catch let error as URLError {
+                if error.code == .cancelled { throw error }
+                lastError = error
+                if isLastCandidate { break }
+                continue
+            }
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw ProviderChatService.Error.notConnected
+            }
+
+            if !isLastCandidate,
+               ProviderHTTPURLResolver.isTransportGapResponse(statusCode: httpResponse.statusCode, data: data) {
+                lastError = StreamAPIError(
+                    code: "http_\(httpResponse.statusCode)",
+                    message: nil,
                     statusCode: httpResponse.statusCode
                 )
+                continue
             }
-            throw StreamAPIError(code: "http_\(httpResponse.statusCode)", message: nil, statusCode: httpResponse.statusCode)
+
+            stickyAPIBaseURL = apiBaseURL
+
+            guard (200...299).contains(httpResponse.statusCode) else {
+                if let envelope = try? decoder.decode(ErrorEnvelope.self, from: data) {
+                    throw StreamAPIError(
+                        code: envelope.error.code,
+                        message: envelope.error.message,
+                        statusCode: httpResponse.statusCode
+                    )
+                }
+                throw StreamAPIError(code: "http_\(httpResponse.statusCode)", message: nil, statusCode: httpResponse.statusCode)
+            }
+
+            return try decoder.decode(Response.self, from: data)
         }
 
-        return try decoder.decode(Response.self, from: data)
+        throw lastError ?? ProviderChatService.Error.notConnected
     }
 
     private func encodePathComponent(_ value: String) -> String {

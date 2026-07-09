@@ -186,6 +186,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     /// Optional session override - if provided, shows messages for this session instead of activeSessionKey
     var sessionKey: String?
     var sessionStatus: SessionStatus?
+    var sessionStatusUnavailable: Bool = false
     var streamSearchQuery: String = ""
     var forceReReadGeneration: Int = 0
     var sendIndicatorRevision: Int = 0
@@ -237,6 +238,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             onExpand: onExpand,
             sessionKey: sessionKey,
             sessionStatus: sessionStatus,
+            sessionStatusUnavailable: sessionStatusUnavailable,
             streamSearchQuery: streamSearchQuery,
             forceReReadGeneration: forceReReadGeneration,
             sendIndicatorRevision: sendIndicatorRevision,
@@ -278,6 +280,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             onExpand: onExpand,
             sessionKey: sessionKey,
             sessionStatus: sessionStatus,
+            sessionStatusUnavailable: sessionStatusUnavailable,
             streamSearchQuery: streamSearchQuery,
             forceReReadGeneration: forceReReadGeneration,
             sendIndicatorRevision: sendIndicatorRevision,
@@ -323,6 +326,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let onExpand: ((Message) -> Void)?
         let sessionKey: String?
         let sessionStatus: SessionStatus?
+        let sessionStatusUnavailable: Bool
         let streamSearchQuery: String
         let forceReReadGeneration: Int
         let sendIndicatorRevision: Int
@@ -545,6 +549,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var keepsKeyboardPinned: Bool = false
     private var isTypingActive: Bool = false
     private var sessionStatus: SessionStatus?
+    private var sessionStatusUnavailable = false
     private var liveProgress: LiveAgentProgress?
     private var topInset: CGFloat = 0
     private var truncationBottomInset: CGFloat = 0
@@ -2024,6 +2029,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onExpand: onExpand,
             sessionKey: channelOverride,
             sessionStatus: sessionStatus,
+            sessionStatusUnavailable: sessionStatusUnavailable,
             streamSearchQuery: streamSearchQuery,
             forceReReadGeneration: readState(for: sessionKey).lastSeenForceReReadGeneration,
             sendIndicatorRevision: currentSendIndicatorRevision,
@@ -2317,6 +2323,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onExpand: onExpand,
             sessionKey: channelOverride,
             sessionStatus: sessionStatus,
+            sessionStatusUnavailable: sessionStatusUnavailable,
             streamSearchQuery: streamSearchQuery,
             forceReReadGeneration: 0,
             sendIndicatorRevision: viewModel.sendIndicatorRevision,
@@ -2370,6 +2377,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 onExpand: request.onExpand,
                 sessionKey: request.sessionKey,
                 sessionStatus: request.sessionStatus,
+                sessionStatusUnavailable: request.sessionStatusUnavailable,
                 streamSearchQuery: request.streamSearchQuery,
                 forceReReadGeneration: request.forceReReadGeneration,
                 sendIndicatorRevision: request.sendIndicatorRevision,
@@ -2494,6 +2502,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         onExpand: ((Message) -> Void)? = nil,
         sessionKey: String? = nil,
         sessionStatus: SessionStatus? = nil,
+        sessionStatusUnavailable: Bool = false,
         streamSearchQuery: String = "",
         forceReReadGeneration: Int = 0,
         sendIndicatorRevision: Int = 0,
@@ -2527,6 +2536,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onExpand: onExpand,
             sessionKey: sessionKey,
             sessionStatus: sessionStatus,
+            sessionStatusUnavailable: sessionStatusUnavailable,
             streamSearchQuery: streamSearchQuery,
             forceReReadGeneration: forceReReadGeneration,
             sendIndicatorRevision: sendIndicatorRevision,
@@ -2564,6 +2574,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         loadViewIfNeeded()
         let previousLastMessageId = lastMessageId
         let previousSessionStatus = self.sessionStatus
+        let previousSessionStatusUnavailable = self.sessionStatusUnavailable
         let previousLiveProgress = self.liveProgress
         let previousStreamSearchQuery = self.streamSearchQuery
         let previousEffectiveSessionKey = callbackSessionKey()
@@ -2579,6 +2590,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         self.keepsKeyboardPinned = keepsKeyboardPinned
         self.isTypingActive = isTypingActive
         self.sessionStatus = sessionStatus
+        self.sessionStatusUnavailable = sessionStatusUnavailable
         self.liveProgress = nextLiveProgress
         self.currentSendIndicatorRevision = request.sendIndicatorRevision
         self.onExpand = onExpand
@@ -2820,7 +2832,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             changedIds.forEach { invalidateBubbleSizingV2Cache(for: $0) }
             removeBubbleV2PreviewVersions(for: changedIds)
         }
-        if previousSessionStatus != sessionStatus,
+        if previousSessionStatus != sessionStatus || previousSessionStatusUnavailable != sessionStatusUnavailable,
            snapshot.indexOfItem(SessionMetadataFooterCell.itemId) != nil,
            oldItemIds.contains(SessionMetadataFooterCell.itemId)
         {
@@ -4155,6 +4167,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 ) as? SessionMetadataFooterCell
                 cell?.configure(
                     status: self.sessionStatus,
+                    statusUnavailable: self.sessionStatusUnavailable,
                     isDark: self.currentIsDark,
                     onSelect: self.onSessionControlSelected,
                     onTestMenuSelect: self.onFooterTestMenuSelected,
@@ -6555,6 +6568,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
 
     func configure(
         status: SessionStatus?,
+        statusUnavailable: Bool = false,
         isDark: Bool,
         isSpatial: Bool = SessionMetadataFooterCell.isSpatialPlatform,
         onSelect: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?,
@@ -6572,7 +6586,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             versionStackView.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
-        let items = Self.footerItems(for: status, isDark: isDark)
+        let items = Self.footerItems(for: status, isUnavailable: statusUnavailable, isDark: isDark)
         for item in items {
             let itemColor = isSpatial ? textColor : (item.textColor ?? textColor)
             controlsStackView.addArrangedSubview(footerView(for: item, status: status, color: itemColor, onSelect: onSelect))
@@ -6580,7 +6594,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         versionStackView.addArrangedSubview(versionLabel(color: textColor))
         versionStackView.addArrangedSubview(testMenuButton(color: textColor, onSelect: onTestMenuSelect))
         configureSearchField(query: searchQuery, textColor: textColor, isDark: isDark, isSpatial: isSpatial)
-        accessibilityLabel = Self.footerText(for: status)
+        accessibilityLabel = Self.footerText(for: status, isUnavailable: statusUnavailable)
         accessibilityTraits = items.contains { $0.action != nil && !$0.options.isEmpty } ? .button : .staticText
     }
 
@@ -6621,14 +6635,17 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         }
     }
 
-    static func footerText(for status: SessionStatus?) -> String? {
-        let parts = footerItems(for: status).map(\.text)
+    static func footerText(for status: SessionStatus?, isUnavailable: Bool = false) -> String? {
+        let parts = footerItems(for: status, isUnavailable: isUnavailable).map(\.text)
         guard !parts.isEmpty else { return nil }
         return parts.joined(separator: "  ·  ")
     }
 
-    private static func footerItems(for status: SessionStatus?, isDark: Bool = false) -> [FooterItem] {
+    private static func footerItems(for status: SessionStatus?, isUnavailable: Bool = false, isDark: Bool = false) -> [FooterItem] {
         guard let status else {
+            if isUnavailable {
+                return metadataPlaceholderFooterItems(state: "unavailable", reason: "session_status_unavailable")
+            }
             return metadataPlaceholderFooterItems(state: "loading", reason: "session_status_loading")
         }
         let display = status.display

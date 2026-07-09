@@ -1147,6 +1147,132 @@ struct ProviderServiceTests {
     }
 
     @MainActor
+    @Test("Sticky base does not pin the client to a base that goes bad")
+    func stickyBaseDoesNotPinClientToBadBase() async throws {
+        let baseURL = URL(string: "http://100.85.66.60:18800")!
+        final class StubState: @unchecked Sendable {
+            var urls: [String] = []
+            var directIsHealthy = true
+        }
+        let state = StubState()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        let streamsJSON = #"""
+        {
+          "streams": [
+            {
+              "sessionKey": "agent:main:clawline:flynn:s_recovery",
+              "displayName": "Recovery",
+              "kind": "main",
+              "orderIndex": 0,
+              "isBuiltIn": true,
+              "createdAt": 1700000000000,
+              "updatedAt": 1700000000000
+            }
+          ]
+        }
+        """#.data(using: .utf8) ?? Data()
+        HTTPStubURLProtocol.requestHandler = { request in
+            let urlString = request.url?.absoluteString ?? ""
+            state.urls.append(urlString)
+            let isDirect = urlString.hasPrefix("http://100.85.66.60:18800")
+            let healthy = isDirect ? state.directIsHealthy : !state.directIsHealthy
+            if healthy {
+                return (
+                    HTTPURLResponse(
+                        url: request.url ?? baseURL,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )!,
+                    streamsJSON
+                )
+            }
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "text/plain"]
+                )!,
+                Data("not found".utf8)
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let client = StreamAPIClient(baseURLProvider: { baseURL }, session: URLSession(configuration: configuration))
+
+        // Phase 1: HTTPS front is gapped, direct is healthy -> falls back, sticks direct.
+        _ = try await client.fetchStreams(token: "jwt")
+        #expect(state.urls.count == 2)
+
+        // Phase 2: direct goes bad, HTTPS front recovers -> ladder must recover, not pin.
+        state.directIsHealthy = false
+        let streams = try await client.fetchStreams(token: "jwt")
+        #expect(streams.count == 1)
+        #expect(state.urls.count == 4)
+        #expect(state.urls[2] == "http://100.85.66.60:18800/api/streams")
+        #expect(state.urls[3] == "https://tars.tail4105e8.ts.net:19443/api/streams")
+
+        // Phase 3: sticky updated to the recovered HTTPS front.
+        let again = try await client.fetchStreams(token: "jwt")
+        #expect(again.count == 1)
+        #expect(state.urls.count == 5)
+        #expect(state.urls[4] == "https://tars.tail4105e8.ts.net:19443/api/streams")
+    }
+
+    @MainActor
+    @Test("Download falls back to direct HTTP when the HTTPS front omits the route")
+    func downloadFallsBackToDirectHTTPWhenFrontOmitsRoute() async throws {
+        let baseURL = URL(string: "http://100.85.66.60:18800")!
+        final class RequestBox: @unchecked Sendable {
+            var urls: [String] = []
+        }
+        let requestBox = RequestBox()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            let urlString = request.url?.absoluteString ?? ""
+            requestBox.urls.append(urlString)
+            if urlString.hasPrefix("https://tars.tail4105e8.ts.net:19443") {
+                return (
+                    HTTPURLResponse(
+                        url: request.url ?? baseURL,
+                        statusCode: 404,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "text/plain"]
+                    )!,
+                    Data("not found".utf8)
+                )
+            }
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/octet-stream"]
+                )!,
+                Data([0xAB, 0xCD])
+            )
+        }
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let service = UploadService(
+            auth: auth,
+            baseURLProvider: { baseURL },
+            session: URLSession(configuration: configuration)
+        )
+
+        let data = try await service.download(assetId: "asset1")
+
+        #expect(data == Data([0xAB, 0xCD]))
+        #expect(requestBox.urls == [
+            "https://tars.tail4105e8.ts.net:19443/download/asset1",
+            "http://100.85.66.60:18800/download/asset1"
+        ])
+    }
+
+    @MainActor
     @Test("Provider error envelopes do not trigger direct HTTP fallback")
     func providerErrorEnvelopesDoNotTriggerDirectHTTPFallback() async throws {
         let baseURL = URL(string: "http://100.85.66.60:18800")!

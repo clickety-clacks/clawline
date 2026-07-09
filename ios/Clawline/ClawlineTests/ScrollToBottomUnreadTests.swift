@@ -113,8 +113,8 @@ struct ScrollToBottomUnreadTests {
         #expect(shouldCompensate == false)
     }
 
-    @Test("SBB resting bottom excludes footer reveal range")
-    func sbbRestingBottomExcludesFooterRevealRange() {
+    @Test("SBB resting bottom excludes footer reveal range while footer stays visible")
+    func sbbRestingBottomExcludesFooterRevealRangeWhileFooterStaysVisible() {
         let contentHeight: CGFloat = 1_200
         let boundsHeight: CGFloat = 700
         let topInset: CGFloat = 40
@@ -140,20 +140,21 @@ struct ScrollToBottomUnreadTests {
         )
 
         #expect(trueBottom - restingBottom == footerHeight)
+        #expect(MessageFlowCollectionViewController.hidesFooterAtRestingBottom == false)
         #expect(MessageFlowCollectionViewController.footerRevealAlpha(
             contentOffsetY: restingBottom,
             restingBottomOffsetY: restingBottom,
             trueBottomOffsetY: trueBottom,
-        ) == 0)
+        ) == 1)
         #expect(MessageFlowCollectionViewController.footerRevealAlpha(
             contentOffsetY: restingBottom - 1,
             restingBottomOffsetY: restingBottom,
             trueBottomOffsetY: trueBottom
-        ) == 0)
+        ) == 1)
     }
 
-    @Test("Spatial footer resting bottom excludes footer reveal range")
-    func spatialFooterRestingBottomExcludesFooterRevealRange() {
+    @Test("Spatial footer resting bottom includes footer content")
+    func spatialFooterRestingBottomIncludesFooterContent() {
         let contentHeight: CGFloat = 1_200
         let boundsHeight: CGFloat = 700
         let topInset: CGFloat = 40
@@ -164,7 +165,7 @@ struct ScrollToBottomUnreadTests {
             contentSizeHeight: contentHeight,
             footerHeight: footerHeight,
             hasFooter: true,
-            excludesFooterRevealRange: MessageFlowCollectionViewController.excludesFooterRevealRangeAtRestingBottom
+            excludesFooterRevealRange: false
         )
         let restingBottom = MessageFlowCollectionViewController.bottomOffsetMaxY(
             contentHeight: restingContentHeight,
@@ -179,19 +180,18 @@ struct ScrollToBottomUnreadTests {
             bottomInset: bottomInset
         )
 
-        #expect(MessageFlowCollectionViewController.excludesFooterRevealRangeAtRestingBottom)
-        #expect(MessageFlowCollectionViewController.hidesFooterAtRestingBottom)
-        #expect(trueBottom - restingBottom == footerHeight)
+        #expect(restingContentHeight == contentHeight)
+        #expect(restingBottom == trueBottom)
         #expect(MessageFlowCollectionViewController.footerRevealAlpha(
             contentOffsetY: restingBottom,
             restingBottomOffsetY: restingBottom,
             trueBottomOffsetY: trueBottom,
-            hidesFooterAtRestingBottom: MessageFlowCollectionViewController.hidesFooterAtRestingBottom
-        ) == 0)
+            hidesFooterAtRestingBottom: false
+        ) == 1)
     }
 
-    @Test("User scroll past SBB resting bottom reveals footer")
-    func userScrollPastSBBRestingBottomRevealsFooter() {
+    @Test("Legacy hidden footer policy fades in after SBB resting bottom")
+    func legacyHiddenFooterPolicyFadesInAfterSBBRestingBottom() {
         let restingBottom: CGFloat = 440
         let trueBottom: CGFloat = 500
 
@@ -199,26 +199,30 @@ struct ScrollToBottomUnreadTests {
             contentOffsetY: restingBottom,
             restingBottomOffsetY: restingBottom,
             trueBottomOffsetY: trueBottom,
+            hidesFooterAtRestingBottom: true
         ) == 0)
         #expect(MessageFlowCollectionViewController.footerRevealAlpha(
             contentOffsetY: restingBottom + 1,
             restingBottomOffsetY: restingBottom,
-            trueBottomOffsetY: trueBottom
+            trueBottomOffsetY: trueBottom,
+            hidesFooterAtRestingBottom: true
         ) > 0)
         #expect(MessageFlowCollectionViewController.footerRevealAlpha(
             contentOffsetY: (restingBottom + trueBottom) / 2,
             restingBottomOffsetY: restingBottom,
             trueBottomOffsetY: trueBottom,
+            hidesFooterAtRestingBottom: true
         ) == 0.5)
         #expect(MessageFlowCollectionViewController.footerRevealAlpha(
             contentOffsetY: trueBottom,
             restingBottomOffsetY: restingBottom,
-            trueBottomOffsetY: trueBottom
+            trueBottomOffsetY: trueBottom,
+            hidesFooterAtRestingBottom: true
         ) == 1)
     }
 
-    @Test("Initial footer cell alpha is resolved without waiting for scroll")
-    func initialFooterCellAlphaIsResolvedWithoutWaitingForScroll() {
+    @Test("Initial footer cell alpha is visible at normal resting bottom")
+    func initialFooterCellAlphaIsVisibleAtNormalRestingBottom() {
         let restingBottom: CGFloat = 440
         let trueBottom: CGFloat = 500
 
@@ -226,12 +230,12 @@ struct ScrollToBottomUnreadTests {
             contentOffsetY: restingBottom,
             restingBottomOffsetY: restingBottom,
             trueBottomOffsetY: trueBottom
-        ) == 0)
+        ) == 1)
         #expect(MessageFlowCollectionViewController.initialFooterCellAlpha(
             contentOffsetY: (restingBottom + trueBottom) / 2,
             restingBottomOffsetY: restingBottom,
             trueBottomOffsetY: trueBottom
-        ) == 0.5)
+        ) == 1)
         #expect(MessageFlowCollectionViewController.initialFooterCellAlpha(
             contentOffsetY: trueBottom,
             restingBottomOffsetY: restingBottom,

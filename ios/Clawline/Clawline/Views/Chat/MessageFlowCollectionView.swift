@@ -2596,6 +2596,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let previousLastMessageId = lastMessageId
         let previousSessionStatus = self.sessionStatus
         let previousLiveProgress = self.liveProgress
+        let previousStreamSearchQuery = self.streamSearchQuery
+        let previousEffectiveSessionKey = callbackSessionKey()
         let wasUserInteracting = isUserInteracting
         let wasPinnedToBottomIntent = sbbState.isPinnedToBottomIntent
         let previousSessionKey = channelOverride
@@ -2697,6 +2699,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if needsFullLayout {
             updateLayout()
         }
+
+        let shouldPreserveSearchScrollAnchor = previousEffectiveSessionKey == effectiveSessionKey
+            && previousStreamSearchQuery != streamSearchQuery
+            && previousLastMessageId != nil
+        let searchScrollAnchor = shouldPreserveSearchScrollAnchor && !wasPinnedToBottomIntent
+            ? captureStreamSearchViewportAnchor()
+            : nil
 
         // Use session override if provided, otherwise use active session messages.
         let messages = sessionKey.map { viewModel.messages(for: $0) } ?? viewModel.messages
@@ -2955,6 +2964,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 targetMessageId: morphTargetMessageId,
                 onApplied: { [weak self] in
                     afterSnapshotApplied()
+                    if shouldPreserveSearchScrollAnchor, wasPinnedToBottomIntent {
+                        self?.scheduleScrollToBottom(sessionKey: effectiveSessionKey, animated: false, attempts: 2)
+                    } else {
+                        self?.scheduleStreamSearchViewportAnchorRestoration(searchScrollAnchor)
+                    }
                     self?.scheduleBubbleSizingV2ViewportAnchorCompensation(expansionAnchor)
                 },
                 onAppliedSessionKey: effectiveSessionKey
@@ -2967,6 +2981,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 animationDuration: showOnlyUserMessagesAnimationDuration
             ) { [weak self] in
                 afterSnapshotApplied()
+                if shouldPreserveSearchScrollAnchor, wasPinnedToBottomIntent {
+                    self?.scheduleScrollToBottom(sessionKey: effectiveSessionKey, animated: false, attempts: 2)
+                } else {
+                    self?.scheduleStreamSearchViewportAnchorRestoration(searchScrollAnchor)
+                }
                 self?.scheduleBubbleSizingV2ViewportAnchorCompensation(expansionAnchor)
             }
         }
@@ -3109,11 +3128,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     static var excludesFooterRevealRangeAtRestingBottom: Bool {
+#if os(visionOS)
+        false
+#else
         true
+#endif
     }
 
     static var hidesFooterAtRestingBottom: Bool {
-        true
+        false
     }
 
     static func bottomOffsetMaxY(
@@ -3133,10 +3156,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         hidesFooterAtRestingBottom: Bool = MessageFlowCollectionViewController.hidesFooterAtRestingBottom
     ) -> CGFloat {
         guard restingBottomOffsetY.isFinite, trueBottomOffsetY.isFinite else { return 0 }
-        let revealDistance = trueBottomOffsetY - restingBottomOffsetY
-        if !hidesFooterAtRestingBottom, revealDistance <= 0 {
+        if !hidesFooterAtRestingBottom {
             return 1
         }
+        let revealDistance = trueBottomOffsetY - restingBottomOffsetY
         guard revealDistance > 0 else { return 0 }
         let revealedDistance = contentOffsetY - restingBottomOffsetY
         return min(1, max(0, revealedDistance / revealDistance))
@@ -6011,6 +6034,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let frameMinY: CGFloat
     }
 
+    private struct StreamSearchViewportAnchor {
+        let sessionKey: String
+        let generation: Int
+        let messageId: String?
+        let contentOffsetY: CGFloat
+        let frameMinY: CGFloat?
+    }
+
     private func captureBubbleSizingV2ViewportAnchor() -> BubbleSizingV2ViewportAnchor? {
         let visibleRect = CGRect(
             origin: collectionView.contentOffset,
@@ -6040,6 +6071,78 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             contentOffsetY: collectionView.contentOffset.y,
             frameMinY: anchor.1.minY
         )
+    }
+
+    private func captureStreamSearchViewportAnchor() -> StreamSearchViewportAnchor? {
+        guard let token = activeSessionGenerationToken() else { return nil }
+        let visibleRect = CGRect(
+            origin: collectionView.contentOffset,
+            size: collectionView.bounds.size
+        )
+        let epsilon: CGFloat = 0.5
+        let candidates = collectionView.visibleCells.compactMap { cell -> (String, CGRect)? in
+            guard let indexPath = collectionView.indexPath(for: cell),
+                  let id = dataSource.itemIdentifier(for: indexPath),
+                  !isNonMessageItemID(id)
+            else {
+                return nil
+            }
+            let frame = cell.frame
+            guard frame.minY >= visibleRect.minY + epsilon,
+                  frame.maxY <= visibleRect.maxY - epsilon
+            else {
+                return nil
+            }
+            return (id, frame)
+        }
+        let anchor = candidates.min(by: { $0.1.minY < $1.1.minY })
+        return StreamSearchViewportAnchor(
+            sessionKey: token.sessionKey,
+            generation: token.generation,
+            messageId: anchor?.0,
+            contentOffsetY: collectionView.contentOffset.y,
+            frameMinY: anchor?.1.minY
+        )
+    }
+
+    private func scheduleStreamSearchViewportAnchorRestoration(_ anchor: StreamSearchViewportAnchor?) {
+        guard let anchor else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard self.callbackSessionKey() == anchor.sessionKey else { return }
+            guard self.readState(for: anchor.sessionKey).restoreGeneration == anchor.generation else { return }
+
+            self.collectionView.layoutIfNeeded()
+            let inset = self.collectionView.contentInset
+            let minY = -inset.top
+            let maxY = max(minY, self.collectionView.contentSize.height - self.collectionView.bounds.height + inset.bottom)
+            guard minY.isFinite, maxY.isFinite else { return }
+
+            var targetY = anchor.contentOffsetY
+            if let messageId = anchor.messageId,
+               let frameMinY = anchor.frameMinY,
+               let indexPath = self.dataSource.indexPath(for: messageId),
+               let attrs = self.collectionView.layoutAttributesForItem(at: indexPath)
+            {
+                targetY += attrs.frame.minY - frameMinY
+            }
+            targetY = max(minY, min(targetY, maxY))
+            guard targetY.isFinite else { return }
+            guard abs(self.collectionView.contentOffset.y - targetY) > 0.5 else {
+                self.refreshLastKnownScrollSnapshot(sessionKey: anchor.sessionKey)
+                return
+            }
+            self.logScrollCall(
+                "streamSearchViewportAnchor",
+                sessionKey: anchor.sessionKey,
+                currentY: self.collectionView.contentOffset.y,
+                targetY: targetY,
+                animated: false,
+                reason: "anchorMessageId=\(anchor.messageId ?? "none") anchorOffsetY=\(self.formatScrollRestore(anchor.contentOffsetY))"
+            )
+            self.collectionView.setContentOffset(CGPoint(x: self.collectionView.contentOffset.x, y: targetY), animated: false)
+            self.refreshLastKnownScrollSnapshot(sessionKey: anchor.sessionKey)
+        }
     }
 
     private func scheduleBubbleSizingV2ViewportAnchorCompensation(_ anchor: BubbleSizingV2ViewportAnchor?) {
@@ -6149,6 +6252,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             return
         }
 
+        let isSearchActive = !streamSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let wasPinnedToBottomIntent = readState(for: effectiveSessionKey).sbbState.isPinnedToBottomIntent
+        let searchScrollAnchor = isSearchActive && !wasPinnedToBottomIntent ? captureStreamSearchViewportAnchor() : nil
         var snapshot = dataSource.snapshot()
         guard !readState(for: effectiveSessionKey).isShowingOnlyUserMessages else {
             snapshot.deleteAllItems()
@@ -6170,6 +6276,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             applyDiffableSnapshot(snapshot, animatingDifferences: false) { [weak self] in
                 self?.updateVisibleFooterAlpha()
                 self?.notifyTypingIndicatorAnchorFrameIfNeeded()
+                if isSearchActive, wasPinnedToBottomIntent {
+                    self?.scheduleScrollToBottom(sessionKey: effectiveSessionKey, animated: false, attempts: 2)
+                } else if isSearchActive {
+                    self?.scheduleStreamSearchViewportAnchorRestoration(searchScrollAnchor)
+                }
             }
             return
         }
@@ -6202,6 +6313,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         applyDiffableSnapshot(snapshot, animatingDifferences: false) { [weak self] in
             self?.updateVisibleFooterAlpha()
             self?.notifyTypingIndicatorAnchorFrameIfNeeded()
+            if isSearchActive, wasPinnedToBottomIntent {
+                self?.scheduleScrollToBottom(sessionKey: effectiveSessionKey, animated: false, attempts: 2)
+            } else if isSearchActive {
+                self?.scheduleStreamSearchViewportAnchorRestoration(searchScrollAnchor)
+            }
         }
     }
 
@@ -6527,12 +6643,11 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
     }
 
     static func height(for status: SessionStatus?) -> CGFloat {
-        guard footerText(for: status) != nil else { return 0 }
         return ceil(searchRowHeight + footerRowSpacing + actionRegionHeight + footerRowSpacing + versionRowHeight + topPadding + bottomPadding)
     }
 
     static func shouldAppendFooter(after itemIds: [String], status: SessionStatus?) -> Bool {
-        !itemIds.isEmpty && footerText(for: status) != nil
+        !itemIds.isEmpty
     }
 
     private func configureSearchField(query: String, textColor: UIColor, isDark: Bool, isSpatial: Bool) {
@@ -6571,7 +6686,9 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
     }
 
     private static func footerItems(for status: SessionStatus?, isDark: Bool = false) -> [FooterItem] {
-        guard let status else { return [] }
+        guard let status else {
+            return metadataPlaceholderFooterItems(state: "loading", reason: "session_status_loading")
+        }
         let display = status.display
         let capabilities = status.capabilities
         let modelCapability = capability(
@@ -6595,7 +6712,12 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                 textColor: nil
             ),
             FooterItem(
-                text: "Thinking \(thinkingValue ?? reasoningValue ?? "Unknown")",
+                text: thinkingText(
+                    thinkingValue: thinkingValue,
+                    reasoningValue: reasoningValue,
+                    action: levelControl.action,
+                    unsupportedReason: levelControl.reason
+                ),
                 action: levelControl.action,
                 options: levelOptions(
                     current: thinkingValue ?? reasoningValue,
@@ -6629,6 +6751,32 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             return (capability.supported, capability.reason, capability.options)
         }
         return (legacySupported, nil, nil)
+    }
+
+    private static func metadataPlaceholderFooterItems(state: String, reason: String) -> [FooterItem] {
+        [
+            FooterItem(
+                text: "Model \(state)",
+                action: nil,
+                options: [],
+                unsupportedReason: reason,
+                textColor: nil
+            ),
+            FooterItem(
+                text: "Thinking \(state)",
+                action: nil,
+                options: [],
+                unsupportedReason: reason,
+                textColor: nil
+            ),
+            FooterItem(
+                text: "Fast \(state)",
+                action: nil,
+                options: [],
+                unsupportedReason: reason,
+                textColor: nil
+            )
+        ]
     }
 
     private func footerView(
@@ -6798,7 +6946,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
            }).first {
             return match
         }
-        return current ?? "Unknown model"
+        return current ?? "Model unavailable"
     }
 
     private static func modelCatalogOption(_ model: SessionStatus.ModelCatalog.Model,
@@ -6930,6 +7078,16 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             return (.setMode, nil, modeCapability.options)
         }
         return (nil, fastModeCapability.reason ?? modeCapability.reason, nil)
+    }
+
+    private static func thinkingText(thinkingValue: String?,
+                                     reasoningValue: String?,
+                                     action: SessionControlAction?,
+                                     unsupportedReason: String?) -> String {
+        if action == nil, thinkingValue == nil, reasoningValue == nil, unsupportedReason != nil {
+            return "Thinking unavailable"
+        }
+        return "Thinking \(thinkingValue ?? reasoningValue ?? "Unknown")"
     }
 
     private static func fastModeText(_ fastMode: Bool?,

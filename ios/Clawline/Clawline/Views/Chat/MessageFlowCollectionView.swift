@@ -3070,15 +3070,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     static var excludesFooterRevealRangeAtRestingBottom: Bool {
+#if os(visionOS)
+        false
+#else
         true
+#endif
     }
 
     static var hidesFooterAtRestingBottom: Bool {
-<<<<<<< HEAD
-        true
-=======
         false
->>>>>>> origin/clawline-t1475-footer-search-rsr
     }
 
     static func bottomOffsetMaxY(

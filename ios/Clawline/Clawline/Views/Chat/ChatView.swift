@@ -8185,6 +8185,32 @@ private struct CrossChatNotificationBubbleHeightPreferenceKey: PreferenceKey {
     }
 }
 
+#if !os(visionOS)
+/// Measurement seam for the notification-glass GPU cost hypothesis (T1591 I1).
+/// `--debug-notification-glass-off` (DEBUG builds only) swaps the bubble's
+/// backdrop-sampling glass for an opaque fill so Instruments can A/B GPU frame
+/// time with identical layout. Production builds always render glass.
+private struct CrossChatNotificationBubbleSurface: ViewModifier {
+#if DEBUG
+    private static let glassDisabledForMeasurement =
+        ProcessInfo.processInfo.arguments.contains("--debug-notification-glass-off")
+#else
+    private static let glassDisabledForMeasurement = false
+#endif
+
+    let cornerRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        if Self.glassDisabledForMeasurement {
+            content.background(Color(UIColor.systemBackground).opacity(0.96), in: shape)
+        } else {
+            content.glassEffect(.regular, in: shape)
+        }
+    }
+}
+#endif
+
 enum CrossChatNotificationMaterialStyle {
     static let backgroundOpacity = 1.0
 
@@ -8679,7 +8705,7 @@ struct CrossChatNotificationBubbleView: View {
             in: RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous)
         )
 #else
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous))
+        .modifier(CrossChatNotificationBubbleSurface(cornerRadius: bubbleCornerRadius))
 #endif
         .clipShape(RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous))
         .shadow(color: Color.black.opacity(0.14), radius: 8, x: 0, y: 3)

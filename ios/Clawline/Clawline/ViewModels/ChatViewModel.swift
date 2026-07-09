@@ -863,6 +863,8 @@ final class ChatViewModel: ChatViewModelHosting {
     private var refreshTrackableSessionsTask: Task<Void, Never>?
     private(set) var sessionStatusBySessionKey: [String: SessionStatus] = [:]
     private var sessionStatusRefreshTasks: [String: Task<Void, Never>] = [:]
+    private var sessionStatusFailureCountBySessionKey: [String: Int] = [:]
+    private(set) var sessionStatusUnavailableSessionKeys: Set<String> = []
     private var pendingUntrackRecovery: StreamSession?
     private var hasLoadedTrackableSessionsOnce = false
     private var hasSurfacedInitialTrackableSessionsFailure = false
@@ -4488,6 +4490,7 @@ final class ChatViewModel: ChatViewModelHosting {
                     requestedSessionKey: normalizedSessionKey
                 )
                 self.sessionStatusRefreshTasks[normalizedSessionKey] = nil
+                self.recordSessionStatusFetchSuccess(for: normalizedSessionKey)
                 self.sessionStatusBySessionKey[normalizedSessionKey] = displayStatus
                 if displayStatus.sessionKey != normalizedSessionKey {
                     self.sessionStatusBySessionKey[displayStatus.sessionKey] = displayStatus
@@ -4499,7 +4502,53 @@ final class ChatViewModel: ChatViewModelHosting {
                 self.logger.debug(
                     "session status refresh failed reason=\(reason, privacy: .public) sessionKey=\(normalizedSessionKey, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
                 )
+                if let retryDelay = self.recordSessionStatusFetchFailure(for: normalizedSessionKey) {
+                    self.scheduleSessionStatusRefresh(
+                        for: normalizedSessionKey,
+                        reason: "failure_retry",
+                        delay: retryDelay
+                    )
+                }
             }
+        }
+    }
+
+    // MARK: - Session status failure state
+    //
+    // The footer must never spin on "loading" forever: after
+    // `sessionStatusFailureThreshold` consecutive fetch failures the session is
+    // marked unavailable (rendered truthfully by the footer) while a slow
+    // steady retry keeps it self-healing. Any success clears the state.
+
+    static let sessionStatusFailureThreshold = 3
+
+    func isSessionStatusUnavailable(for sessionKey: String) -> Bool {
+        sessionStatusUnavailableSessionKeys.contains(sessionKey)
+    }
+
+    func recordSessionStatusFetchSuccess(for sessionKey: String) {
+        sessionStatusFailureCountBySessionKey.removeValue(forKey: sessionKey)
+        if sessionStatusUnavailableSessionKeys.contains(sessionKey) {
+            sessionStatusUnavailableSessionKeys.remove(sessionKey)
+        }
+    }
+
+    /// Records one fetch failure and returns the delay before the next retry.
+    /// Failures below the threshold back off quickly; at or past the threshold
+    /// the session is marked unavailable and retried on a slow steady cadence.
+    func recordSessionStatusFetchFailure(for sessionKey: String) -> Duration? {
+        let count = (sessionStatusFailureCountBySessionKey[sessionKey] ?? 0) + 1
+        sessionStatusFailureCountBySessionKey[sessionKey] = count
+        switch count {
+        case 1:
+            return .seconds(2)
+        case 2:
+            return .seconds(8)
+        default:
+            if !sessionStatusUnavailableSessionKeys.contains(sessionKey) {
+                sessionStatusUnavailableSessionKeys.insert(sessionKey)
+            }
+            return .seconds(30)
         }
     }
 

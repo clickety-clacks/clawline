@@ -217,10 +217,6 @@ enum PromptProcessingStage: String, Equatable {
     case failed
 }
 
-protocol ChatViewModelHosting: AnyObject {
-    func handleSceneDidBecomeActive()
-}
-
 struct LiveAgentProgress: Equatable {
     let sessionKey: String
     let runId: String?
@@ -307,7 +303,7 @@ enum ImageAttachmentPreparer {
 
 @Observable
 @MainActor
-final class ChatViewModel: ChatViewModelHosting {
+final class ChatViewModel {
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessagePipeline")
     private let instanceId = UUID().uuidString
     @MainActor
@@ -384,7 +380,9 @@ final class ChatViewModel: ChatViewModelHosting {
     private(set) var streamDotStateBySession: [String: StreamDotState] = [:]
     private(set) var lastReadMessageIdBySession: [String: String] = [:]
     private(set) var streamTailStateBySession: [String: StreamTailState] = [:]
-    private(set) var crossChatNotificationBubblesBySourceChatId: [String: CrossChatNotificationBubble] = [:]
+    private(set) var crossChatNotificationBubblesBySourceChatId: [String: CrossChatNotificationBubble] = [:] {
+        didSet { refreshCrossChatNotificationBubbles() }
+    }
     private var notificationBatchCommitCoordinator = NotificationBatchCommitCoordinator()
     private var suppressedCrossChatNotificationEntryKeysBySourceChatId: [String: Set<String>] = [:]
     var crossChatNotificationDismissAnimator: CrossChatNotificationDismissAnimator?
@@ -464,7 +462,28 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     var activeStream: ChatStream {
-        SessionRegistry.shared.stream(for: engineActiveSessionKey)
+        streamType(for: engineActiveSessionKey)
+    }
+
+    func streamType(for sessionKey: String) -> ChatStream {
+        switch streamsBySessionKey[sessionKey]?.kind {
+        case "dm", "global_dm":
+            return .admin
+        default:
+            return .personal
+        }
+    }
+
+    func adoptedSessionKeysForProvider() -> [String] {
+        streamsBySessionKey.values
+            .filter(\.adopted)
+            .sorted { lhs, rhs in
+                if lhs.orderIndex == rhs.orderIndex {
+                    return lhs.sessionKey < rhs.sessionKey
+                }
+                return lhs.orderIndex < rhs.orderIndex
+            }
+            .map(\.sessionKey)
     }
 
     var canUseTrackFeature: Bool {
@@ -741,10 +760,23 @@ final class ChatViewModel: ChatViewModelHosting {
     }
     var inputContent: NSAttributedString = NSAttributedString() {
         didSet {
+            let hasSendableContent = !inputContent.isEffectivelyEmpty
+            if inputHasSendableContent != hasSendableContent {
+                inputHasSendableContent = hasSendableContent
+            }
+            let mentionQuery = CrossChatMentionPickerLogic.query(
+                inputText: inputContent.string,
+                resolvedMention: nil
+            )
+            if inputMentionQuery != mentionQuery {
+                inputMentionQuery = mentionQuery
+            }
             pruneAttachmentData()
             pruneMessageReferenceData()
         }
     }
+    private(set) var inputHasSendableContent = false
+    private(set) var inputMentionQuery: String?
     var attachmentData: [UUID: PendingAttachment] = [:]
     private var messageReferenceData: [UUID: PendingMessageReference] = [:]
     private(set) var pendingAttachmentStageCount: Int = 0
@@ -784,7 +816,7 @@ final class ChatViewModel: ChatViewModelHosting {
         pendingAttachmentStageCount == 0
             && transportSendButtonConnectionState == .connected
             && sendProvisioningState(for: engineActiveSessionKey) == .ready
-            && !inputContent.isEffectivelyEmpty
+            && inputHasSendableContent
     }
 
     let toastManager: ToastManager
@@ -804,6 +836,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private var lifecycleOutputsSubscription: AsyncStream<ConnectionLifecycleOutput>?
     private var lifecycleStartupGateDebugSubscription: AsyncStream<StartupGateDebugEvent>?
     private var sessionMessages: [String: [Message]] = [:]
+    private var messageListRevisionBySession: [String: Int] = [:]
     private var forceReReadGenerationBySession: [String: Int] = [:]
     private var pendingLocalMessages: [PendingLocalMessage] = []
     private var ackedPendingLocalMessageIDs: Set<String> = []
@@ -872,6 +905,10 @@ final class ChatViewModel: ChatViewModelHosting {
 
     func forceReReadGeneration(for sessionKey: String) -> Int {
         forceReReadGenerationBySession[sessionKey] ?? 0
+    }
+
+    func messageListRevision(for sessionKey: String) -> Int {
+        messageListRevisionBySession[sessionKey] ?? 0
     }
 
     private func armForceReRead(for sessionKey: String) {
@@ -1422,7 +1459,7 @@ final class ChatViewModel: ChatViewModelHosting {
         guard let lifecycleOutputsSubscription else { return }
         for await output in lifecycleOutputsSubscription {
             coordinatorDiag("observeLifecycleOutputs output=\(String(describing: output))")
-            handleLifecycleOutput(output)
+            await handleLifecycleOutput(output)
         }
     }
 
@@ -1619,8 +1656,10 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
 
-    var crossChatNotificationBubbles: [CrossChatNotificationBubble] {
-        crossChatNotificationBubblesBySourceChatId.values.sorted {
+    private(set) var crossChatNotificationBubbles: [CrossChatNotificationBubble] = []
+
+    private func refreshCrossChatNotificationBubbles() {
+        crossChatNotificationBubbles = crossChatNotificationBubblesBySourceChatId.values.sorted {
             if $0.lastAssistantActivityAt == $1.lastAssistantActivityAt {
                 return $0.sourceChatId < $1.sourceChatId
             }
@@ -1828,7 +1867,6 @@ final class ChatViewModel: ChatViewModelHosting {
         persistMessages([alphaMessage], for: alphaSessionKey)
         persistMessages([betaMessage], for: betaSessionKey)
         recalculateOrderedSessionKeys()
-        SessionRegistry.shared.replace(with: orderedStreams)
         ensureDefaultActiveSessionIfNeeded()
 
         crossChatNotificationBubblesBySourceChatId = [
@@ -2582,7 +2620,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private func handleIncoming(_ message: Message, notificationBatchEpoch: Int? = nil) {
         let snippet = String(message.content.prefix(80))
         logger.info(
-            "incoming id=\(message.id, privacy: .public) sessionKey=\(message.sessionKey, privacy: .public) stream=\(message.stream.rawValue, privacy: .public) role=\(String(describing: message.role), privacy: .public) streaming=\(message.streaming, privacy: .public) deviceId=\(message.deviceId ?? "nil", privacy: .public) snippet=\"\(snippet, privacy: .public)\""
+            "incoming id=\(message.id, privacy: .public) sessionKey=\(message.sessionKey, privacy: .public) stream=\(self.streamType(for: message.sessionKey).rawValue, privacy: .public) role=\(String(describing: message.role), privacy: .public) streaming=\(message.streaming, privacy: .public) deviceId=\(message.deviceId ?? "nil", privacy: .public) snippet=\"\(snippet, privacy: .public)\""
         )
 
         if shouldSuppressInteractiveCallbackEcho(message) {
@@ -2846,18 +2884,15 @@ final class ChatViewModel: ChatViewModelHosting {
         return true
     }
 
-    private func handleLifecycleServerMessage(epoch: Int, payload: Data) {
+    private func handleLifecycleServerMessage(epoch: Int, payload: Data) async {
         firstReplayAppliedEpoch = epoch
         restoreTaskBySessionKey.values.forEach { $0.cancel() }
         restoreTaskBySessionKey.removeAll()
-        let decoder = JSONDecoder()
-        guard let envelope = try? decoder.decode(LifecycleEnvelope.self, from: payload) else { return }
-        guard envelope.type == "message" else { return }
-        guard let serverPayload = try? decoder.decode(ServerMessagePayload.self, from: payload),
-              let sessionKey = serverPayload.sessionKey?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !sessionKey.isEmpty else {
-            return
-        }
+        guard let decoded = try? await Self.decodeLifecycleServerMessagePayload(from: payload) else { return }
+        guard decoded.envelope.type == "message" else { return }
+        let serverPayload = decoded.payload
+        guard let sessionKey = serverPayload.sessionKey?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !sessionKey.isEmpty else { return }
         let message = Message(payload: serverPayload, sessionKey: sessionKey)
         if pendingHistoryResetReplay?.epoch == epoch {
             pendingHistoryResetReplay?.messagesBySessionKey[sessionKey, default: []].append(message)
@@ -2876,8 +2911,23 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
 
-    private struct LifecycleEnvelope: Decodable {
+    nonisolated private struct LifecycleEnvelope: Decodable, Sendable {
         let type: String
+    }
+
+    nonisolated private struct LifecycleServerMessagePayload: Sendable {
+        let envelope: LifecycleEnvelope
+        let payload: ServerMessagePayload
+    }
+
+    nonisolated private static func decodeLifecycleServerMessagePayload(from data: Data) async throws -> LifecycleServerMessagePayload {
+        try await Task.detached(priority: .userInitiated) {
+            let decoder = JSONDecoder()
+            return LifecycleServerMessagePayload(
+                envelope: try decoder.decode(LifecycleEnvelope.self, from: data),
+                payload: try decoder.decode(ServerMessagePayload.self, from: data)
+            )
+        }.value
     }
 
     private func handleHistoryResetRequired(epoch: Int) {
@@ -3234,6 +3284,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private func applyMessagesWrite(_ newMessages: [Message], for sessionKey: String) {
         let oldCount = sessionMessages[sessionKey]?.count ?? 0
         sessionMessages[sessionKey] = newMessages
+        messageListRevisionBySession[sessionKey, default: 0] &+= 1
         let newCount = newMessages.count
         if oldCount > 0, newCount == 0 {
             StreamSwitchTiming.log("stream_messages_unloaded oldCount=\(oldCount) newCount=0", sessionKey: sessionKey)
@@ -3251,7 +3302,7 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
 
-    private func handleLifecycleOutput(_ output: ConnectionLifecycleOutput) {
+    private func handleLifecycleOutput(_ output: ConnectionLifecycleOutput) async {
         switch output {
         case .phaseTransition(_, let to, let epoch, let reason):
             if writerCurrentEpoch != epoch {
@@ -3302,7 +3353,7 @@ final class ChatViewModel: ChatViewModelHosting {
         case .replayStarted(let epoch, _, let replayTruncated, _):
             beginCrossChatNotificationBatch(epoch: epoch, waitsForTruncationBoundary: replayTruncated)
         case .serverMessage(let epoch, let payload):
-            handleLifecycleServerMessage(epoch: epoch, payload: payload)
+            await handleLifecycleServerMessage(epoch: epoch, payload: payload)
         case .replayCompleted(let epoch):
             applyPendingHistoryResetReplayIfNeeded()
             markMissingFinalsAfterReplay()
@@ -4977,7 +5028,6 @@ final class ChatViewModel: ChatViewModelHosting {
         streamsBySessionKey[sessionKey] = synthesized
         syntheticSessionKeys.insert(sessionKey)
         recalculateOrderedSessionKeys()
-        SessionRegistry.shared.upsert(synthesized)
     }
 
     private func applyStreamSnapshot(_ streams: [StreamSession]) {
@@ -5015,7 +5065,6 @@ final class ChatViewModel: ChatViewModelHosting {
         } else {
             messages = sessionMessages[engineActiveSessionKey] ?? []
         }
-        SessionRegistry.shared.replace(with: orderedStreams)
         persistStreamMetadata()
     }
 
@@ -5027,7 +5076,6 @@ final class ChatViewModel: ChatViewModelHosting {
         restoreLastReadMessageIdIfNeeded(for: stream.sessionKey)
         restoreCachedMessagesIfNeeded(for: stream.sessionKey)
         ensureDefaultActiveSessionIfNeeded()
-        SessionRegistry.shared.upsert(stream)
         persistStreamMetadata()
     }
 
@@ -5051,7 +5099,6 @@ final class ChatViewModel: ChatViewModelHosting {
         } else if !engineActiveSessionKey.isEmpty {
             messages = sessionMessages[engineActiveSessionKey] ?? []
         }
-        SessionRegistry.shared.remove(sessionKey: sessionKey)
         persistStreamMetadata()
     }
 
@@ -5112,7 +5159,6 @@ final class ChatViewModel: ChatViewModelHosting {
             messages = sessionMessages[engineActiveSessionKey] ?? []
         }
 
-        SessionRegistry.shared.remove(sessionKey: sessionKey)
         persistStreamMetadata()
     }
 
@@ -5211,7 +5257,6 @@ final class ChatViewModel: ChatViewModelHosting {
             streamsBySessionKey = Dictionary(uniqueKeysWithValues: streams.map { ($0.sessionKey, $0) })
             syntheticSessionKeys.removeAll()
             recalculateOrderedSessionKeys()
-            SessionRegistry.shared.replace(with: orderedStreams)
         }
     }
 

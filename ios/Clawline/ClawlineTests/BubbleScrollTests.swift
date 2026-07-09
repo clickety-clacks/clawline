@@ -79,6 +79,7 @@ struct BubbleScrollTests {
         for bubble in [visibleBubble, measurementBubble] {
             bubble.configure(
                 message: message,
+                stream: .personal,
                 presentation: presentation,
                 sizeClass: sizeClass,
                 metrics: metrics,
@@ -275,6 +276,7 @@ struct BubbleScrollTests {
         let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: planMaxWidth, height: 1))
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: sizeClass,
             metrics: metrics,
@@ -374,6 +376,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: sizeClass,
             metrics: metrics,
@@ -392,6 +395,7 @@ struct BubbleScrollTests {
         )
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: sizeClass,
             metrics: metrics,
@@ -874,6 +878,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: firstMessage,
+            stream: .personal,
             presentation: firstPresentation,
             sizeClass: firstSizeClass,
             metrics: metrics,
@@ -900,6 +905,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: secondMessage,
+            stream: .personal,
             presentation: secondPresentation,
             sizeClass: secondSizeClass,
             metrics: metrics,
@@ -1043,6 +1049,7 @@ struct BubbleScrollTests {
             let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 360, height: 1))
             bubble.configure(
                 message: message,
+                stream: .personal,
                 presentation: presentation,
                 sizeClass: MessageFlowRules.sizeClass(for: presentation),
                 metrics: metrics,
@@ -1128,6 +1135,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: MessageFlowRules.sizeClass(for: presentation),
             metrics: metrics,
@@ -1172,6 +1180,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: MessageFlowRules.sizeClass(for: presentation),
             metrics: metrics,
@@ -1229,6 +1238,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: MessageFlowRules.sizeClass(for: presentation),
             metrics: metrics,
@@ -1286,6 +1296,7 @@ struct BubbleScrollTests {
         var requestedIds: [String] = []
         cell.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sendIndicatorState: nil,
             isCompact: true,
@@ -1346,6 +1357,7 @@ struct BubbleScrollTests {
         let originalPresentation = buildPresentation(originalMessage, metrics: metrics, enableLinkPreviews: false)
         cell.configure(
             message: originalMessage,
+            stream: .personal,
             presentation: originalPresentation,
             sendIndicatorState: nil,
             isCompact: true,
@@ -1373,6 +1385,7 @@ struct BubbleScrollTests {
         cell.prepareForReuse()
         cell.configure(
             message: reusedMessage,
+            stream: .personal,
             presentation: reusedPresentation,
             sendIndicatorState: nil,
             isCompact: true,
@@ -1429,6 +1442,7 @@ struct BubbleScrollTests {
             let naturalBubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: maxWidth, height: 1))
             naturalBubble.configure(
                 message: message,
+                stream: .personal,
                 presentation: presentation,
                 sizeClass: MessageFlowRules.sizeClass(for: presentation),
                 metrics: metrics,
@@ -1457,6 +1471,7 @@ struct BubbleScrollTests {
             cell.contentView.frame = cell.bounds
             cell.configure(
                 message: message,
+                stream: .personal,
                 presentation: presentation,
                 sendIndicatorState: nil,
                 isCompact: false,
@@ -1568,6 +1583,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: MessageFlowRules.sizeClass(for: presentation),
             metrics: metrics,
@@ -1719,6 +1735,7 @@ struct BubbleScrollTests {
         )
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: sizeClass,
             metrics: metrics,
@@ -1942,6 +1959,7 @@ struct BubbleScrollTests {
         cell.contentView.frame = cell.bounds
         cell.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sendIndicatorState: nil,
             isCompact: false,
@@ -1996,6 +2014,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: sizeClass,
             metrics: metrics,
@@ -2183,6 +2202,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: longMessage,
+            stream: .personal,
             presentation: longPresentation,
             sizeClass: longSizeClass,
             metrics: metrics,
@@ -2214,6 +2234,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: shortMessage,
+            stream: .personal,
             presentation: shortPresentation,
             sizeClass: shortSizeClass,
             metrics: metrics,
@@ -2262,6 +2283,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: sizeClass,
             metrics: metrics,
@@ -2385,6 +2407,7 @@ struct BubbleScrollTests {
         var layoutRequests = 0
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: MessageFlowRules.sizeClass(for: presentation),
             metrics: metrics,
@@ -2612,6 +2635,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: sizeClass,
             metrics: metrics,
@@ -2652,6 +2676,7 @@ struct BubbleScrollTests {
         let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: maxWidth, height: 1))
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: sizeClass,
             metrics: metrics,
@@ -2696,6 +2721,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: sizeClass,
             metrics: metrics,
@@ -2737,6 +2763,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: sizeClass,
             metrics: metrics,
@@ -2924,6 +2951,7 @@ struct BubbleScrollTests {
         let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 320, height: 1))
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: sizeClass,
             metrics: metrics,

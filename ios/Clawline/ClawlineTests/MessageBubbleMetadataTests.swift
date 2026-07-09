@@ -34,6 +34,7 @@ struct MessageBubbleMetadataTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: .short,
             metrics: metrics,
@@ -95,6 +96,7 @@ struct MessageBubbleMetadataTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: .short,
             metrics: metrics,
@@ -167,6 +169,7 @@ struct MessageBubbleMetadataTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: .short,
             metrics: metrics,
@@ -234,6 +237,7 @@ struct MessageBubbleMetadataTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: .short,
             metrics: metrics,
@@ -578,6 +582,7 @@ struct MessageBubbleMetadataTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: .short,
             metrics: metrics,
@@ -647,6 +652,7 @@ struct MessageBubbleMetadataTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: .short,
             metrics: metrics,
@@ -704,6 +710,7 @@ struct MessageBubbleMetadataTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: .short,
             metrics: metrics,
@@ -761,6 +768,7 @@ struct MessageBubbleMetadataTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: .short,
             metrics: metrics,
@@ -817,6 +825,7 @@ struct MessageBubbleMetadataTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: .short,
             metrics: metrics,
@@ -888,6 +897,7 @@ struct MessageBubbleMetadataTests {
         let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: maxWidth, height: 1))
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: .short,
             metrics: metrics,

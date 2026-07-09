@@ -1438,37 +1438,37 @@ struct PromptFocusShortcutActivationTests {
         )
 
         let beforeIdentity = CrossChatNotificationShortcutLifecycle.identity(
-            sourceStates: [(sourceChatId: "notification-0", isReplying: false)],
+            sourceStates: [CrossChatNotificationObservation.SourceState(sourceChatId: "notification-0", isReplying: false)],
             keyboardOwnershipStore: beforeReply,
             selectedSessionKey: "chat-a",
             streamPopupRoute: .closed
         )
         let replyIdentity = CrossChatNotificationShortcutLifecycle.identity(
-            sourceStates: [(sourceChatId: "notification-0", isReplying: true)],
+            sourceStates: [CrossChatNotificationObservation.SourceState(sourceChatId: "notification-0", isReplying: true)],
             keyboardOwnershipStore: inReply,
             selectedSessionKey: "chat-a",
             streamPopupRoute: .closed
         )
         let switchedChatIdentity = CrossChatNotificationShortcutLifecycle.identity(
-            sourceStates: [(sourceChatId: "notification-0", isReplying: false)],
+            sourceStates: [CrossChatNotificationObservation.SourceState(sourceChatId: "notification-0", isReplying: false)],
             keyboardOwnershipStore: beforeReply,
             selectedSessionKey: "chat-b",
             streamPopupRoute: .closed
         )
         let popupOpenIdentity = CrossChatNotificationShortcutLifecycle.identity(
-            sourceStates: [(sourceChatId: "notification-0", isReplying: false)],
+            sourceStates: [CrossChatNotificationObservation.SourceState(sourceChatId: "notification-0", isReplying: false)],
             keyboardOwnershipStore: beforeReply,
             selectedSessionKey: "chat-a",
             streamPopupRoute: .popup(presentationID: 1, searchFocus: .request(id: 1))
         )
         let popupFilteringIdentity = CrossChatNotificationShortcutLifecycle.identity(
-            sourceStates: [(sourceChatId: "notification-0", isReplying: false)],
+            sourceStates: [CrossChatNotificationObservation.SourceState(sourceChatId: "notification-0", isReplying: false)],
             keyboardOwnershipStore: beforeReply,
             selectedSessionKey: "chat-a",
             streamPopupRoute: .popup(presentationID: 1, searchFocus: .none)
         )
         let recoveredIdentity = CrossChatNotificationShortcutLifecycle.identity(
-            sourceStates: [(sourceChatId: "notification-0", isReplying: false)],
+            sourceStates: [CrossChatNotificationObservation.SourceState(sourceChatId: "notification-0", isReplying: false)],
             keyboardOwnershipStore: beforeReply,
             selectedSessionKey: "chat-a",
             streamPopupRoute: .closed
@@ -1687,7 +1687,8 @@ struct PromptFocusShortcutActivationTests {
         let source = try String(contentsOf: chatViewPath, encoding: .utf8)
 
         #expect(source.contains(".glassBackgroundEffect(\n            in: RoundedRectangle(cornerRadius: bubbleCornerRadius"))
-        #expect(source.contains(".glassEffect(.regular, in: RoundedRectangle(cornerRadius: bubbleCornerRadius"))
+        #expect(source.contains("content.glassEffect(.regular, in: shape)"))
+        #expect(source.contains(".modifier(CrossChatNotificationBubbleSurface(cornerRadius: bubbleCornerRadius))"))
         #expect(!source.contains("spatialNotificationTintColor"))
         #expect(CrossChatNotificationMaterialStyle.backgroundOpacity == 1.0)
         #expect(CrossChatNotificationMaterialStyle.accentOpacity(isSpatial: true) >= 0.88)

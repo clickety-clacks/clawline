@@ -117,7 +117,7 @@ final class ProviderChatService: ChatServicing {
         }
     }
 
-    private struct Envelope: Decodable {
+    nonisolated private struct Envelope: Decodable, Sendable {
         let type: String
     }
 
@@ -202,7 +202,7 @@ final class ProviderChatService: ChatServicing {
     private let baseURLProvider: () -> URL?
     private let userIdProvider: () -> String?
     private let authTokenProvider: @Sendable () async -> String?
-    private let adoptedSessionKeysProvider: @Sendable () -> [String]
+    private var adoptedSessionKeysProvider: @Sendable () -> [String]
     private let streamAPIClient: StreamAPIClient
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
@@ -263,6 +263,10 @@ final class ProviderChatService: ChatServicing {
     var connectionState: AsyncStream<ConnectionState> { stateBroadcaster.stream(initial: lastConnectionState) }
     var serviceEvents: AsyncStream<ChatServiceEvent> { serviceEventBroadcaster.stream() }
     var lifecycleTransportEvents: AsyncStream<LifecycleTransportEvent> { lifecycleTransportEventBroadcaster.stream() }
+
+    func setAdoptedSessionKeysProvider(_ provider: @escaping @Sendable () -> [String]) {
+        adoptedSessionKeysProvider = provider
+    }
 
     func fetchStreams() async throws -> [StreamSession] {
         guard let token = await resolveControlPlaneToken() else {
@@ -766,7 +770,7 @@ final class ProviderChatService: ChatServicing {
             guard let self else { return }
             var iterator = client.incomingTextMessages.makeAsyncIterator()
             while let text = await iterator.next() {
-                handle(text: text, lifecycleEpoch: nil, lifecycleConnectionToken: nil)
+                await handle(text: text, lifecycleEpoch: nil, lifecycleConnectionToken: nil)
             }
             handleSocketClose(closeInfo: client.lastCloseInfo, lifecycleEpoch: nil, lifecycleConnectionToken: nil)
         }
@@ -777,7 +781,7 @@ final class ProviderChatService: ChatServicing {
             guard let self else { return }
             var iterator = client.incomingTextMessages.makeAsyncIterator()
             while let text = await iterator.next() {
-                handle(text: text, lifecycleEpoch: epoch, lifecycleConnectionToken: connectionToken)
+                await handle(text: text, lifecycleEpoch: epoch, lifecycleConnectionToken: connectionToken)
             }
             handleSocketClose(
                 closeInfo: client.lastCloseInfo,
@@ -787,18 +791,17 @@ final class ProviderChatService: ChatServicing {
         }
     }
 
-    private func handle(text: String, lifecycleEpoch: Int?, lifecycleConnectionToken: UUID?) {
+    private func handle(text: String, lifecycleEpoch: Int?, lifecycleConnectionToken: UUID?) async {
         if let lifecycleConnectionToken, !isCurrentLifecycleConnectionToken(lifecycleConnectionToken) {
             return
         }
-        guard let data = text.data(using: .utf8) else {
-            logger.warning("Dropping inbound frame: failed UTF-8 conversion")
-            return
-        }
-
+        let data: Data
         let envelope: Envelope
         do {
-            envelope = try decoder.decode(Envelope.self, from: data)
+            (data, envelope) = try await Self.decodeEnvelopeFrame(text)
+        } catch FrameDecodeError.invalidUTF8 {
+            logger.warning("Dropping inbound frame: failed UTF-8 conversion")
+            return
         } catch {
             logger.warning("Dropping inbound frame: failed to decode envelope error=\(error.localizedDescription, privacy: .public)")
             return
@@ -812,7 +815,7 @@ final class ProviderChatService: ChatServicing {
                 lifecycleConnectionToken: lifecycleConnectionToken
             )
         case "message":
-            handleMessage(
+            await handleMessage(
                 data: data,
                 lifecycleEpoch: lifecycleEpoch,
                 lifecycleConnectionToken: lifecycleConnectionToken
@@ -852,6 +855,26 @@ final class ProviderChatService: ChatServicing {
         default:
             logger.debug("Unknown message type: \(envelope.type, privacy: .public)")
         }
+    }
+
+    private enum FrameDecodeError: Swift.Error {
+        case invalidUTF8
+    }
+
+    nonisolated private static func decodeEnvelopeFrame(_ text: String) async throws -> (Data, Envelope) {
+        try await Task.detached(priority: .userInitiated) {
+            guard let data = text.data(using: .utf8) else {
+                throw FrameDecodeError.invalidUTF8
+            }
+            let envelope = try JSONDecoder().decode(Envelope.self, from: data)
+            return (data, envelope)
+        }.value
+    }
+
+    nonisolated private static func decodeServerMessagePayload(data: Data, decoder _: JSONDecoder) async throws -> ServerMessagePayload {
+        try await Task.detached(priority: .userInitiated) {
+            try JSONDecoder().decode(ServerMessagePayload.self, from: data)
+        }.value
     }
 
     private func handleAuthResult(data: Data, lifecycleEpoch: Int?, lifecycleConnectionToken: UUID?) {
@@ -906,7 +929,7 @@ final class ProviderChatService: ChatServicing {
         }
     }
 
-    private func handleMessage(data: Data, lifecycleEpoch: Int?, lifecycleConnectionToken: UUID?) {
+    private func handleMessage(data: Data, lifecycleEpoch: Int?, lifecycleConnectionToken: UUID?) async {
         if let lifecycleEpoch {
             emitLifecycleEvent(
                 epoch: lifecycleEpoch,
@@ -917,7 +940,7 @@ final class ProviderChatService: ChatServicing {
         }
         let payload: ServerMessagePayload
         do {
-            payload = try decoder.decode(ServerMessagePayload.self, from: data)
+            payload = try await Self.decodeServerMessagePayload(data: data, decoder: decoder)
         } catch {
             logger.warning("Dropping message payload: decode failed error=\(error.localizedDescription, privacy: .public)")
             return
@@ -1434,6 +1457,7 @@ final class ProviderChatService: ChatServicing {
     }
 
     private func resolveAuthContinuation(with result: Result<Void, Swift.Error>) {
+        // This check-then-clear is safe under the target's MainActor default isolation.
         authTimeoutTask?.cancel()
         authTimeoutTask = nil
         guard let continuation = authContinuation else { return }

@@ -531,6 +531,29 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         var deferredBottomInsetRemeasureIds: Set<String> = []
         var bottomInsetRemeasureTimer: Timer?
         var pendingBottomInsetHeightCapInvalidation: DispatchWorkItem?
+        var lastAppliedMessageSetIdentity: MessageSetIdentity?
+    }
+
+    private struct MessageSetIdentity: Equatable {
+        let sessionKey: String
+        let messageCount: Int
+        let lastMessageId: String?
+        let messageListRevision: Int
+        let isShowingOnlyUserMessages: Bool
+        let streamSearchQuery: String
+        let firstUnreadMessageId: String?
+        let unreadCount: Int
+        let sessionStatus: SessionStatus?
+        let liveProgress: LiveAgentProgress?
+        let forceReReadGeneration: Int
+        let sendIndicatorRevision: Int
+        let fontScaleChangeSequence: Int
+        let isCompact: Bool
+        let topInset: CGFloat
+        let trailingContentInset: CGFloat
+        let truncationBottomInset: CGFloat
+        let allowsTransparentWindowBackground: Bool
+        let isDark: Bool?
     }
 
     private var perStreamStateBySessionKey: [String: PerStreamRuntimeState] = [:]
@@ -766,6 +789,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         set {
             guard let key = activeStateKey() else { return }
             mutateState(for: key) { $0.fingerprints = newValue }
+        }
+    }
+
+    private var lastAppliedMessageSetIdentity: MessageSetIdentity? {
+        get { activeStateKey().flatMap { readState(for: $0).lastAppliedMessageSetIdentity } }
+        set {
+            guard let key = activeStateKey() else { return }
+            mutateState(for: key) { $0.lastAppliedMessageSetIdentity = newValue }
         }
     }
 
@@ -2690,6 +2721,33 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
         // Use session override if provided, otherwise use active session messages.
         let messages = sessionKey.map { viewModel.messages(for: $0) } ?? viewModel.messages
+        let isShowingOnlyUserMessages = readState(for: effectiveSessionKey).isShowingOnlyUserMessages
+        let messageSetIdentity = MessageSetIdentity(
+            sessionKey: effectiveSessionKey,
+            messageCount: messages.count,
+            lastMessageId: messages.last?.id,
+            messageListRevision: viewModel.messageListRevision(for: effectiveSessionKey),
+            isShowingOnlyUserMessages: isShowingOnlyUserMessages,
+            streamSearchQuery: streamSearchQuery,
+            firstUnreadMessageId: firstUnreadMessageId,
+            unreadCount: unreadCount,
+            sessionStatus: sessionStatus,
+            liveProgress: nextLiveProgress,
+            forceReReadGeneration: forceReReadGeneration,
+            sendIndicatorRevision: request.sendIndicatorRevision,
+            fontScaleChangeSequence: request.fontScaleChangeSequence,
+            isCompact: isCompact,
+            topInset: topInset,
+            trailingContentInset: nextTrailingContentInset,
+            truncationBottomInset: truncationBottomInset,
+            allowsTransparentWindowBackground: allowsTransparentWindowBackground,
+            isDark: isDark
+        )
+        if !needsFullLayout, lastAppliedMessageSetIdentity == messageSetIdentity {
+            StreamSwitchTiming.log("messageFlow_update_fast_path", sessionKey: effectiveSessionKey)
+            return
+        }
+
         let fullMessageIds = messages.map(\.id)
         let appendedMessageIDs = Self.appendedMessageIDs(previousLastMessageId: previousLastMessageId, messageIDs: fullMessageIds)
         let messageCount = messages.count
@@ -2712,7 +2770,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 restorePhase = .pendingFullConfirmation
             }
         }
-        let isShowingOnlyUserMessages = readState(for: effectiveSessionKey).isShowingOnlyUserMessages
         let materializationPlan = enqueueMaterializationEvent(
             sessionKey: effectiveSessionKey,
             event: .messagesUpdated(
@@ -2742,7 +2799,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         )
         let snapshotMessages = StreamMessageSearch.filteredMessages(from: collapsedVisibleMessages, query: streamSearchQuery)
         lastMessages = messages
-        let effectiveStream = SessionKey.stream(for: effectiveSessionKey)
+        let effectiveStream = viewModel.streamType(for: effectiveSessionKey)
         lastEffectiveStream = effectiveStream
         webBubbleCoordinator.currentStream = effectiveStream
         let snapshotMessageIds = snapshotMessages.map(\.id)
@@ -2948,6 +3005,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             "diffing apply snapshot count=\(messageCount, privacy: .public) changed=\(changedIds.count, privacy: .public) needsLayout=\(needsFullLayout, privacy: .public) morph=\(shouldMorph, privacy: .public)"
         )
         fingerprints = newFingerprints
+        lastAppliedMessageSetIdentity = messageSetIdentity
 
         if lastMessageId != newestMessageId {
             lastMessageId = newestMessageId
@@ -4236,6 +4294,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             }
             cell?.configure(
                 message: message,
+                stream: viewModel.streamType(for: message.sessionKey),
                 presentation: presentation,
                 sendIndicatorState: sendIndicatorState,
                 isCompact: self.isCompact,
@@ -4819,6 +4878,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     private func measureUIKitBubbleSize(message: Message,
+                                        stream: ChatStream? = nil,
                                         presentation: MessagePresentation,
                                         sendIndicatorState: MessageSendIndicatorState?,
                                         maxWidth: CGFloat,
@@ -4834,6 +4894,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let sizeClass = MessageFlowRules.sizeClass(for: presentation)
         uiKitBubbleSizer.configure(
             message: message,
+            stream: stream ?? viewModel?.streamType(for: message.sessionKey) ?? .personal,
             presentation: presentation,
             sizeClass: sizeClass,
             metrics: metrics,
@@ -5143,6 +5204,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         // Pass 0: configure at max width so preferredWidth() can read padding and label sizes.
         uiKitBubbleSizer.configure(
             message: message,
+            stream: viewModel?.streamType(for: message.sessionKey) ?? .personal,
             presentation: presentation,
             sizeClass: plan.sizeClass,
             metrics: metrics,
@@ -5209,6 +5271,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         )
         uiKitBubbleSizer.configure(
             message: message,
+            stream: viewModel?.streamType(for: message.sessionKey) ?? .personal,
             presentation: presentation,
             sizeClass: plan.sizeClass,
             metrics: metrics,
@@ -5255,6 +5318,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         )
         uiKitBubbleSizer.configure(
             message: message,
+            stream: viewModel?.streamType(for: message.sessionKey) ?? .personal,
             presentation: presentation,
             sizeClass: plan.sizeClass,
             metrics: metrics,

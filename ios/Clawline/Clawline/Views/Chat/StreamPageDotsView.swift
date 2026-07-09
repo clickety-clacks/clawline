@@ -615,6 +615,10 @@ struct StreamPageDotsView: View {
     }
 
     private var dotRowDots: some View {
+        let activeIndex = activeIndex
+        let visibleDotIndices = visibleDotIndices
+        let showsLeadingOverflow = (visibleDotIndices.first ?? 0) > 0
+        let showsTrailingOverflow = (visibleDotIndices.last ?? -1) < sessionKeys.count - 1
         let selectionRingIndex = Self.selectionRingIndex(
             activeIndex: activeIndex,
             scrubCandidateIndex: scrubCandidateIndex,
@@ -672,6 +676,8 @@ struct StreamPageDotsView: View {
 
     @ViewBuilder
     private func selectionRingOverlay(fieldWidth: CGFloat) -> some View {
+        let activeIndex = activeIndex
+        let visibleDotIndices = visibleDotIndices
         let selectionRingIndex = Self.selectionRingIndex(
             activeIndex: activeIndex,
             scrubCandidateIndex: scrubCandidateIndex,

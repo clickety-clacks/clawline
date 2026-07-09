@@ -283,6 +283,7 @@ struct ClawlineTests {
         let bubble = MessageBubbleUIKitView()
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: .short,
             metrics: metrics,

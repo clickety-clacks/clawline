@@ -17,6 +17,7 @@ private final class ObservationFlag {
     var value = false
 }
 
+@Suite(.serialized)
 struct ChatViewModelTests {
     @Test("T307 cross-chat mention sends to destination only")
     @MainActor

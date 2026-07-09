@@ -370,7 +370,6 @@ struct RichTextEditor: UIViewRepresentable {
         context.coordinator.isApplyingLocalEdit = false
 
         if !isComposing,
-           !context.coordinator.isApplyingLocalEdit,
            !((textView.attributedText?.isEqual(attributedText)) ?? false) {
             _ = context.coordinator.controller.recordParentMutation(reason: "externalBinding")
             context.coordinator.invalidateHeightMeasurementFastPath()
@@ -417,7 +416,7 @@ struct RichTextEditor: UIViewRepresentable {
             on: textView,
             trigger: dismissTrigger
         )
-        context.coordinator.updateHeight(for: textView, allowAutoScroll: false)
+        context.coordinator.updateHeightFromSwiftUIIfNeeded(for: textView)
         context.coordinator.enforceBaseAttributesIfNeeded(
             on: textView,
             fontScaleChangeSequence: fontScaleChangeSequence
@@ -555,11 +554,13 @@ struct RichTextEditor: UIViewRepresentable {
             if !isProgrammaticEdit {
                 parent.onTextEditActivity?()
             }
-            PromptEditorBridgeTelemetry.record(.legacyBindingWrite, [
-                "binding": "attributedText",
-                "length": textView.attributedText.length
-            ])
-            parent.attributedText = textView.attributedText
+            if !parent.attributedText.isEqual(to: textView.attributedText) {
+                PromptEditorBridgeTelemetry.record(.legacyBindingWrite, [
+                    "binding": "attributedText",
+                    "length": textView.attributedText.length
+                ])
+                parent.attributedText = textView.attributedText
+            }
             if !isProgrammaticEdit {
                 setSelectionRange(textView.selectedRange)
             }
@@ -586,6 +587,7 @@ struct RichTextEditor: UIViewRepresentable {
                 "location": selectedRange.location,
                 "length": selectedRange.length
             ])
+            parent.onTextEditActivity?()
             setSelectionRange(selectedRange)
             if isApplyingLocalEdit {
                 ensureCaretVisible(in: textView)
@@ -621,6 +623,22 @@ struct RichTextEditor: UIViewRepresentable {
                 return false
             }
             return true
+        }
+
+        func updateHeightFromSwiftUIIfNeeded(for textView: UITextView) {
+            let targetWidth = textView.bounds.width
+            if targetWidth > 1,
+               let lastHeightMeasurement,
+               abs(lastHeightMeasurement.width - targetWidth) <= 0.5,
+               lastHeightMeasurement.textLength == textView.textStorage.length {
+                PromptEditorBridgeTelemetry.record(.editorHeightMeasurementSkipped, [
+                    "length": textView.textStorage.length,
+                    "reason": "swiftUIUnchangedTextAndWidth",
+                    "width": targetWidth
+                ])
+                return
+            }
+            updateHeight(for: textView, allowAutoScroll: false)
         }
 
         func updateHeight(for textView: UITextView, allowAutoScroll: Bool) {
@@ -855,6 +873,14 @@ struct RichTextEditor: UIViewRepresentable {
 
         func insertAttachments(_ attachments: [PendingAttachment], into textView: UITextView) {
             guard !attachments.isEmpty else { return }
+            if let textView = textView as? PastableTextView {
+                textView.programmaticEditInFlight = true
+            }
+            defer {
+                if let textView = textView as? PastableTextView {
+                    textView.programmaticEditInFlight = false
+                }
+            }
             let mutable = NSMutableAttributedString(attributedString: textView.attributedText ?? NSAttributedString())
             let safeRange = clamp(textView.selectedRange, length: mutable.length)
             mutable.replaceCharacters(in: safeRange, with: NSAttributedString(string: ""))
@@ -871,6 +897,9 @@ struct RichTextEditor: UIViewRepresentable {
             }
             textView.attributedText = mutable
             let newRange = NSRange(location: insertionLocation, length: 0)
+            if let textView = textView as? PastableTextView {
+                textView.expectProgrammaticSelectionFeedback(newRange)
+            }
             textView.selectedRange = newRange
             _ = controller.recordParentMutation(reason: "legacyPendingInsertions")
             PromptEditorBridgeTelemetry.record(.legacyBindingWrite, [

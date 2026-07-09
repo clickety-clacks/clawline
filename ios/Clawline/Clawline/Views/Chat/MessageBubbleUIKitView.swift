@@ -578,6 +578,7 @@ final class MessageBubbleUIKitContainerView: UIView {
     }
 
     func configure(message: Message,
+                   stream: ChatStream,
                    presentation: MessagePresentation,
                    sendIndicatorState: MessageSendIndicatorState?,
                    isCompact: Bool,
@@ -610,6 +611,7 @@ final class MessageBubbleUIKitContainerView: UIView {
         let sizeClass = MessageFlowRules.sizeClass(for: presentation)
         bubbleView.configure(
             message: message,
+            stream: stream,
             presentation: presentation,
             sizeClass: sizeClass,
             metrics: metrics,
@@ -1284,6 +1286,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     }
 
     func configure(message: Message,
+                   stream: ChatStream,
                    presentation: MessagePresentation,
                    sizeClass: MessageSizeClass,
                    metrics: ChatFlowTheme.Metrics,
@@ -1324,7 +1327,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         // Store for trait collection updates
         currentMessageRole = message.role
         currentMessageDeliveryState = message.deliveryState
-        currentStream = message.stream
+        currentStream = stream
         explicitIsDarkOverride = isDark
         currentSizeClass = sizeClass
         self.showsHeader = showsHeader
@@ -1395,12 +1398,12 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         let palette = ChatFlowUIKitTheme.palette(isDark: effectiveIsDark)
         let isCanceled = message.deliveryState == .canceled
         let contentColor = isCanceled ? ChatFlowUIKitTheme.canceledText(isDark: effectiveIsDark) : palette.ink
-        let senderColor = (message.stream == .admin) ? palette.adminAccent : palette.warmBrown
+        let senderColor = (stream == .admin) ? palette.adminAccent : palette.warmBrown
         senderLabel.font = UIFont.clawline(.senderName)
         senderLabel.adjustsFontForContentSizeCategory = true
         senderLabel.textColor = isCanceled
             ? ChatFlowUIKitTheme.canceledText(isDark: effectiveIsDark).withAlphaComponent(0.78)
-            : senderColor.withAlphaComponent(message.stream == .admin ? 1.0 : 0.7)
+            : senderColor.withAlphaComponent(stream == .admin ? 1.0 : 0.7)
         senderLabel.text = message.displayName
         timestampLabel.font = UIFont.clawline(.timestamp)
         timestampLabel.adjustsFontForContentSizeCategory = true
@@ -3880,6 +3883,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
     }
 
     func configure(message: Message,
+                   stream: ChatStream,
                    presentation: MessagePresentation,
                    sendIndicatorState: MessageSendIndicatorState?,
                    isCompact: Bool,
@@ -3914,6 +3918,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
         self.onRequestLayout = guardedRequestLayout
         containerView.configure(
             message: message,
+            stream: stream,
             presentation: presentation,
             sendIndicatorState: sendIndicatorState,
             isCompact: isCompact,

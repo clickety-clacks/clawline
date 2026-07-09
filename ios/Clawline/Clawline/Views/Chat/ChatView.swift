@@ -404,6 +404,78 @@ enum StreamPagerKeyboardDismissPolicy {
     }
 }
 
+
+struct CrossChatNotificationObservation: Equatable {
+    struct SourceState: Equatable, Hashable {
+        let sourceChatId: String
+        let isReplying: Bool
+    }
+
+    let visibleSourceStates: [SourceState]
+    let transcriptTrailingClearance: CGFloat
+
+    var visibleSourceChatIds: [String] { visibleSourceStates.map(\.sourceChatId) }
+    var visibleReplySourceChatIds: [String] { visibleSourceStates.filter(\.isReplying).map(\.sourceChatId) }
+    var visibleCount: Int { visibleSourceStates.count }
+
+    static let empty = CrossChatNotificationObservation(
+        visibleSourceStates: [],
+        transcriptTrailingClearance: 0
+    )
+}
+
+private struct CrossChatNotificationObservationPreferenceKey: PreferenceKey {
+    static var defaultValue: CrossChatNotificationObservation = .empty
+
+    static func reduce(value: inout CrossChatNotificationObservation, nextValue: () -> CrossChatNotificationObservation) {
+        value = nextValue()
+    }
+}
+
+private struct CrossChatNotificationObservationHost: View {
+    @Bindable var viewModel: ChatViewModel
+    let maxContainerHeight: CGFloat
+    let replyPinSlotsBySourceChatId: [String: Int]
+    let measuredHeightsBySourceChatId: [String: CGFloat]
+    let isCompactLandscape: Bool
+    let isNotificationDocked: Bool
+
+    private var observation: CrossChatNotificationObservation {
+        let visibleBubbles = CrossChatNotificationOverlay.visibleBubbles(
+            maxContainerHeight: maxContainerHeight,
+            bubbles: viewModel.crossChatNotificationBubbles,
+            replyPinSlotsBySourceChatId: replyPinSlotsBySourceChatId,
+            measuredHeightsBySourceChatId: measuredHeightsBySourceChatId
+        )
+        let visibleSourceStates = visibleBubbles.map {
+            CrossChatNotificationObservation.SourceState(
+                sourceChatId: $0.sourceChatId,
+                isReplying: $0.isReplying
+            )
+        }
+#if os(iOS) && !targetEnvironment(macCatalyst)
+        let clearance = CrossChatNotificationGeometry.transcriptTrailingClearance(
+            isCompactLandscape: isCompactLandscape,
+            isNotificationDocked: isNotificationDocked,
+            visibleNotificationCount: visibleSourceStates.count
+        )
+#else
+        let clearance: CGFloat = 0
+#endif
+        return CrossChatNotificationObservation(
+            visibleSourceStates: visibleSourceStates,
+            transcriptTrailingClearance: clearance
+        )
+    }
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .preference(key: CrossChatNotificationObservationPreferenceKey.self, value: observation)
+            .accessibilityHidden(true)
+    }
+}
+
 struct ChatView: View {
     private static let spatialPromptFocusShortcutTargetLeaseDuration: TimeInterval = 10
 
@@ -496,6 +568,7 @@ struct ChatView: View {
     @State private var isCrossChatNotificationStackDocked = false
     @State private var crossChatNotificationReplyPinSlotsBySourceChatId: [String: Int] = [:]
     @State private var crossChatNotificationMeasuredHeightsBySourceChatId: [String: CGFloat] = [:]
+    @State private var crossChatNotificationObservation = CrossChatNotificationObservation.empty
     @State private var crossChatNotificationActionMenuSourceChatId: String?
     @State private var crossChatNotificationFocusedSourceChatId: String?
     @State private var crossChatNotificationFocusedReplySourceChatId: String?
@@ -667,10 +740,7 @@ struct ChatView: View {
 #endif
 
     private func currentMentionPickerQuery() -> String? {
-        CrossChatMentionPickerLogic.query(
-            inputText: viewModel.inputContent.string,
-            resolvedMention: resolvedCrossChatMention
-        )
+        resolvedCrossChatMention == nil ? viewModel.inputMentionQuery : nil
     }
 
     private func resolveCrossChatMention(_ stream: StreamSession) {
@@ -1351,7 +1421,7 @@ struct ChatView: View {
         let keyboardGeometryRefreshKey = ChatKeyboardGeometryRefreshKey(
             size: geometry.size,
             safeAreaBottom: geometry.safeAreaInsets.bottom,
-            notificationVisibleCount: viewModel.crossChatNotificationBubbles.count
+            notificationVisibleCount: crossChatNotificationObservation.visibleCount
         )
         let streamSelectorSpacingFromMessageBarTop: CGFloat = 8
         let streamSelectorMaxHeight = max(
@@ -1372,10 +1442,7 @@ struct ChatView: View {
 #else
         let promptFocusShortcutHasTargetOwnership = true
 #endif
-        let mentionQuery = CrossChatMentionPickerLogic.query(
-            inputText: viewModel.inputContent.string,
-            resolvedMention: resolvedCrossChatMention
-        )
+        let mentionQuery = currentMentionPickerQuery()
         let mentionCurrentSessionKey = viewModel.uiSelectedSessionKey.isEmpty
             ? viewModel.engineActiveSessionKey
             : viewModel.uiSelectedSessionKey
@@ -1436,28 +1503,10 @@ struct ChatView: View {
             resolvedContainerWidth: notificationOverlayMaxWidth
         )
 #endif
-        let keyboardVisibleNotificationBubbles = CrossChatNotificationOverlay.visibleBubbles(
-            maxContainerHeight: notificationOverlayMaxHeight,
-            bubbles: viewModel.crossChatNotificationBubbles,
-            replyPinSlotsBySourceChatId: crossChatNotificationReplyPinSlotsBySourceChatId,
-            measuredHeightsBySourceChatId: crossChatNotificationMeasuredHeightsBySourceChatId
-        )
-        let keyboardVisibleNotificationSourceChatIds = keyboardVisibleNotificationBubbles.map(\.sourceChatId)
-        let keyboardVisibleReplySourceChatIds = keyboardVisibleNotificationBubbles
-            .filter(\.isReplying)
-            .map(\.sourceChatId)
-        let notificationShortcutVisibleCount = keyboardVisibleNotificationSourceChatIds.count
-        let transcriptTrailingNotificationClearance: CGFloat = {
-#if os(iOS) && !targetEnvironment(macCatalyst)
-            return CrossChatNotificationGeometry.transcriptTrailingClearance(
-                isCompactLandscape: isCompactLandscape,
-                isNotificationDocked: isCrossChatNotificationStackDocked,
-                visibleNotificationCount: notificationShortcutVisibleCount
-            )
-#else
-            return 0
-#endif
-        }()
+        let keyboardVisibleNotificationSourceChatIds = crossChatNotificationObservation.visibleSourceChatIds
+        let keyboardVisibleReplySourceChatIds = crossChatNotificationObservation.visibleReplySourceChatIds
+        let notificationShortcutVisibleCount = crossChatNotificationObservation.visibleCount
+        let transcriptTrailingNotificationClearance = crossChatNotificationObservation.transcriptTrailingClearance
         let keyboardOwnershipStore = KeyboardOwnershipSceneFactory.chatScene(
             visibleNotificationSourceChatIds: keyboardVisibleNotificationSourceChatIds,
             visibleChatSelectorSessionKeys: streamSelectorShortcutSessionKeys,
@@ -1527,6 +1576,21 @@ struct ChatView: View {
                 )
                 .offset(x: notificationOverlayHorizontalCorrection)
             }
+            .background {
+                CrossChatNotificationObservationHost(
+                    viewModel: viewModel,
+                    maxContainerHeight: notificationOverlayMaxHeight,
+                    replyPinSlotsBySourceChatId: crossChatNotificationReplyPinSlotsBySourceChatId,
+                    measuredHeightsBySourceChatId: crossChatNotificationMeasuredHeightsBySourceChatId,
+                    isCompactLandscape: isCompactLandscape,
+                    isNotificationDocked: isCrossChatNotificationStackDocked
+                )
+            }
+            .onPreferenceChange(CrossChatNotificationObservationPreferenceKey.self) { observation in
+                if crossChatNotificationObservation != observation {
+                    crossChatNotificationObservation = observation
+                }
+            }
             .overlay(alignment: .topTrailing) {
                 if isCrossChatNotificationStackDocked && notificationShortcutVisibleCount > 0 {
                     NotificationDockedHitTargetView(
@@ -1552,9 +1616,7 @@ struct ChatView: View {
             }
             .overlay(alignment: .topTrailing) {
                 notificationKeyboardShortcutView(
-                    viewModel: viewModel,
-                    maxContainerHeight: notificationOverlayMaxHeight,
-                    measuredHeightsBySourceChatId: crossChatNotificationMeasuredHeightsBySourceChatId,
+                    visibleSourceStates: crossChatNotificationObservation.visibleSourceStates,
                     keyboardOwnershipStore: keyboardOwnershipStore,
                     selectedSessionKey: viewModel.uiSelectedSessionKey,
                     streamPopupRoute: streamPopupRouteController.route
@@ -1599,10 +1661,7 @@ struct ChatView: View {
             )
         )
         let notificationCommand = crossChatNotificationCommand(
-            viewModel: viewModel,
-            maxContainerHeight: notificationOverlayMaxHeight,
-            replyPinSlotsBySourceChatId: crossChatNotificationReplyPinSlotsBySourceChatId,
-            measuredHeightsBySourceChatId: crossChatNotificationMeasuredHeightsBySourceChatId,
+            visibleSourceChatIds: crossChatNotificationObservation.visibleSourceChatIds,
             keyboardOwnershipStore: keyboardOwnershipStore
         )
         let showOnlyUserMessagesCommand = ShowOnlyUserMessagesCommand(
@@ -2174,32 +2233,22 @@ struct ChatView: View {
     }
 
     private func crossChatNotificationCommand(
-        viewModel: ChatViewModel,
-        maxContainerHeight: CGFloat,
-        replyPinSlotsBySourceChatId: [String: Int],
-        measuredHeightsBySourceChatId: [String: CGFloat],
+        visibleSourceChatIds: [String],
         keyboardOwnershipStore: KeyboardOwnershipStore
     ) -> CrossChatNotificationCommand? {
-        let allBubbles = viewModel.crossChatNotificationBubbles
-        let bubbles = CrossChatNotificationOverlay.visibleBubbles(
-            maxContainerHeight: maxContainerHeight,
-            bubbles: allBubbles,
-            replyPinSlotsBySourceChatId: replyPinSlotsBySourceChatId,
-            measuredHeightsBySourceChatId: measuredHeightsBySourceChatId
-        )
         let selectorShortcutSlots = Set(keyboardOwnershipStore.chatSelectorShortcutMap.keys)
         let hasActiveChatSelectorShortcuts = !selectorShortcutSlots.isEmpty
         guard CrossChatNotificationCommandAvailability.shouldInstallCommand(
-            visibleNotificationCount: bubbles.count,
+            visibleNotificationCount: visibleSourceChatIds.count,
             selectorShortcutSlots: selectorShortcutSlots
         ) else { return nil }
         return CrossChatNotificationCommand(
-            hasVisibleNotifications: !bubbles.isEmpty,
-            visibleCount: bubbles.count,
+            hasVisibleNotifications: !visibleSourceChatIds.isEmpty,
+            visibleCount: visibleSourceChatIds.count,
             hasActiveChatSelectorShortcuts: hasActiveChatSelectorShortcuts,
             keyboardOwnershipStore: keyboardOwnershipStore,
             openActionMenu: { index in
-                guard bubbles.indices.contains(index),
+                guard visibleSourceChatIds.indices.contains(index),
                       case .handled(.notificationBubble(_)) = KeyboardCommandRouter
                         .route(intent: .notificationAssignedOpen(index), store: keyboardOwnershipStore)
                         .outcome else { return }
@@ -2209,7 +2258,7 @@ struct ChatView: View {
                 )
             },
             dismiss: { index in
-                guard bubbles.indices.contains(index),
+                guard visibleSourceChatIds.indices.contains(index),
                       case .handled(.notificationBubble(_)) = KeyboardCommandRouter
                         .route(intent: .notificationAssignedDismiss(index), store: keyboardOwnershipStore)
                         .outcome else { return }
@@ -2219,7 +2268,7 @@ struct ChatView: View {
                 )
             },
             reply: { index in
-                guard bubbles.indices.contains(index),
+                guard visibleSourceChatIds.indices.contains(index),
                       case .handled(.notificationBubble(_)) = KeyboardCommandRouter
                         .route(intent: .notificationAssignedReply(index), store: keyboardOwnershipStore)
                         .outcome else { return }
@@ -2270,19 +2319,14 @@ struct ChatView: View {
     }
 
     private func notificationKeyboardShortcutView(
-        viewModel: ChatViewModel,
-        maxContainerHeight: CGFloat,
-        measuredHeightsBySourceChatId: [String: CGFloat],
+        visibleSourceStates: [CrossChatNotificationObservation.SourceState],
         keyboardOwnershipStore: KeyboardOwnershipStore,
         selectedSessionKey: String,
         streamPopupRoute: StreamPopupRoute
     ) -> AnyView {
         AnyView(
             CrossChatNotificationKeyboardShortcuts(
-                bubbles: viewModel.crossChatNotificationBubbles,
-                maxContainerHeight: maxContainerHeight,
-                replyPinSlotsBySourceChatId: crossChatNotificationReplyPinSlotsBySourceChatId,
-                measuredHeightsBySourceChatId: measuredHeightsBySourceChatId,
+                visibleSourceStates: visibleSourceStates,
                 keyboardOwnershipStore: keyboardOwnershipStore,
                 selectedSessionKey: selectedSessionKey,
                 streamPopupRoute: streamPopupRoute,
@@ -3091,7 +3135,7 @@ struct ChatView: View {
         if CrossChatNotificationNavigationDockPolicy.shouldDock(
             origin: .notificationNavigation,
             isSwitchingChats: viewModel.uiSelectedSessionKey != sourceChatId,
-            hasNotifications: !viewModel.crossChatNotificationBubbles.isEmpty
+            hasNotifications: crossChatNotificationObservation.visibleCount > 0
         ) {
             isCrossChatNotificationStackDocked = true
         }
@@ -8187,6 +8231,32 @@ private struct CrossChatNotificationBubbleHeightPreferenceKey: PreferenceKey {
     }
 }
 
+#if !os(visionOS)
+/// Measurement seam for the notification-glass GPU cost hypothesis (T1591 I1).
+/// `--debug-notification-glass-off` (DEBUG builds only) swaps the bubble's
+/// backdrop-sampling glass for an opaque fill so Instruments can A/B GPU frame
+/// time with identical layout. Production builds always render glass.
+private struct CrossChatNotificationBubbleSurface: ViewModifier {
+#if DEBUG
+    private static let glassDisabledForMeasurement =
+        ProcessInfo.processInfo.arguments.contains("--debug-notification-glass-off")
+#else
+    private static let glassDisabledForMeasurement = false
+#endif
+
+    let cornerRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        if Self.glassDisabledForMeasurement {
+            content.background(Color(UIColor.systemBackground).opacity(0.96), in: shape)
+        } else {
+            content.glassEffect(.regular, in: shape)
+        }
+    }
+}
+#endif
+
 enum CrossChatNotificationMaterialStyle {
     static let backgroundOpacity = 1.0
 
@@ -8681,7 +8751,7 @@ struct CrossChatNotificationBubbleView: View {
             in: RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous)
         )
 #else
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous))
+        .modifier(CrossChatNotificationBubbleSurface(cornerRadius: bubbleCornerRadius))
 #endif
         .clipShape(RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous))
         .shadow(color: Color.black.opacity(0.14), radius: 8, x: 0, y: 3)
@@ -9859,29 +9929,17 @@ enum CrossChatNotificationGlobalShortcut {
 }
 
 private struct CrossChatNotificationKeyboardShortcuts: View {
-    let bubbles: [CrossChatNotificationBubble]
-    let maxContainerHeight: CGFloat
-    let replyPinSlotsBySourceChatId: [String: Int]
-    let measuredHeightsBySourceChatId: [String: CGFloat]
+    let visibleSourceStates: [CrossChatNotificationObservation.SourceState]
     let keyboardOwnershipStore: KeyboardOwnershipStore
     let selectedSessionKey: String
     let streamPopupRoute: StreamPopupRoute
     let onDismissAll: () -> Void
     let onToggleDock: () -> Void
 
-    private var visibleBubbles: [CrossChatNotificationBubble] {
-        CrossChatNotificationOverlay.visibleBubbles(
-            maxContainerHeight: maxContainerHeight,
-            bubbles: bubbles,
-            replyPinSlotsBySourceChatId: replyPinSlotsBySourceChatId,
-            measuredHeightsBySourceChatId: measuredHeightsBySourceChatId
-        )
-    }
-
     var body: some View {
-        if !visibleBubbles.isEmpty {
+        if !visibleSourceStates.isEmpty {
             ZStack {
-                ForEach(Array(visibleBubbles.enumerated()), id: \.element.sourceChatId) { index, _ in
+                ForEach(Array(visibleSourceStates.enumerated()), id: \.element.sourceChatId) { index, _ in
                     Button("") {
                         routeAssignedShortcut(.notificationAssignedOpen(index), index: index) {
                             NotificationCenter.default.post(
@@ -9890,7 +9948,7 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
                             )
                         }
                     }
-                        .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: .command)
+                    .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: .command)
                     Button("") {
                         routeAssignedShortcut(.notificationAssignedReply(index), index: index) {
                             NotificationCenter.default.post(
@@ -9899,7 +9957,7 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
                             )
                         }
                     }
-                        .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .option])
+                    .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .option])
                     Button("") {
                         routeAssignedShortcut(.notificationAssignedDismiss(index), index: index) {
                             NotificationCenter.default.post(
@@ -9908,9 +9966,9 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
                             )
                         }
                     }
-                        .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .shift, .option])
+                    .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .shift, .option])
                 }
-                ForEach(CrossChatNotificationGlobalShortcut.scrollSpecs(visibleNotificationCount: visibleBubbles.count), id: \.input) { spec in
+                ForEach(CrossChatNotificationGlobalShortcut.scrollSpecs(visibleNotificationCount: visibleSourceStates.count), id: \.input) { spec in
                     Button("") {
                         routeScrollShortcut(spec)
                     }
@@ -9921,22 +9979,20 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
                         onDismissAll()
                     }
                 }
-                    .keyboardShortcut("-", modifiers: [.command, .shift, .option])
+                .keyboardShortcut("-", modifiers: [.command, .shift, .option])
                 Button("") {
                     routeNotificationStackShortcut(.notificationToggleDock) {
                         onToggleDock()
                     }
                 }
-                    .keyboardShortcut("\\", modifiers: .command)
+                .keyboardShortcut("\\", modifiers: .command)
             }
             .opacity(0.001)
             .frame(width: 1, height: 1)
             .accessibilityHidden(true)
             .id(
                 CrossChatNotificationShortcutLifecycle.identity(
-                    sourceStates: visibleBubbles.map { bubble in
-                        (sourceChatId: bubble.sourceChatId, isReplying: bubble.isReplying)
-                    },
+                    sourceStates: visibleSourceStates,
                     keyboardOwnershipStore: keyboardOwnershipStore,
                     selectedSessionKey: selectedSessionKey,
                     streamPopupRoute: streamPopupRoute
@@ -9950,7 +10006,7 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
         index: Int,
         perform action: () -> Void
     ) {
-        guard visibleBubbles.indices.contains(index) else { return }
+        guard visibleSourceStates.indices.contains(index) else { return }
         switch KeyboardCommandRouter.route(intent: intent, store: keyboardOwnershipStore).outcome {
         case .handled(.notificationBubble(_)):
             action()
@@ -9985,7 +10041,7 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
 
 enum CrossChatNotificationShortcutLifecycle {
     static func identity(
-        sourceStates: [(sourceChatId: String, isReplying: Bool)],
+        sourceStates: [CrossChatNotificationObservation.SourceState],
         keyboardOwnershipStore: KeyboardOwnershipStore,
         selectedSessionKey: String,
         streamPopupRoute: StreamPopupRoute

@@ -2,6 +2,7 @@ import Testing
 @testable import Clawline
 
 @MainActor
+@Suite(.serialized)
 struct StreamToastManagerTests {
     @Test("T179: stream toast dismisses after configured idle delay")
     func dismissesAfterConfiguredIdleDelay() async {

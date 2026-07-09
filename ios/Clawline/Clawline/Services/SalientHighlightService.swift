@@ -267,7 +267,8 @@ private actor Worker {
         // Best-effort: if the awaiting task was cancelled before being granted a permit,
         // remove its waiter so we don't leak an unresumable continuation.
         if let idx = permitWaiters.lastIndex(where: { $0.id == id }) {
-            permitWaiters.remove(at: idx)
+            let waiter = permitWaiters.remove(at: idx)
+            waiter.continuation.resume()
         }
     }
 

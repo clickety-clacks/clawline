@@ -2306,20 +2306,6 @@ struct ChatView: View {
             selectStream(sessionKey, source: .programmatic)
             return
         }
-        if route.outcome.containsNotificationBubble {
-            switch intent {
-            case .notificationDismissAll:
-                withAnimation(CrossChatNotificationMotion.hide) {
-                    viewModel.dismissAllCrossChatNotifications()
-                }
-                return
-            case .notificationToggleDock:
-                NotificationCenter.default.post(name: .clawlineToggleNotificationDockCommand, object: nil)
-                return
-            default:
-                break
-            }
-        }
         let notificationNames = ChatRootKeyboardCommandDispatch.notificationNames(
             for: intent,
             keyboardOwnershipStore: keyboardOwnershipStore

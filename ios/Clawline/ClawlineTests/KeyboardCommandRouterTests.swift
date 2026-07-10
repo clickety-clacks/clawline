@@ -748,6 +748,42 @@ struct KeyboardCommandRouterTests {
         )
     }
 
+    @Test("Notification stack intents have exactly one overlay execution owner")
+    func notificationStackIntentsBypassRootRedispatch() {
+        let store = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: ["n0"],
+            mentionPickerVisible: false,
+            composerFocused: true,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
+
+        #expect(
+            KeyboardCommandRouter.route(
+                intent: .notificationToggleDock,
+                store: store
+            ).outcome == .handled(.notificationBubble("n0"))
+        )
+        #expect(
+            ChatRootKeyboardCommandDispatch.notificationNames(
+                for: .notificationToggleDock,
+                keyboardOwnershipStore: store
+            ).isEmpty
+        )
+        #expect(
+            KeyboardCommandRouter.route(
+                intent: .notificationDismissAll,
+                store: store
+            ).outcome == .handled(.notificationBubble("n0"))
+        )
+        #expect(
+            ChatRootKeyboardCommandDispatch.notificationNames(
+                for: .notificationDismissAll,
+                keyboardOwnershipStore: store
+            ).isEmpty
+        )
+    }
+
     @Test("Shortcut authority Cmd-J/K fan out through bubble scroll while Cmd-Shift-J/K stays transcript")
     func shortcutAuthorityPhysicalScrollShortcutsUseCorrectRootBridge() {
         for composerFocused in [false, true] {

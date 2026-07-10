@@ -67,6 +67,34 @@ final class T1150NotificationDockUITests: XCTestCase {
     }
 
     @MainActor
+    func testT1591NotificationDockShortcutExecutesOnceWhileComposerIsFocused() throws {
+        let app = launchDockedNotificationProofApp(skipCollapsedPreview: true)
+        let dockedHitTarget = dockedHitTarget(in: app)
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: dockedHitTarget.frame.minX + 4, dy: dockedHitTarget.frame.midY))
+            .tap()
+        assertUndockedNotificationsRemainVisible(in: app)
+
+        promptComposer(in: app).tap()
+        app.typeKey("\\", modifierFlags: .command)
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)
+                .matching(identifier: "cross_chat_notification_stack_docked")
+                .firstMatch
+                .waitForExistence(timeout: 2),
+            "Cmd-\\ should dock the notification stack exactly once while the composer is focused"
+        )
+        XCTAssertFalse(
+            app.descendants(matching: .any)
+                .matching(identifier: "cross_chat_notification_stack_undocked")
+                .firstMatch
+                .exists,
+            "A second notification-stack owner must not immediately undo Cmd-\\"
+        )
+    }
+
+    @MainActor
     func testRotatedLandscapeChatBubblesComposerAndNotificationsStayWithinScreen() throws {
         let app = launchDockedNotificationProofApp(skipCollapsedPreview: true)
         assertDockedPeekIsOnlyEdgeStrip(in: app)

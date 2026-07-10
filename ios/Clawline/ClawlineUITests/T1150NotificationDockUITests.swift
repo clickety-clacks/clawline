@@ -194,12 +194,11 @@ final class T1150NotificationDockUITests: XCTestCase {
 
     @MainActor
     func testNotificationDismissControlIsSingleTapActivatable() throws {
-        let app = launchDockedNotificationProofApp(skipCollapsedPreview: true)
-
-        let dockedHitTarget = dockedHitTarget(in: app)
-        app.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: dockedHitTarget.frame.midX, dy: dockedHitTarget.frame.minY + 24))
-            .tap()
+        let app = launchDockedNotificationProofApp(
+            skipCollapsedPreview: true,
+            startDocked: false,
+            orientation: .portrait
+        )
 
         let alpha = app.staticTexts["T1174 Alpha"]
         XCTAssertTrue(alpha.waitForExistence(timeout: 4), "Expected seeded notification to be visible")
@@ -210,6 +209,36 @@ final class T1150NotificationDockUITests: XCTestCase {
 
         XCTAssertFalse(app.staticTexts["T1174 Alpha"].waitForExistence(timeout: 1), "Dismiss tap should close that notification")
         XCTAssertTrue(app.staticTexts["T1174 Beta"].exists, "Dismiss tap should preserve unrelated notifications")
+    }
+
+    @MainActor
+    func testNotificationDismissControlHoldOffersClearAllConfirmation() throws {
+        let app = launchDockedNotificationProofApp(
+            skipCollapsedPreview: true,
+            startDocked: false,
+            orientation: .portrait
+        )
+
+        let alpha = app.staticTexts["T1174 Alpha"]
+        let beta = app.staticTexts["T1174 Beta"]
+        XCTAssertTrue(alpha.waitForExistence(timeout: 4), "Expected first seeded notification to be visible")
+        XCTAssertTrue(beta.exists, "Expected second seeded notification to be visible")
+
+        let dismissButton = app.buttons["Dismiss"].firstMatch
+        XCTAssertTrue(dismissButton.waitForExistence(timeout: 4), "Expected notification Dismiss control to exist")
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: dismissButton.frame.midX, dy: dismissButton.frame.midY))
+            .press(forDuration: 1)
+
+        let clearAllButton = app.buttons["Clear All Notifications"]
+        XCTAssertTrue(clearAllButton.waitForExistence(timeout: 2), "Holding Dismiss should offer Clear All Notifications")
+        XCTAssertTrue(alpha.exists, "Holding Dismiss should not dismiss the held notification before confirmation")
+        XCTAssertTrue(beta.exists, "Holding Dismiss should preserve unrelated notifications before confirmation")
+
+        clearAllButton.tap()
+
+        XCTAssertFalse(alpha.waitForExistence(timeout: 1), "Clear All Notifications should dismiss the held notification")
+        XCTAssertFalse(beta.exists, "Clear All Notifications should dismiss unrelated notifications")
     }
 
     @MainActor
@@ -258,9 +287,11 @@ final class T1150NotificationDockUITests: XCTestCase {
         skipCollapsedPreview: Bool = false,
         extendCollapsedPreview: Bool = false,
         startOnAlpha: Bool = false,
-        singlePeekHandoff: Bool = false
+        singlePeekHandoff: Bool = false,
+        startDocked: Bool = true,
+        orientation: UIDeviceOrientation = .landscapeLeft
     ) -> XCUIApplication {
-        XCUIDevice.shared.orientation = .landscapeLeft
+        XCUIDevice.shared.orientation = orientation
 
         let app = XCUIApplication()
         app.launchArguments += [
@@ -269,8 +300,10 @@ final class T1150NotificationDockUITests: XCTestCase {
             "-auth.isAdmin", "YES",
             "-provider.baseURL", "ws://127.0.0.1:8080",
             "--debug-cross-chat-notification-dock-proof",
-            "--debug-cross-chat-notification-dock-proof-start-docked",
         ]
+        if startDocked {
+            app.launchArguments.append("--debug-cross-chat-notification-dock-proof-start-docked")
+        }
         if skipCollapsedPreview {
             app.launchArguments.append("--debug-cross-chat-notification-dock-proof-skip-preview")
         }
@@ -285,10 +318,12 @@ final class T1150NotificationDockUITests: XCTestCase {
         }
         app.launch()
 
-        let dockedStack = app.descendants(matching: .any)
-            .matching(identifier: "cross_chat_notification_stack_docked")
-            .firstMatch
-        XCTAssertTrue(dockedStack.waitForExistence(timeout: 8), "Expected seeded notifications to start docked")
+        if startDocked {
+            let dockedStack = app.descendants(matching: .any)
+                .matching(identifier: "cross_chat_notification_stack_docked")
+                .firstMatch
+            XCTAssertTrue(dockedStack.waitForExistence(timeout: 8), "Expected seeded notifications to start docked")
+        }
         return app
     }
 

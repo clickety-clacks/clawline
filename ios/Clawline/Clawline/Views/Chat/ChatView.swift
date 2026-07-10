@@ -8580,6 +8580,14 @@ struct CrossChatNotificationBubbleView: View {
                         isClearAllConfirmationPresented = true
                     }
                 )
+                .confirmationDialog(
+                    "Clear all notifications?",
+                    isPresented: $isClearAllConfirmationPresented,
+                    titleVisibility: .visible
+                ) {
+                    Button("Clear All Notifications", role: .destructive, action: onDismissAll)
+                    Button("Cancel", role: .cancel) {}
+                }
             }
 
             if !bubble.isReplying {
@@ -8776,14 +8784,6 @@ struct CrossChatNotificationBubbleView: View {
                             onReply()
                         }
                 )
-        }
-        .confirmationDialog(
-            "Clear all notifications?",
-            isPresented: $isClearAllConfirmationPresented,
-            titleVisibility: .visible
-        ) {
-            Button("Clear All Notifications", role: .destructive, action: onDismissAll)
-            Button("Cancel", role: .cancel) {}
         }
         .onAppear(perform: refreshRenderedNotificationEntriesIfNeeded)
         .onChange(of: currentRenderedEntriesKey) { _, _ in

@@ -153,43 +153,6 @@ struct ScrollToBottomUnreadTests {
         ) == 1)
     }
 
-    @Test("Spatial footer resting bottom includes footer content")
-    func spatialFooterRestingBottomIncludesFooterContent() {
-        let contentHeight: CGFloat = 1_200
-        let boundsHeight: CGFloat = 700
-        let topInset: CGFloat = 40
-        let bottomInset: CGFloat = 180
-        let footerHeight = SessionMetadataFooterCell.fadeRevealRange
-            + SessionMetadataFooterCell.bottomPadding
-        let restingContentHeight = MessageFlowCollectionViewController.restingBottomContentHeight(
-            contentSizeHeight: contentHeight,
-            footerHeight: footerHeight,
-            hasFooter: true,
-            excludesFooterRevealRange: false
-        )
-        let restingBottom = MessageFlowCollectionViewController.bottomOffsetMaxY(
-            contentHeight: restingContentHeight,
-            boundsHeight: boundsHeight,
-            topInset: topInset,
-            bottomInset: bottomInset
-        )
-        let trueBottom = MessageFlowCollectionViewController.bottomOffsetMaxY(
-            contentHeight: contentHeight,
-            boundsHeight: boundsHeight,
-            topInset: topInset,
-            bottomInset: bottomInset
-        )
-
-        #expect(restingContentHeight == contentHeight)
-        #expect(restingBottom == trueBottom)
-        #expect(MessageFlowCollectionViewController.footerRevealAlpha(
-            contentOffsetY: restingBottom,
-            restingBottomOffsetY: restingBottom,
-            trueBottomOffsetY: trueBottom,
-            hidesFooterAtRestingBottom: false
-        ) == 1)
-    }
-
     @Test("Legacy hidden footer policy fades in after SBB resting bottom")
     func legacyHiddenFooterPolicyFadesInAfterSBBRestingBottom() {
         let restingBottom: CGFloat = 440

@@ -607,6 +607,7 @@ final class ChatViewModel {
     private func setUISelectedSessionKey(_ sessionKey: String) {
         uiSelectedSessionKey = sessionKey
         StreamSwitchTiming.log("uiSelectedSessionKey_set", sessionKey: sessionKey)
+        cancelSessionStatusRefreshes(except: sessionKey)
         scheduleSessionStatusRefresh(for: sessionKey, reason: "uiSelectedSession")
     }
 
@@ -897,6 +898,9 @@ final class ChatViewModel {
     private(set) var sessionStatusBySessionKey: [String: SessionStatus] = [:]
     private var sessionStatusRefreshTasks: [String: Task<Void, Never>] = [:]
     private var sessionStatusFailureCountBySessionKey: [String: Int] = [:]
+    private var allowsSessionStatusRefreshes = true
+    private var usageFollowUpFreshnessBySessionKey: [String: SessionStatus.Display.CodexUsage.Freshness] = [:]
+    private var usageFollowUpCountBySessionKey: [String: Int] = [:]
     private(set) var sessionStatusUnavailableSessionKeys: Set<String> = []
     private var pendingUntrackRecovery: StreamSession?
     private var hasLoadedTrackableSessionsOnce = false
@@ -1236,6 +1240,7 @@ final class ChatViewModel {
         }
         coordinatorDiag("handleAuthStateChange enter tokenPresent=\(auth.token != nil)")
         if auth.token != nil {
+            allowsSessionStatusRefreshes = true
             restoreStreamMetadataIfNeeded()
             restoreActiveSessionKeyIfNeeded()
             ensureDefaultActiveSessionIfNeeded()
@@ -1256,6 +1261,7 @@ final class ChatViewModel {
             refreshStreamsFromProvider(reason: "authChanged")
             scheduleSessionStatusRefresh(for: uiSelectedSessionKey, reason: "authChanged")
         } else {
+            allowsSessionStatusRefreshes = false
             coordinatorDiag("handleAuthStateChange logout-path")
             didRestoreActiveSessionKey = false
             clearSessionStatusRefreshes()
@@ -1272,6 +1278,7 @@ final class ChatViewModel {
         guard !isRetired else { return }
         guard isConnectionOwner else { return }
         isAppInForeground = true
+        allowsSessionStatusRefreshes = true
         guard hasActivatedLifecycleOwnership else {
             coordinatorDiag("sceneDidBecomeActive deferred until activate")
             return
@@ -1298,7 +1305,11 @@ final class ChatViewModel {
 
     func handleSceneActiveStateChanged(isActive: Bool) {
         isAppInForeground = isActive
-        guard isActive else { return }
+        guard isActive else {
+            allowsSessionStatusRefreshes = false
+            cancelSessionStatusRefreshes()
+            return
+        }
         handleSceneDidBecomeActive()
     }
 
@@ -3226,6 +3237,8 @@ final class ChatViewModel {
         streamDotStateBySession.removeValue(forKey: sessionKey)
         sessionStatusBySessionKey.removeValue(forKey: sessionKey)
         sessionStatusRefreshTasks.removeValue(forKey: sessionKey)?.cancel()
+        usageFollowUpFreshnessBySessionKey.removeValue(forKey: sessionKey)
+        usageFollowUpCountBySessionKey.removeValue(forKey: sessionKey)
         let removedIDs = Set(pendingLocalMessages.filter { $0.sessionKey == sessionKey }.map(\.id))
         pendingLocalMessages.removeAll { $0.sessionKey == sessionKey }
         ackedPendingLocalMessageIDs.subtract(removedIDs)
@@ -4383,6 +4396,7 @@ final class ChatViewModel {
         logger.info("connectionState transition id=\(self.instanceId, privacy: .public) source=\(source.rawValue, privacy: .public) state=\(String(describing: state), privacy: .public)")
         switch state {
         case .connected:
+            allowsSessionStatusRefreshes = true
             connectionStableTask?.cancel()
             connectionStableTask = nil
             isAssistantTyping = false
@@ -4391,12 +4405,15 @@ final class ChatViewModel {
             clearAllTypingIndicatorMorphTargets()
             auth.refreshAdminStatusFromToken()
             attemptPendingProvisionedSendIfPossible()
+            scheduleSessionStatusRefresh(for: uiSelectedSessionKey, reason: "connectionRestored")
         case .connecting, .reconnecting:
             isAssistantTyping = false
             typingSessionKey = nil
             clearAllLiveProgress()
             clearAllTypingIndicatorMorphTargets()
         case .disconnected, .failed:
+            allowsSessionStatusRefreshes = false
+            cancelSessionStatusRefreshes()
             connectionStableTask?.cancel()
             connectionStableTask = nil
             resetSessionProvisioningState(clearPendingSend: true)
@@ -4519,6 +4536,8 @@ final class ChatViewModel {
         let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedSessionKey.isEmpty else { return }
         guard auth.token != nil else { return }
+        guard allowsSessionStatusRefreshes, !isRetired else { return }
+        guard normalizedSessionKey == uiSelectedSessionKey else { return }
 
         sessionStatusRefreshTasks[normalizedSessionKey]?.cancel()
         sessionStatusRefreshTasks[normalizedSessionKey] = Task { [weak self] in
@@ -4638,7 +4657,8 @@ final class ChatViewModel {
                 thinkingLevel: resolvedThinkingLevel,
                 fastMode: incoming.display.fastMode ?? cached.display.fastMode,
                 mode: incoming.display.mode,
-                verbosity: incoming.display.verbosity
+                verbosity: incoming.display.verbosity,
+                codexUsage: incoming.display.codexUsage
             ),
             run: incoming.run,
             context: incoming.context,
@@ -4661,22 +4681,84 @@ final class ChatViewModel {
         guard uiSelectedSessionKey == requestedSessionKey || engineActiveSessionKey == requestedSessionKey else {
             return
         }
-        switch status.run.state {
-        case .running, .queued:
-            scheduleSessionStatusRefresh(
-                for: requestedSessionKey,
-                reason: "runStateFollowUp",
-                delay: .seconds(5)
-            )
-        case .idle, .unknown:
-            break
+        let usage = status.display.codexUsage
+        let usageFollowUpCount: Int
+        if let freshness = usage?.freshness, freshness != .fresh {
+            if usageFollowUpFreshnessBySessionKey[requestedSessionKey] == freshness {
+                usageFollowUpCount = (usageFollowUpCountBySessionKey[requestedSessionKey] ?? 0) + 1
+            } else {
+                usageFollowUpCount = 1
+            }
+            usageFollowUpFreshnessBySessionKey[requestedSessionKey] = freshness
+            usageFollowUpCountBySessionKey[requestedSessionKey] = usageFollowUpCount
+        } else {
+            usageFollowUpFreshnessBySessionKey.removeValue(forKey: requestedSessionKey)
+            usageFollowUpCountBySessionKey.removeValue(forKey: requestedSessionKey)
+            usageFollowUpCount = 0
+        }
+
+        guard let delay = Self.sessionStatusFollowUpDelay(
+            usage: usage,
+            usageFollowUpCount: usageFollowUpCount,
+            runState: status.run.state
+        ) else {
+            return
+        }
+        scheduleSessionStatusRefresh(
+            for: requestedSessionKey,
+            reason: "sessionStatusFollowUp",
+            delay: delay
+        )
+    }
+
+    static func sessionStatusFollowUpDelay(
+        usage: SessionStatus.Display.CodexUsage?,
+        usageFollowUpCount: Int,
+        runState: SessionStatus.Run.State
+    ) -> Duration? {
+        let usageDelay: Duration?
+        switch usage?.freshness {
+        case .loading:
+            usageDelay = .seconds(usageFollowUpCount <= 1 ? 2 : 5)
+        case .stale:
+            usageDelay = .seconds(usageFollowUpCount <= 1 ? 5 : 30)
+        case .unavailable:
+            usageDelay = .seconds(30)
+        case .fresh, nil:
+            usageDelay = nil
+        }
+        let runDelay: Duration? = switch runState {
+        case .running, .queued: .seconds(5)
+        case .idle, .unknown: nil
+        }
+        switch (usageDelay, runDelay) {
+        case (.some(let usageDelay), .some(let runDelay)):
+            return min(usageDelay, runDelay)
+        case (.some(let usageDelay), .none):
+            return usageDelay
+        case (.none, .some(let runDelay)):
+            return runDelay
+        case (.none, .none):
+            return nil
         }
     }
 
     private func clearSessionStatusRefreshes() {
-        sessionStatusRefreshTasks.values.forEach { $0.cancel() }
-        sessionStatusRefreshTasks.removeAll()
+        cancelSessionStatusRefreshes()
         sessionStatusBySessionKey.removeAll()
+    }
+
+    private func cancelSessionStatusRefreshes(except retainedSessionKey: String? = nil) {
+        let normalizedRetainedKey = retainedSessionKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cancelledKeys = sessionStatusRefreshTasks.keys.filter { $0 != normalizedRetainedKey }
+        for sessionKey in cancelledKeys {
+            sessionStatusRefreshTasks.removeValue(forKey: sessionKey)?.cancel()
+            usageFollowUpFreshnessBySessionKey.removeValue(forKey: sessionKey)
+            usageFollowUpCountBySessionKey.removeValue(forKey: sessionKey)
+        }
+        guard normalizedRetainedKey == nil else { return }
+        usageFollowUpFreshnessBySessionKey.removeAll()
+        usageFollowUpCountBySessionKey.removeAll()
     }
 
     private func normalizeSessionKeyList(_ sessionKeys: [String]) -> [String] {
@@ -5136,6 +5218,8 @@ final class ChatViewModel {
         syntheticSessionKeys.remove(sessionKey)
         sessionStatusBySessionKey.removeValue(forKey: sessionKey)
         sessionStatusRefreshTasks.removeValue(forKey: sessionKey)?.cancel()
+        usageFollowUpFreshnessBySessionKey.removeValue(forKey: sessionKey)
+        usageFollowUpCountBySessionKey.removeValue(forKey: sessionKey)
         recalculateOrderedSessionKeys()
 
         if typingSessionKey == sessionKey {

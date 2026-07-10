@@ -3310,7 +3310,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private func restingBottomContentHeight() -> CGFloat {
         return Self.restingBottomContentHeight(
             contentSizeHeight: collectionView.contentSize.height,
-            footerHeight: SessionMetadataFooterCell.height(for: sessionStatus),
+            footerHeight: SessionMetadataFooterCell.height(
+                for: sessionStatus,
+                width: availableContentWidth(),
+                compatibleWith: traitCollection
+            ),
             hasFooter: dataSource.indexPath(for: SessionMetadataFooterCell.itemId) != nil
         )
     }
@@ -4814,7 +4818,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
         if id == SessionMetadataFooterCell.itemId {
             let rowWidth = availableContentWidth()
-            let height = SessionMetadataFooterCell.height(for: sessionStatus)
+            let height = SessionMetadataFooterCell.height(
+                for: sessionStatus,
+                width: rowWidth,
+                compatibleWith: traitCollection
+            )
             return CGSize(width: rowWidth, height: height)
         }
 
@@ -6484,16 +6492,56 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
 
     private let stackView = UIStackView()
     private let controlsStackView = UIStackView()
+    private let primaryControlsStackView = UIStackView()
+    private let secondaryControlsStackView = UIStackView()
     private let versionStackView = UIStackView()
     private let searchField = FooterSearchField()
+    private var primaryRowHeightConstraint: NSLayoutConstraint?
+    private var secondaryRowHeightConstraint: NSLayoutConstraint?
+    private var contentSizeTraitObservation: UITraitChangeRegistration?
+    private var currentFooterItems: [FooterItem] = []
     private var onSearchQueryChanged: (@MainActor (String) -> Void)?
 
     private struct FooterItem {
+        enum Row {
+            case primary
+            case secondary
+        }
+
         let text: String
         let action: SessionControlAction?
         let options: [FooterOption]
         let unsupportedReason: String?
         let textColor: UIColor?
+        let row: Row
+        let accessibilityLabel: String?
+        let isStaticLabel: Bool
+        let allowsTruncation: Bool
+        let allowsWrapping: Bool
+
+        init(
+            text: String,
+            action: SessionControlAction?,
+            options: [FooterOption],
+            unsupportedReason: String?,
+            textColor: UIColor?,
+            row: Row = .primary,
+            accessibilityLabel: String? = nil,
+            isStaticLabel: Bool = false,
+            allowsTruncation: Bool = false,
+            allowsWrapping: Bool = false
+        ) {
+            self.text = text
+            self.action = action
+            self.options = options
+            self.unsupportedReason = unsupportedReason
+            self.textColor = textColor
+            self.row = row
+            self.accessibilityLabel = accessibilityLabel
+            self.isStaticLabel = isStaticLabel
+            self.allowsTruncation = allowsTruncation
+            self.allowsWrapping = allowsWrapping
+        }
     }
 
     private struct FooterOption {
@@ -6503,7 +6551,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         let isCurrent: Bool
     }
 
-    private static let footerFont = UIFont.clawline(.timestamp)
+    private var footerFont: UIFont { UIFont.clawline(.timestamp, compatibleWith: traitCollection) }
     static func textAlpha(isDark: Bool) -> CGFloat {
         isDark ? 0.90 : 0.84
     }
@@ -6571,12 +6619,22 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         stackView.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         contentView.addSubview(stackView)
 
-        controlsStackView.axis = .horizontal
+        controlsStackView.axis = .vertical
         controlsStackView.alignment = .center
         controlsStackView.distribution = .fill
-        controlsStackView.spacing = 2
+        controlsStackView.spacing = 0
         controlsStackView.setContentHuggingPriority(.required, for: .horizontal)
         controlsStackView.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+
+        for row in [primaryControlsStackView, secondaryControlsStackView] {
+            row.axis = .horizontal
+            row.alignment = .center
+            row.distribution = .fill
+            row.spacing = 2
+            row.setContentHuggingPriority(.required, for: .horizontal)
+            row.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+            controlsStackView.addArrangedSubview(row)
+        }
 
         versionStackView.axis = .horizontal
         versionStackView.alignment = .center
@@ -6585,7 +6643,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         versionStackView.setContentHuggingPriority(.required, for: .horizontal)
         versionStackView.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
-        searchField.font = Self.footerFont
+        searchField.font = footerFont
         searchField.borderStyle = .none
         searchField.clearButtonMode = .whileEditing
         searchField.returnKeyType = .search
@@ -6600,17 +6658,33 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         stackView.addArrangedSubview(controlsStackView)
         stackView.addArrangedSubview(versionStackView)
 
+        let primaryRowHeightConstraint = primaryControlsStackView.heightAnchor.constraint(
+            equalToConstant: Self.controlRowHeight(compatibleWith: traitCollection)
+        )
+        let secondaryRowHeightConstraint = secondaryControlsStackView.heightAnchor.constraint(
+            equalToConstant: Self.controlRowHeight(compatibleWith: traitCollection)
+        )
+        secondaryRowHeightConstraint.priority = .defaultHigh
+        self.primaryRowHeightConstraint = primaryRowHeightConstraint
+        self.secondaryRowHeightConstraint = secondaryRowHeightConstraint
+
         NSLayoutConstraint.activate([
             stackView.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: Self.horizontalPadding),
             stackView.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -Self.horizontalPadding),
             stackView.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
             stackView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Self.topPadding),
-            controlsStackView.heightAnchor.constraint(equalToConstant: Self.actionRegionHeight),
+            primaryRowHeightConstraint,
+            secondaryRowHeightConstraint,
             versionStackView.heightAnchor.constraint(equalToConstant: Self.versionRowHeight),
             searchField.heightAnchor.constraint(equalToConstant: Self.searchRowHeight),
             searchField.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
             searchField.widthAnchor.constraint(lessThanOrEqualTo: contentView.widthAnchor, constant: -(Self.horizontalPadding * 2)),
         ])
+
+        contentSizeTraitObservation = registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) {
+            (cell: SessionMetadataFooterCell, _: UITraitCollection) in
+            cell.updateFontsForPreferredContentSizeCategory()
+        }
     }
 
     @available(*, unavailable)
@@ -6618,8 +6692,38 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         fatalError("init(coder:) has not been implemented")
     }
 
+    private func updateFontsForPreferredContentSizeCategory() {
+        let font = footerFont
+        searchField.font = font
+        for view in [primaryControlsStackView, secondaryControlsStackView].flatMap(\.arrangedSubviews) {
+            if let button = view as? UIButton {
+                button.titleLabel?.font = font
+            } else if let label = view as? UILabel {
+                label.font = font
+            }
+        }
+        primaryRowHeightConstraint?.constant = Self.controlRowHeight(compatibleWith: traitCollection)
+        secondaryRowHeightConstraint?.constant = secondaryControlsStackView.isHidden
+            ? Self.controlRowHeight(compatibleWith: traitCollection)
+            : Self.secondaryControlRowHeight(
+                items: currentFooterItems,
+                availableWidth: bounds.width,
+                font: font
+            )
+        var ancestor = superview
+        while let view = ancestor {
+            if let collectionView = view as? UICollectionView {
+                collectionView.collectionViewLayout.invalidateLayout()
+                break
+            }
+            ancestor = view.superview
+        }
+    }
+
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        let actionButtons = controlsStackView.arrangedSubviews.compactMap { $0 as? FooterButton }
+        let actionButtons = [primaryControlsStackView, secondaryControlsStackView]
+            .flatMap(\.arrangedSubviews)
+            .compactMap { $0 as? FooterButton }
         if let button = FooterActionHitTesting.hitView(at: point, in: self, candidates: actionButtons, event: event) {
             return button
         }
@@ -6642,28 +6746,84 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
     ) {
         let textColor = Self.textColor(isDark: isDark, isSpatial: isSpatial)
         self.onSearchQueryChanged = onSearchQueryChanged
-        for view in controlsStackView.arrangedSubviews {
-            controlsStackView.removeArrangedSubview(view)
-            view.removeFromSuperview()
+        for row in [primaryControlsStackView, secondaryControlsStackView] {
+            for view in row.arrangedSubviews {
+                row.removeArrangedSubview(view)
+                view.removeFromSuperview()
+            }
         }
         for view in versionStackView.arrangedSubviews {
             versionStackView.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
         let items = Self.footerItems(for: status, isUnavailable: statusUnavailable, isDark: isDark)
+        currentFooterItems = items
+        let usesTwoRows = Self.requiresTwoControlRows(
+            items: items,
+            availableWidth: bounds.width,
+            font: footerFont
+        )
         for item in items {
             let itemColor = isSpatial ? textColor : (item.textColor ?? textColor)
-            controlsStackView.addArrangedSubview(footerView(for: item, status: status, color: itemColor, onSelect: onSelect))
+            let row = usesTwoRows && item.row == .secondary ? secondaryControlsStackView : primaryControlsStackView
+            row.addArrangedSubview(footerView(for: item, status: status, color: itemColor, onSelect: onSelect))
         }
+        secondaryControlsStackView.isHidden = !usesTwoRows
+        secondaryRowHeightConstraint?.constant = usesTwoRows
+            ? Self.secondaryControlRowHeight(items: items, availableWidth: bounds.width, font: footerFont)
+            : Self.controlRowHeight(compatibleWith: traitCollection)
         versionStackView.addArrangedSubview(versionLabel(color: textColor))
         versionStackView.addArrangedSubview(testMenuButton(color: textColor, onSelect: onTestMenuSelect))
         configureSearchField(query: searchQuery, textColor: textColor, isDark: isDark, isSpatial: isSpatial)
-        accessibilityLabel = Self.footerText(for: status, isUnavailable: statusUnavailable)
-        accessibilityTraits = items.contains { $0.action != nil && !$0.options.isEmpty } ? .button : .staticText
+        isAccessibilityElement = false
+        accessibilityLabel = nil
     }
 
-    static func height(for status: SessionStatus?) -> CGFloat {
-        return ceil(searchRowHeight + footerRowSpacing + actionRegionHeight + footerRowSpacing + versionRowHeight + topPadding + bottomPadding)
+    static func height(
+        for status: SessionStatus?,
+        width: CGFloat = .greatestFiniteMagnitude,
+        compatibleWith traitCollection: UITraitCollection? = nil
+    ) -> CGFloat {
+        let items = footerItems(for: status)
+        let font = UIFont.clawline(.timestamp, compatibleWith: traitCollection)
+        let rowCount: CGFloat = requiresTwoControlRows(items: items, availableWidth: width, font: font) ? 2 : 1
+        let primaryHeight = controlRowHeight(compatibleWith: traitCollection)
+        let controlsHeight = rowCount == 2
+            ? primaryHeight + secondaryControlRowHeight(items: items, availableWidth: width, font: font)
+            : primaryHeight
+        return ceil(searchRowHeight + footerRowSpacing + controlsHeight + footerRowSpacing + versionRowHeight + topPadding + bottomPadding)
+    }
+
+    private static func controlRowHeight(compatibleWith traitCollection: UITraitCollection?) -> CGFloat {
+        max(actionRegionHeight, ceil(UIFont.clawline(.timestamp, compatibleWith: traitCollection).lineHeight + 4))
+    }
+
+    private static func requiresTwoControlRows(items: [FooterItem], availableWidth: CGFloat, font: UIFont) -> Bool {
+        guard items.contains(where: { $0.row == .secondary }) else { return false }
+        let contentWidth = max(0, availableWidth - (horizontalPadding * 2))
+        let itemWidth = items.reduce(CGFloat.zero) { partial, item in
+            let titleWidth = ceil((item.text as NSString).size(withAttributes: [.font: font]).width)
+            return partial + max(44, titleWidth + 8)
+        }
+        let spacing = CGFloat(max(0, items.count - 1)) * 2
+        return itemWidth + spacing > contentWidth
+    }
+
+    private static func secondaryControlRowHeight(
+        items: [FooterItem],
+        availableWidth: CGFloat,
+        font: UIFont
+    ) -> CGFloat {
+        let secondaryItems = items.filter { $0.row == .secondary }
+        guard !secondaryItems.isEmpty else { return max(actionRegionHeight, ceil(font.lineHeight + 4)) }
+        let contentWidth = max(0, availableWidth - (horizontalPadding * 2))
+        let spacing = CGFloat(max(0, secondaryItems.count - 1)) * 2
+        let allocatedWidth = max(44, (contentWidth - spacing) / CGFloat(secondaryItems.count))
+        let maximumLineCount = secondaryItems.map { item in
+            let titleWidth = ceil((item.text as NSString).size(withAttributes: [.font: font]).width) + 8
+            return item.allowsWrapping ? max(1, ceil(titleWidth / allocatedWidth)) : 1
+        }.max() ?? 1
+        return max(actionRegionHeight, ceil((font.lineHeight * maximumLineCount) + 4))
     }
 
     static func shouldAppendFooter(after itemIds: [String], status: SessionStatus?) -> Bool {
@@ -6686,7 +6846,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         searchField.attributedPlaceholder = NSAttributedString(
             string: "Search current stream",
             attributes: [
-                .font: Self.footerFont,
+                .font: footerFont,
                 .foregroundColor: textColor.withAlphaComponent(0.58)
             ]
         )
@@ -6732,7 +6892,8 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                 action: modelCapability.isSupported ? .setModel : nil,
                 options: modelOptions(display: display, catalog: status.modelCatalog),
                 unsupportedReason: modelCapability.reason ?? "model_catalog_control_not_available",
-                textColor: nil
+                textColor: nil,
+                allowsTruncation: true
             ),
             FooterItem(
                 text: thinkingText(
@@ -6761,7 +6922,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                 unsupportedReason: fastControl.reason,
                 textColor: nil
             )
-        ] + authModeFooterItems(display.authMode, isDark: isDark)
+        ] + authModeFooterItems(display.authMode, codexUsage: display.codexUsage, isDark: isDark)
     }
 
     private static func capability(_ capability: SessionStatus.Capability?,
@@ -6808,21 +6969,27 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         color: UIColor,
         onSelect: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
     ) -> UIView {
-        if item.action == nil, item.textColor != nil {
+        if item.isStaticLabel {
             let label = UILabel()
             label.text = item.text
-            label.font = Self.footerFont
+            label.font = footerFont
             label.textColor = color
             label.adjustsFontForContentSizeCategory = true
-            label.lineBreakMode = .byTruncatingTail
+            label.numberOfLines = item.allowsWrapping ? 0 : 1
+            label.lineBreakMode = item.allowsWrapping ? .byWordWrapping : .byTruncatingTail
             label.textAlignment = .center
             label.isAccessibilityElement = true
-            label.accessibilityLabel = item.text
+            label.accessibilityLabel = item.accessibilityLabel ?? item.text
             label.accessibilityTraits = .staticText
             label.setContentHuggingPriority(.required, for: .horizontal)
-            label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
-            let titleWidth = ceil((item.text as NSString).size(withAttributes: [.font: Self.footerFont]).width)
-            label.widthAnchor.constraint(greaterThanOrEqualToConstant: max(44, titleWidth + 8)).isActive = true
+            label.setContentCompressionResistancePriority(
+                item.allowsTruncation || item.allowsWrapping ? .defaultLow : .defaultHigh,
+                for: .horizontal
+            )
+            let titleWidth = ceil((item.text as NSString).size(withAttributes: [.font: footerFont]).width)
+            label.widthAnchor.constraint(
+                greaterThanOrEqualToConstant: item.allowsTruncation || item.allowsWrapping ? 44 : max(44, titleWidth + 8)
+            ).isActive = true
             return label
         }
 
@@ -6831,22 +6998,24 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         configuration.contentInsets = NSDirectionalEdgeInsets(top: 2, leading: 4, bottom: 2, trailing: 4)
         configuration.attributedTitle = AttributedString(
             item.text,
-            attributes: AttributeContainer([.font: Self.footerFont])
+            attributes: AttributeContainer([.font: footerFont])
         )
         configuration.baseForegroundColor = color
         configuration.background.strokeWidth = 0
         button.configuration = configuration
         button.setContentHuggingPriority(.required, for: .horizontal)
-        button.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
-        let titleWidth = ceil((item.text as NSString).size(withAttributes: [.font: Self.footerFont]).width)
-        button.widthAnchor.constraint(greaterThanOrEqualToConstant: max(44, titleWidth + 8)).isActive = true
-        button.titleLabel?.font = Self.footerFont
+        button.setContentCompressionResistancePriority(item.allowsTruncation ? .defaultLow : .defaultHigh, for: .horizontal)
+        let titleWidth = ceil((item.text as NSString).size(withAttributes: [.font: footerFont]).width)
+        button.widthAnchor.constraint(
+            greaterThanOrEqualToConstant: item.allowsTruncation ? 44 : max(44, titleWidth + 8)
+        ).isActive = true
+        button.titleLabel?.font = footerFont
         button.titleLabel?.adjustsFontForContentSizeCategory = true
         button.titleLabel?.lineBreakMode = .byTruncatingTail
         button.tintColor = color
         button.isEnabled = item.action != nil && !item.options.isEmpty
         button.showsMenuAsPrimaryAction = button.isEnabled
-        button.accessibilityLabel = item.text
+        button.accessibilityLabel = item.accessibilityLabel ?? item.text
         if !button.isEnabled, let reason = item.unsupportedReason {
             button.accessibilityHint = reason
         }
@@ -6870,7 +7039,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
     private func versionLabel(color: UIColor) -> UILabel {
         let label = UILabel()
         label.text = Self.versionBuildText()
-        label.font = Self.footerFont
+        label.font = footerFont
         label.textColor = color
         label.adjustsFontForContentSizeCategory = true
         label.lineBreakMode = .byTruncatingTail
@@ -7123,7 +7292,11 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         return fastMode ? "Fast on" : "Fast off"
     }
 
-    private static func authModeFooterItems(_ authMode: String?, isDark: Bool) -> [FooterItem] {
+    private static func authModeFooterItems(
+        _ authMode: String?,
+        codexUsage: SessionStatus.Display.CodexUsage?,
+        isDark: Bool
+    ) -> [FooterItem] {
         switch authMode?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "oauth":
             return [
@@ -7132,9 +7305,12 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                     action: nil,
                     options: [FooterOption(title: "OAUTH", value: nil, enabled: nil, isCurrent: true)],
                     unsupportedReason: nil,
-                    textColor: ChatFlowUIKitTheme.palette(isDark: isDark).sage
+                    textColor: ChatFlowUIKitTheme.palette(isDark: isDark).sage,
+                    row: .secondary,
+                    isStaticLabel: true,
+                    allowsWrapping: true
                 )
-            ]
+            ] + codexUsageFooterItems(codexUsage)
         case "api_key", "api-key":
             return [
                 FooterItem(
@@ -7142,12 +7318,82 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                     action: nil,
                     options: [FooterOption(title: "API KEY", value: nil, enabled: nil, isCurrent: true)],
                     unsupportedReason: nil,
-                    textColor: ChatFlowUIKitTheme.connectionReconnecting(isDark: isDark)
+                    textColor: ChatFlowUIKitTheme.connectionReconnecting(isDark: isDark),
+                    row: .secondary,
+                    isStaticLabel: true,
+                    allowsWrapping: true
                 )
             ]
         default:
             return []
         }
+    }
+
+    private static func codexUsageFooterItems(_ usage: SessionStatus.Display.CodexUsage?) -> [FooterItem] {
+        guard let usage else { return [] }
+        switch usage.freshness {
+        case .fresh, .stale:
+            let windows = usage.windows.map { window in
+                FooterItem(
+                    text: "\(window.label.rawValue) \(window.remainingPercent)%",
+                    action: nil,
+                    options: [],
+                    unsupportedReason: nil,
+                    textColor: nil,
+                    row: .secondary,
+                    accessibilityLabel: usageAccessibilityLabel(for: window),
+                    isStaticLabel: true,
+                    allowsWrapping: true
+                )
+            }
+            guard usage.freshness == .stale else { return windows }
+            return windows + [
+                FooterItem(
+                    text: "Stale",
+                    action: nil,
+                    options: [],
+                    unsupportedReason: nil,
+                    textColor: nil,
+                    row: .secondary,
+                    accessibilityLabel: staleAccessibilityLabel(fetchedAt: usage.fetchedAt),
+                    isStaticLabel: true,
+                    allowsWrapping: true
+                )
+            ]
+        case .loading:
+            return [usageStateFooterItem(text: "Usage loading")]
+        case .unavailable:
+            return [usageStateFooterItem(text: "Usage unavailable")]
+        }
+    }
+
+    private static func usageStateFooterItem(text: String) -> FooterItem {
+        FooterItem(
+            text: text,
+            action: nil,
+            options: [],
+            unsupportedReason: nil,
+            textColor: nil,
+            row: .secondary,
+            isStaticLabel: true,
+            allowsWrapping: true
+        )
+    }
+
+    private static func usageAccessibilityLabel(for window: SessionStatus.Display.CodexUsage.Window) -> String {
+        let name = window.label == .fiveHour ? "5 hour" : "Weekly"
+        var label = "\(name) Codex usage, \(window.remainingPercent) percent remaining"
+        if let resetAt = window.resetAt {
+            let resetDate = Date(timeIntervalSince1970: resetAt / 1_000)
+            label += ", resets \(DateFormatter.localizedString(from: resetDate, dateStyle: .medium, timeStyle: .short))"
+        }
+        return label
+    }
+
+    private static func staleAccessibilityLabel(fetchedAt: TimeInterval?) -> String {
+        guard let fetchedAt else { return "Codex usage stale" }
+        let fetchedDate = Date(timeIntervalSince1970: fetchedAt / 1_000)
+        return "Codex usage stale, last updated \(DateFormatter.localizedString(from: fetchedDate, dateStyle: .medium, timeStyle: .short))"
     }
 
     private static func normalized(_ value: String?) -> String? {

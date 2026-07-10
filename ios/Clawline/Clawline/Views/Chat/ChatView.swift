@@ -424,14 +424,6 @@ struct CrossChatNotificationObservation: Equatable {
     )
 }
 
-private struct CrossChatNotificationObservationPreferenceKey: PreferenceKey {
-    static var defaultValue: CrossChatNotificationObservation = .empty
-
-    static func reduce(value: inout CrossChatNotificationObservation, nextValue: () -> CrossChatNotificationObservation) {
-        value = nextValue()
-    }
-}
-
 private struct CrossChatNotificationObservationHost: View {
     @Bindable var viewModel: ChatViewModel
     let maxContainerHeight: CGFloat
@@ -439,6 +431,7 @@ private struct CrossChatNotificationObservationHost: View {
     let measuredHeightsBySourceChatId: [String: CGFloat]
     let isCompactLandscape: Bool
     let isNotificationDocked: Bool
+    let onObservationChange: (CrossChatNotificationObservation) -> Void
 
     private var observation: CrossChatNotificationObservation {
         let visibleBubbles = CrossChatNotificationOverlay.visibleBubbles(
@@ -471,8 +464,13 @@ private struct CrossChatNotificationObservationHost: View {
     var body: some View {
         Color.clear
             .frame(width: 0, height: 0)
-            .preference(key: CrossChatNotificationObservationPreferenceKey.self, value: observation)
             .accessibilityHidden(true)
+            .onAppear {
+                onObservationChange(observation)
+            }
+            .onChange(of: observation) { _, observation in
+                onObservationChange(observation)
+            }
     }
 }
 
@@ -1583,13 +1581,13 @@ struct ChatView: View {
                     replyPinSlotsBySourceChatId: crossChatNotificationReplyPinSlotsBySourceChatId,
                     measuredHeightsBySourceChatId: crossChatNotificationMeasuredHeightsBySourceChatId,
                     isCompactLandscape: isCompactLandscape,
-                    isNotificationDocked: isCrossChatNotificationStackDocked
+                    isNotificationDocked: isCrossChatNotificationStackDocked,
+                    onObservationChange: { observation in
+                        if crossChatNotificationObservation != observation {
+                            crossChatNotificationObservation = observation
+                        }
+                    }
                 )
-            }
-            .onPreferenceChange(CrossChatNotificationObservationPreferenceKey.self) { observation in
-                if crossChatNotificationObservation != observation {
-                    crossChatNotificationObservation = observation
-                }
             }
             .overlay(alignment: .topTrailing) {
                 if isCrossChatNotificationStackDocked && notificationShortcutVisibleCount > 0 {
@@ -2302,12 +2300,25 @@ struct ChatView: View {
         keyboardOwnershipStore: KeyboardOwnershipStore
     ) {
         grantSpatialPromptFocusShortcutTargetLease()
-        if case .handled(.chatSelectorRow(let sessionKey)) = KeyboardCommandRouter
-            .route(intent: intent, store: keyboardOwnershipStore)
-            .outcome {
+        let route = KeyboardCommandRouter.route(intent: intent, store: keyboardOwnershipStore)
+        if case .handled(.chatSelectorRow(let sessionKey)) = route.outcome {
             closeStreamPopup(reason: .rowSelection)
             selectStream(sessionKey, source: .programmatic)
             return
+        }
+        if route.outcome.containsNotificationBubble {
+            switch intent {
+            case .notificationDismissAll:
+                withAnimation(CrossChatNotificationMotion.hide) {
+                    viewModel.dismissAllCrossChatNotifications()
+                }
+                return
+            case .notificationToggleDock:
+                NotificationCenter.default.post(name: .clawlineToggleNotificationDockCommand, object: nil)
+                return
+            default:
+                break
+            }
         }
         let notificationNames = ChatRootKeyboardCommandDispatch.notificationNames(
             for: intent,
@@ -4840,6 +4851,7 @@ enum ChatAppCommandShortcut {
         case scrollNotificationDown
         case scrollNotificationUp
         case notificationNumber
+        case notificationStack
 
         var selector: Selector {
             switch self {
@@ -4867,6 +4879,8 @@ enum ChatAppCommandShortcut {
                 return #selector(UIResponder.clawlineScrollNotificationUpCommand(_:))
             case .notificationNumber:
                 return #selector(UIResponder.clawlineNotificationNumberCommand(_:))
+            case .notificationStack:
+                return #selector(UIResponder.clawlineNotificationStackCommand(_:))
             }
         }
     }
@@ -4909,7 +4923,9 @@ enum ChatAppCommandShortcut {
     }
 
     static func notificationScrollKeyCommandSpecs(notificationVisibleCount: Int) -> [KeyCommandSpec] {
-        convert(KeyboardCommandBridge.notificationScrollSpecs)
+        convert(KeyboardCommandBridge.notificationScrollSpecs.filter {
+            $0.intent == .notificationScrollForward || $0.intent == .notificationScrollBackward
+        })
     }
 
     static func prioritizedTextInputKeyCommandSpecs(notificationVisibleCount: Int) -> [KeyCommandSpec] {
@@ -4959,6 +4975,8 @@ enum ChatAppCommandShortcut {
              .notificationAssignedReply,
              .notificationAssignedDismiss:
             return .notificationNumber
+        case .notificationDismissAll, .notificationToggleDock:
+            return .notificationStack
         default:
             return nil
         }
@@ -5087,6 +5105,14 @@ extension UIResponder {
     }
 
     @objc func clawlineNotificationNumberCommand(_ sender: UIKeyCommand) {
+        guard let intent = KeyboardCommandBridge.intent(
+            input: sender.input,
+            modifierFlags: sender.modifierFlags
+        ) else { return }
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: intent)
+    }
+
+    @objc func clawlineNotificationStackCommand(_ sender: UIKeyCommand) {
         guard let intent = KeyboardCommandBridge.intent(
             input: sender.input,
             modifierFlags: sender.modifierFlags
@@ -9369,7 +9395,12 @@ final class NotificationReplyUITextView: UITextView {
             action: #selector(didPressEscape)
         )
         let emacsCommands = [
-            UIKeyCommand(input: "w", modifierFlags: [.control], action: #selector(didPressCtrlW))
+            UIKeyCommand(input: "a", modifierFlags: [.control], action: #selector(didPressCtrlA)),
+            UIKeyCommand(input: "e", modifierFlags: [.control], action: #selector(didPressCtrlE)),
+            UIKeyCommand(input: "w", modifierFlags: [.control], action: #selector(didPressCtrlW)),
+            UIKeyCommand(input: "u", modifierFlags: [.control], action: #selector(didPressCtrlU)),
+            UIKeyCommand(input: "k", modifierFlags: [.control], action: #selector(didPressCtrlK)),
+            UIKeyCommand(input: "c", modifierFlags: [.control], action: #selector(didPressCtrlC))
         ]
         let modifiedReturnCommands = KeyboardCommandBridge.textInputSpecs.compactMap { spec -> UIKeyCommand? in
             guard spec.intent == .textModifiedNewline else { return nil }
@@ -9426,6 +9457,38 @@ final class NotificationReplyUITextView: UITextView {
         deletePreviousWordForReplyShortcut()
     }
 
+    @objc private func didPressCtrlA(_ sender: UIKeyCommand) {
+        guard canHandleReplyEditingShortcut else { return }
+        selectedTextRange = textRange(from: beginningOfDocument, to: beginningOfDocument)
+    }
+
+    @objc private func didPressCtrlE(_ sender: UIKeyCommand) {
+        guard canHandleReplyEditingShortcut else { return }
+        selectedTextRange = textRange(from: endOfDocument, to: endOfDocument)
+    }
+
+    @objc private func didPressCtrlU(_ sender: UIKeyCommand) {
+        guard canHandleReplyEditingShortcut else { return }
+        guard let cursor = selectedTextRange?.start,
+              let range = textRange(from: beginningOfDocument, to: cursor),
+              !range.isEmpty else { return }
+        replaceReplyText(range, with: "")
+    }
+
+    @objc private func didPressCtrlK(_ sender: UIKeyCommand) {
+        guard canHandleReplyEditingShortcut else { return }
+        guard let cursor = selectedTextRange?.start,
+              let range = textRange(from: cursor, to: endOfDocument),
+              !range.isEmpty else { return }
+        replaceReplyText(range, with: "")
+    }
+
+    @objc private func didPressCtrlC(_ sender: UIKeyCommand) {
+        guard canHandleReplyEditingShortcut else { return }
+        guard let range = textRange(from: beginningOfDocument, to: endOfDocument) else { return }
+        replaceReplyText(range, with: "")
+    }
+
     override func insertText(_ text: String) {
         if text == "\u{17}" {
             _ = deletePreviousWordForReplyShortcut()
@@ -9444,7 +9507,7 @@ final class NotificationReplyUITextView: UITextView {
 
     @discardableResult
     private func deletePreviousWordForReplyShortcut() -> Bool {
-        guard isEditable, isFirstResponder, isOwnedReplyShortcutRoute else { return false }
+        guard canHandleReplyEditingShortcut else { return false }
         guard let range = NotificationReplyPreviousWordDeletion.deleteRange(
             in: text ?? "",
             selectedRange: selectedRange
@@ -9458,6 +9521,16 @@ final class NotificationReplyUITextView: UITextView {
             .route(intent: .textModifiedNewline, store: keyboardOwnershipStore)
             .outcome else { return false }
         return routedSourceChatId == sourceChatId
+    }
+
+    private var canHandleReplyEditingShortcut: Bool {
+        isEditable && isFirstResponder && isOwnedReplyShortcutRoute
+    }
+
+    private func replaceReplyText(_ range: UITextRange, with text: String) {
+        let start = offset(from: beginningOfDocument, to: range.start)
+        let end = offset(from: beginningOfDocument, to: range.end)
+        replacePlainText(in: NSRange(location: start, length: end - start), with: text)
     }
 
     private func isControlWPress(_ press: UIPress) -> Bool {

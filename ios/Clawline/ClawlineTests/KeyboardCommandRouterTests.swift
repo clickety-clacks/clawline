@@ -914,6 +914,8 @@ struct KeyboardCommandRouterTests {
                         return .scrollChatUp
                     case .notificationAssignedOpen, .notificationAssignedReply, .notificationAssignedDismiss:
                         return .notificationNumber
+                    case .notificationDismissAll, .notificationToggleDock:
+                        return .notificationStack
                     default:
                         return nil
                     }
@@ -939,6 +941,9 @@ struct KeyboardCommandRouterTests {
                 .scrollUp,
                 .scrollChatDown,
                 .scrollChatUp,
+                .notificationStack,
+                .notificationStack,
+                .notificationStack,
                 .notificationNumber,
                 .notificationNumber,
                 .notificationNumber,

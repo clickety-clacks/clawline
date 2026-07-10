@@ -91,8 +91,8 @@ struct Clawline_SpatialTests {
         #expect(collectionView?.backgroundView == nil)
     }
 
-    @Test("Spatial footer resting bottom removes footer reveal gap")
-    func spatialFooterRestingBottomRemovesFooterRevealGap() {
+    @Test("Spatial resting bottom stops above footer like iPhone")
+    func spatialRestingBottomStopsAboveFooterLikeIPhone() {
         let contentHeight: CGFloat = 1_200
         let boundsHeight: CGFloat = 700
         let topInset: CGFloat = 40
@@ -100,8 +100,7 @@ struct Clawline_SpatialTests {
         let footerHeight = SessionMetadataFooterCell.fadeRevealRange
             + SessionMetadataFooterCell.bottomPadding
 
-        #expect(MessageFlowCollectionViewController.excludesFooterRevealRangeAtRestingBottom == false)
-        #expect(MessageFlowCollectionViewController.hidesFooterAtRestingBottom == false)
+        #expect(MessageFlowCollectionViewController.excludesFooterRevealRangeAtRestingBottom)
 
         let restingContentHeight = MessageFlowCollectionViewController.restingBottomContentHeight(
             contentSizeHeight: contentHeight,
@@ -121,14 +120,22 @@ struct Clawline_SpatialTests {
             bottomInset: bottomInset
         )
 
-        #expect(restingContentHeight == contentHeight)
-        #expect(restingBottom == trueBottom)
+        #expect(contentHeight - restingContentHeight == footerHeight)
+        #expect(trueBottom - restingBottom == footerHeight)
+    }
+
+    @Test("Spatial footer is fully invisible at resting bottom")
+    func spatialFooterIsFullyInvisibleAtRestingBottom() {
+        let restingBottom: CGFloat = 440
+        let trueBottom: CGFloat = 560
+
+        #expect(MessageFlowCollectionViewController.hidesFooterAtRestingBottom)
         #expect(MessageFlowCollectionViewController.footerRevealAlpha(
             contentOffsetY: restingBottom,
             restingBottomOffsetY: restingBottom,
             trueBottomOffsetY: trueBottom,
             hidesFooterAtRestingBottom: MessageFlowCollectionViewController.hidesFooterAtRestingBottom
-        ) == 1)
+        ) == 0)
     }
 
     private func makeWindow() -> UIWindow {

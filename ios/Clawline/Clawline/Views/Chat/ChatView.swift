@@ -9196,6 +9196,7 @@ struct NotificationReplyTextInput: UIViewRepresentable {
     func makeUIView(context: Context) -> NotificationReplyUITextView {
         let textView = NotificationReplyUITextView()
         textView.delegate = context.coordinator
+        textView.onSubmit = onSubmit
         textView.onCancel = onCancel
         textView.sourceChatId = sourceChatId
         textView.keyboardOwnershipStore = keyboardOwnershipStore
@@ -9213,6 +9214,7 @@ struct NotificationReplyTextInput: UIViewRepresentable {
 
     func updateUIView(_ textView: NotificationReplyUITextView, context: Context) {
         context.coordinator.parent = self
+        textView.onSubmit = onSubmit
         textView.onCancel = onCancel
         textView.sourceChatId = sourceChatId
         textView.keyboardOwnershipStore = keyboardOwnershipStore
@@ -9290,7 +9292,7 @@ struct NotificationReplyTextInput: UIViewRepresentable {
                 // UIKit's software-keyboard text delegate reports only the replacement text,
                 // so Return and software Shift-Return are not distinguishable here. Hardware
                 // modified Return is handled by keyCommands before this submit path.
-                if parent.isOwnedReplyRoute(.textSubmit) {
+                if parent.isOwnedReplyRoute(.textSubmit, textView: textView) {
                     parent.onSubmit()
                 } else {
                     return true
@@ -9321,9 +9323,13 @@ struct NotificationReplyTextInput: UIViewRepresentable {
         }
     }
 
-    func isOwnedReplyRoute(_ intent: KeyboardCommandIntent) -> Bool {
+    func isOwnedReplyRoute(_ intent: KeyboardCommandIntent, textView: UITextView) -> Bool {
+        var reconciledStore = keyboardOwnershipStore
+        if textView.isFirstResponder {
+            reconciledStore.reconcileFocusedTextSurface(.notificationReply(sourceChatId))
+        }
         if case .handled(.notificationReply(let routedSourceChatId)) = KeyboardCommandRouter
-            .route(intent: intent, store: keyboardOwnershipStore)
+            .route(intent: intent, store: reconciledStore)
             .outcome,
            routedSourceChatId == sourceChatId {
             return true
@@ -9334,6 +9340,7 @@ struct NotificationReplyTextInput: UIViewRepresentable {
 
 final class NotificationReplyUITextView: UITextView {
     var sourceChatId = ""
+    var onSubmit: (() -> Void)?
     var onCancel: (() -> Void)?
     var wantsInitialFocus = false
     var visibleNotificationCount = 0
@@ -9368,18 +9375,32 @@ final class NotificationReplyUITextView: UITextView {
             modifierFlags: [],
             action: #selector(didPressEscape)
         )
-        let emacsCommands = [
-            UIKeyCommand(input: "w", modifierFlags: [.control], action: #selector(didPressCtrlW))
-        ]
-        let modifiedReturnCommands = KeyboardCommandBridge.textInputSpecs.compactMap { spec -> UIKeyCommand? in
-            guard spec.intent == .textModifiedNewline else { return nil }
-            return UIKeyCommand(
+        let textEditingCommands = TextEditingShortcutContract.keyCommands(
+            action: #selector(didPressTextEditingShortcut)
+        )
+        let returnCommands = KeyboardCommandBridge.textInputSpecs.compactMap { spec -> UIKeyCommand? in
+            let selector: Selector
+            switch spec.intent {
+            case .textSubmit:
+                selector = #selector(didPressReturn)
+            case .textModifiedNewline:
+                selector = #selector(didPressModifiedReturn)
+            default:
+                return nil
+            }
+            let command = UIKeyCommand(
                 input: spec.input,
                 modifierFlags: spec.modifierFlags,
-                action: #selector(didPressModifiedReturn)
+                action: selector
             )
+            command.wantsPriorityOverSystemBehavior = true
+            return command
         }
-        return prioritizedNotificationCommands + [escapeCommand] + modifiedReturnCommands + emacsCommands + (super.keyCommands ?? [])
+        return prioritizedNotificationCommands
+            + [escapeCommand]
+            + returnCommands
+            + textEditingCommands
+            + (super.keyCommands ?? [])
     }
 
     override func didMoveToWindow() {
@@ -9407,69 +9428,47 @@ final class NotificationReplyUITextView: UITextView {
     }
 
     @objc private func didPressEscape(_ sender: UIKeyCommand) {
-        guard case .handled(.notificationReply(let routedSourceChatId)) = KeyboardCommandRouter
-            .route(intent: .textCancel, store: keyboardOwnershipStore)
-            .outcome,
-              routedSourceChatId == sourceChatId else { return }
+        guard ownsReplyRoute(.textCancel) else { return }
         onCancel?()
     }
 
     @objc private func didPressModifiedReturn(_ sender: UIKeyCommand) {
-        guard case .handled(.notificationReply(let routedSourceChatId)) = KeyboardCommandRouter
-            .route(intent: .textModifiedNewline, store: keyboardOwnershipStore)
-            .outcome,
-              routedSourceChatId == sourceChatId else { return }
+        guard ownsReplyRoute(.textModifiedNewline) else { return }
         insertPlainText("\n")
     }
 
-    @objc private func didPressCtrlW(_ sender: UIKeyCommand) {
-        deletePreviousWordForReplyShortcut()
+    @objc private func didPressReturn(_ sender: UIKeyCommand) {
+        guard ownsReplyRoute(.textSubmit) else { return }
+        onSubmit?()
     }
 
-    override func insertText(_ text: String) {
-        if text == "\u{17}" {
-            _ = deletePreviousWordForReplyShortcut()
-            return
+    @objc private func didPressTextEditingShortcut(_ sender: UIKeyCommand) {
+        guard isEditable,
+              isFirstResponder,
+              let action = TextEditingShortcutContract.action(for: sender),
+              ownsReplyRoute(.textEditing) else { return }
+        TextEditingShortcutContract.perform(action, in: self) { [weak self] range, replacement in
+            self?.replacePlainText(in: range, with: replacement)
         }
-        super.insertText(text)
     }
 
-    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        if presses.contains(where: isControlWPress(_:)),
-           deletePreviousWordForReplyShortcut() {
-            return
-        }
-        super.pressesBegan(presses, with: event)
-    }
-
-    @discardableResult
-    private func deletePreviousWordForReplyShortcut() -> Bool {
-        guard isEditable, isFirstResponder, isOwnedReplyShortcutRoute else { return false }
-        guard let range = NotificationReplyPreviousWordDeletion.deleteRange(
-            in: text ?? "",
-            selectedRange: selectedRange
-        ) else { return false }
-        replacePlainText(in: range, with: "")
-        return true
-    }
-
-    private var isOwnedReplyShortcutRoute: Bool {
+    private func ownsReplyRoute(_ intent: KeyboardCommandIntent) -> Bool {
+        guard isFirstResponder else { return false }
+        var reconciledStore = keyboardOwnershipStore
+        reconciledStore.reconcileFocusedTextSurface(.notificationReply(sourceChatId))
         guard case .handled(.notificationReply(let routedSourceChatId)) = KeyboardCommandRouter
-            .route(intent: .textModifiedNewline, store: keyboardOwnershipStore)
+            .route(intent: intent, store: reconciledStore)
             .outcome else { return false }
         return routedSourceChatId == sourceChatId
     }
 
-    private func isControlWPress(_ press: UIPress) -> Bool {
-        guard let key = press.key else { return false }
-        return NotificationReplyControlWShortcut.matches(
-            charactersIgnoringModifiers: key.charactersIgnoringModifiers,
-            modifierFlags: key.modifierFlags
-        )
-    }
-
     private func insertPlainText(_ text: String) {
         replacePlainText(in: selectedRange, with: text)
+    }
+
+    private func replacePlainText(in range: UITextRange, with text: String) {
+        replace(range, withText: text)
+        delegate?.textViewDidChange?(self)
     }
 
     private func replacePlainText(in range: NSRange, with text: String) {
@@ -9477,41 +9476,6 @@ final class NotificationReplyUITextView: UITextView {
         textStorage.replaceCharacters(in: range, with: attributed)
         selectedRange = NSRange(location: range.location + attributed.length, length: 0)
         delegate?.textViewDidChange?(self)
-    }
-}
-
-struct NotificationReplyControlWShortcut {
-    static func matches(charactersIgnoringModifiers: String, modifierFlags: UIKeyModifierFlags) -> Bool {
-        let modifiers = modifierFlags.intersection([.command, .shift, .alternate, .control])
-        return modifiers == [.control]
-            && charactersIgnoringModifiers.lowercased() == "w"
-    }
-}
-
-struct NotificationReplyPreviousWordDeletion {
-    static func deleteRange(in text: String, selectedRange: NSRange) -> NSRange? {
-        guard let range = Range(selectedRange, in: text) else { return nil }
-        guard selectedRange.length == 0 else { return selectedRange }
-        let cursor = range.lowerBound
-        guard selectedRange.location > 0 else { return nil }
-
-        var deleteStartIndex = cursor
-        while deleteStartIndex > text.startIndex {
-            let previousIndex = text.index(before: deleteStartIndex)
-            if !text[previousIndex].isWhitespace { break }
-            deleteStartIndex = previousIndex
-        }
-
-        while deleteStartIndex > text.startIndex {
-            let previousIndex = text.index(before: deleteStartIndex)
-            if text[previousIndex].isWhitespace { break }
-            deleteStartIndex = previousIndex
-        }
-
-        let lowerBound = deleteStartIndex.utf16Offset(in: text)
-        let length = selectedRange.location - lowerBound
-        guard length > 0 else { return nil }
-        return NSRange(location: lowerBound, length: length)
     }
 }
 

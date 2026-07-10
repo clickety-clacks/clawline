@@ -1025,14 +1025,9 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
 
     override var keyCommands: [UIKeyCommand]? {
         let base = Self.appFontScalePassthroughCommands(from: super.keyCommands ?? [])
-        let emacsCommands: [UIKeyCommand] = [
-            UIKeyCommand(input: "a", modifierFlags: [.control], action: #selector(didPressCtrlA)),
-            UIKeyCommand(input: "e", modifierFlags: [.control], action: #selector(didPressCtrlE)),
-            UIKeyCommand(input: "w", modifierFlags: [.control], action: #selector(didPressCtrlW)),
-            UIKeyCommand(input: "u", modifierFlags: [.control], action: #selector(didPressCtrlU)),
-            UIKeyCommand(input: "k", modifierFlags: [.control], action: #selector(didPressCtrlK)),
-            UIKeyCommand(input: "c", modifierFlags: [.control], action: #selector(didPressCtrlC))
-        ]
+        let emacsCommands = TextEditingShortcutContract.keyCommands(
+            action: #selector(didPressTextEditingShortcut)
+        )
         let appCommandShortcuts = ChatAppCommandShortcut
             .prioritizedTextInputKeyCommandSpecs(notificationVisibleCount: notificationVisibleCount)
             .filter { spec in
@@ -1153,70 +1148,15 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         isInputEnabled && isFirstResponder
     }
 
-    @objc private func didPressCtrlA(_ sender: UIKeyCommand) {
-        guard canHandleInputShortcut else { return }
-        selectedTextRange = textRange(from: beginningOfDocument, to: beginningOfDocument)
-    }
-
-    @objc private func didPressCtrlE(_ sender: UIKeyCommand) {
-        guard canHandleInputShortcut else { return }
-        selectedTextRange = textRange(from: endOfDocument, to: endOfDocument)
-    }
-
-    @objc private func didPressCtrlW(_ sender: UIKeyCommand) {
-        guard canHandleInputShortcut else { return }
-
-        if let selectedRange = selectedTextRange, !selectedRange.isEmpty {
-            replaceUserText(selectedRange, with: "")
-            return
+    @objc private func didPressTextEditingShortcut(_ sender: UIKeyCommand) {
+        guard canHandleInputShortcut,
+              let action = TextEditingShortcutContract.action(for: sender),
+              case .handled(.composer) = KeyboardCommandRouter
+                .route(intent: .textEditing, store: keyboardOwnershipStore)
+                .outcome else { return }
+        TextEditingShortcutContract.perform(action, in: self) { [weak self] range, replacement in
+            self?.replaceUserText(range, with: replacement)
         }
-
-        guard let cursor = selectedTextRange?.start else { return }
-        guard let textBeforeCursorRange = textRange(from: beginningOfDocument, to: cursor),
-              let textBeforeCursor = text(in: textBeforeCursorRange),
-              !textBeforeCursor.isEmpty else { return }
-
-        var deleteStartIndex = textBeforeCursor.endIndex
-        while deleteStartIndex > textBeforeCursor.startIndex {
-            let previousIndex = textBeforeCursor.index(before: deleteStartIndex)
-            if !textBeforeCursor[previousIndex].isWhitespace { break }
-            deleteStartIndex = previousIndex
-        }
-
-        while deleteStartIndex > textBeforeCursor.startIndex {
-            let previousIndex = textBeforeCursor.index(before: deleteStartIndex)
-            if textBeforeCursor[previousIndex].isWhitespace { break }
-            deleteStartIndex = previousIndex
-        }
-
-        let charsToDelete = textBeforeCursor.distance(from: deleteStartIndex, to: textBeforeCursor.endIndex)
-        guard charsToDelete > 0,
-              let deleteStart = position(from: cursor, offset: -charsToDelete),
-              let deleteRange = textRange(from: deleteStart, to: cursor) else { return }
-
-        replaceUserText(deleteRange, with: "")
-    }
-
-    @objc private func didPressCtrlU(_ sender: UIKeyCommand) {
-        guard canHandleInputShortcut else { return }
-        guard let cursor = selectedTextRange?.start,
-              let range = textRange(from: beginningOfDocument, to: cursor),
-              !range.isEmpty else { return }
-        replaceUserText(range, with: "")
-    }
-
-    @objc private func didPressCtrlK(_ sender: UIKeyCommand) {
-        guard canHandleInputShortcut else { return }
-        guard let cursor = selectedTextRange?.start,
-              let range = textRange(from: cursor, to: endOfDocument),
-              !range.isEmpty else { return }
-        replaceUserText(range, with: "")
-    }
-
-    @objc private func didPressCtrlC(_ sender: UIKeyCommand) {
-        guard canHandleInputShortcut else { return }
-        guard let fullRange = textRange(from: beginningOfDocument, to: endOfDocument) else { return }
-        replaceUserText(fullRange, with: "")
     }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {

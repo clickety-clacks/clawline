@@ -35,6 +35,7 @@ enum KeyboardCommandIntent: Equatable {
     case textSubmit
     case textModifiedNewline
     case textCancel
+    case textEditing
 }
 
 enum KeyboardSurfaceKind: String, Equatable {
@@ -251,6 +252,16 @@ struct KeyboardOwnershipStore: Equatable {
             .first { $0.participatesInRouting && $0.commandFamilies.contains(family) }
         return mapped ?? firstActiveSurface(kind: .notificationBubble, supporting: family)
     }
+
+    mutating func reconcileFocusedTextSurface(_ focusedSurfaceId: KeyboardSurfaceId) {
+        for record in activeVisibleSurfaces() where record.commandFamilies.contains(.textEditing) {
+            update(
+                surfaceId: record.surfaceId,
+                lifecycleToken: record.lifecycleToken,
+                focusedHint: record.surfaceId == focusedSurfaceId
+            )
+        }
+    }
 }
 
 struct KeyboardRouteDecision: Equatable {
@@ -391,7 +402,7 @@ enum KeyboardCommandRouter {
             }
             return decision(.fallthroughToDefault, "PR-07")
 
-        case .textSubmit, .textModifiedNewline, .textCancel:
+        case .textSubmit, .textModifiedNewline, .textCancel, .textEditing:
             if intent == .textSubmit,
                let picker = reconciledStore.firstActiveSurface(kind: .mentionPicker, supporting: .pickerAccept) {
                 return decision(.handled(picker.surfaceId), "PR-02")
@@ -409,6 +420,120 @@ enum KeyboardCommandRouter {
                 return decision(.handled(transcript.surfaceId), "PR-07")
             }
             return decision(.fallthroughToDefault, "PR-07")
+        }
+    }
+}
+
+enum TextEditingShortcutAction: Equatable {
+    case moveToBeginning
+    case moveToEnd
+    case deletePreviousWord
+    case deleteToBeginning
+    case deleteToEnd
+    case clear
+}
+
+enum TextEditingShortcutContract {
+    struct Spec: Equatable {
+        let input: String
+        let modifierFlags: UIKeyModifierFlags
+        let action: TextEditingShortcutAction
+    }
+
+    static let specs: [Spec] = [
+        Spec(input: "a", modifierFlags: [.control], action: .moveToBeginning),
+        Spec(input: "e", modifierFlags: [.control], action: .moveToEnd),
+        Spec(input: "w", modifierFlags: [.control], action: .deletePreviousWord),
+        Spec(input: "u", modifierFlags: [.control], action: .deleteToBeginning),
+        Spec(input: "k", modifierFlags: [.control], action: .deleteToEnd),
+        Spec(input: "c", modifierFlags: [.control], action: .clear)
+    ]
+
+    static func action(for command: UIKeyCommand) -> TextEditingShortcutAction? {
+        specs.first {
+            command.input == $0.input && command.modifierFlags == $0.modifierFlags
+        }?.action
+    }
+
+    static func keyCommands(action: Selector) -> [UIKeyCommand] {
+        specs.map { spec in
+            let command = UIKeyCommand(
+                input: spec.input,
+                modifierFlags: spec.modifierFlags,
+                action: action
+            )
+            command.wantsPriorityOverSystemBehavior = true
+            return command
+        }
+    }
+
+    @MainActor
+    static func perform(
+        _ action: TextEditingShortcutAction,
+        in textView: UITextView,
+        replace: (UITextRange, String) -> Void
+    ) {
+        switch action {
+        case .moveToBeginning:
+            textView.selectedTextRange = textView.textRange(
+                from: textView.beginningOfDocument,
+                to: textView.beginningOfDocument
+            )
+        case .moveToEnd:
+            textView.selectedTextRange = textView.textRange(
+                from: textView.endOfDocument,
+                to: textView.endOfDocument
+            )
+        case .deletePreviousWord:
+            if let selectedRange = textView.selectedTextRange, !selectedRange.isEmpty {
+                replace(selectedRange, "")
+                return
+            }
+
+            guard let cursor = textView.selectedTextRange?.start,
+                  let textBeforeCursorRange = textView.textRange(
+                    from: textView.beginningOfDocument,
+                    to: cursor
+                  ),
+                  let textBeforeCursor = textView.text(in: textBeforeCursorRange),
+                  !textBeforeCursor.isEmpty else { return }
+
+            var deleteStartIndex = textBeforeCursor.endIndex
+            while deleteStartIndex > textBeforeCursor.startIndex {
+                let previousIndex = textBeforeCursor.index(before: deleteStartIndex)
+                if !textBeforeCursor[previousIndex].isWhitespace { break }
+                deleteStartIndex = previousIndex
+            }
+            while deleteStartIndex > textBeforeCursor.startIndex {
+                let previousIndex = textBeforeCursor.index(before: deleteStartIndex)
+                if textBeforeCursor[previousIndex].isWhitespace { break }
+                deleteStartIndex = previousIndex
+            }
+
+            let charactersToDelete = textBeforeCursor.distance(
+                from: deleteStartIndex,
+                to: textBeforeCursor.endIndex
+            )
+            guard charactersToDelete > 0,
+                  let deleteStart = textView.position(from: cursor, offset: -charactersToDelete),
+                  let deleteRange = textView.textRange(from: deleteStart, to: cursor) else { return }
+            replace(deleteRange, "")
+        case .deleteToBeginning:
+            guard let cursor = textView.selectedTextRange?.start,
+                  let range = textView.textRange(from: textView.beginningOfDocument, to: cursor),
+                  !range.isEmpty else { return }
+            replace(range, "")
+        case .deleteToEnd:
+            guard let cursor = textView.selectedTextRange?.start,
+                  let range = textView.textRange(from: cursor, to: textView.endOfDocument),
+                  !range.isEmpty else { return }
+            replace(range, "")
+        case .clear:
+            guard let range = textView.textRange(
+                from: textView.beginningOfDocument,
+                to: textView.endOfDocument
+            ) else { return }
+            replace(range, "")
         }
     }
 }

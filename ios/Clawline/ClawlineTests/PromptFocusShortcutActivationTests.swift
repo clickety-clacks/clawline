@@ -489,18 +489,24 @@ struct PromptFocusShortcutActivationTests {
         )
     }
 
-    @Test("T1476 reply input exposes Ctrl-W previous-word delete shortcut")
+    @Test("T1476 composer and reply expose the same prioritized Emacs editing shortcut contract")
     @MainActor
-    func replyInputExposesCtrlWPreviousWordDeleteShortcut() {
-        let textView = NotificationReplyUITextView()
+    func composerAndReplyExposeSamePrioritizedEmacsEditingShortcutContract() {
+        let composer = PastableTextView()
+        let reply = NotificationReplyUITextView()
 
-        #expect(
-            textView.keyCommands?.contains { command in
-                command.input == "w"
-                    && command.modifierFlags == [.control]
-                    && command.action == Selector(("didPressCtrlW:"))
-            } == true
-        )
+        for spec in TextEditingShortcutContract.specs {
+            let composerCommand = composer.keyCommands?.first {
+                $0.input == spec.input && $0.modifierFlags == spec.modifierFlags
+            }
+            let replyCommand = reply.keyCommands?.first {
+                $0.input == spec.input && $0.modifierFlags == spec.modifierFlags
+            }
+            #expect(composerCommand?.action == Selector(("didPressTextEditingShortcut:")))
+            #expect(replyCommand?.action == Selector(("didPressTextEditingShortcut:")))
+            #expect(composerCommand?.wantsPriorityOverSystemBehavior == true)
+            #expect(replyCommand?.wantsPriorityOverSystemBehavior == true)
+        }
     }
 
     @Test("T342 reply input modified Return inserts newline at caret")
@@ -541,128 +547,60 @@ struct PromptFocusShortcutActivationTests {
         #expect(textView.selectedRange == NSRange(location: 4, length: 0))
     }
 
-    @Test("T1476 reply input Ctrl-W deletes previous word and trailing spaces")
+    @Test("T1476 reply input performs the complete composer Emacs editing contract")
     @MainActor
-    func replyInputCtrlWDeletesPreviousWordAndTrailingSpaces() {
+    func replyInputPerformsCompleteComposerEmacsEditingContract() {
         let (textView, window) = focusedNotificationReplyTextView(sourceChatId: "reply-source")
         defer { window.isHidden = true }
+
+        func send(_ input: String) {
+            textView.perform(
+                Selector(("didPressTextEditingShortcut:")),
+                with: UIKeyCommand(
+                    input: input,
+                    modifierFlags: [.control],
+                    action: Selector(("didPressTextEditingShortcut:"))
+                )
+            )
+        }
+
+        textView.text = "alpha beta"
+        textView.selectedRange = NSRange(location: 5, length: 0)
+        send("a")
+        #expect(textView.selectedRange == NSRange(location: 0, length: 0))
+        send("e")
+        #expect(textView.selectedRange == NSRange(location: 10, length: 0))
 
         textView.text = "alpha beta   "
         textView.selectedRange = NSRange(location: 13, length: 0)
-
-        textView.perform(
-            Selector(("didPressCtrlW:")),
-            with: UIKeyCommand(input: "w", modifierFlags: [.control], action: Selector(("didPressCtrlW:")))
-        )
-
+        send("w")
         #expect(textView.text == "alpha ")
         #expect(textView.selectedRange == NSRange(location: 6, length: 0))
-    }
-
-    @Test("T1476 reply input previous-word deletion helper covers selection and words")
-    func replyInputPreviousWordDeletionHelperCoversSelectionAndWords() {
-        #expect(
-            NotificationReplyPreviousWordDeletion.deleteRange(
-                in: "alpha beta   ",
-                selectedRange: NSRange(location: 13, length: 0)
-            ) == NSRange(location: 6, length: 7)
-        )
-        #expect(
-            NotificationReplyPreviousWordDeletion.deleteRange(
-                in: "keep remove tail",
-                selectedRange: NSRange(location: 5, length: 7)
-            ) == NSRange(location: 5, length: 7)
-        )
-        #expect(
-            NotificationReplyPreviousWordDeletion.deleteRange(
-                in: "alpha",
-                selectedRange: NSRange(location: 0, length: 0)
-            ) == nil
-        )
-    }
-
-    @Test("T1476 reply input recognizes hardware Ctrl-W press shape")
-    func replyInputRecognizesHardwareCtrlWPressShape() {
-        #expect(
-            NotificationReplyControlWShortcut.matches(
-                charactersIgnoringModifiers: "w",
-                modifierFlags: [.control]
-            )
-        )
-        #expect(
-            NotificationReplyControlWShortcut.matches(
-                charactersIgnoringModifiers: "W",
-                modifierFlags: [.control]
-            )
-        )
-        #expect(
-            NotificationReplyControlWShortcut.matches(
-                charactersIgnoringModifiers: "w",
-                modifierFlags: [.command]
-            ) == false
-        )
-        #expect(
-            NotificationReplyControlWShortcut.matches(
-                charactersIgnoringModifiers: "w",
-                modifierFlags: [.control, .shift]
-            ) == false
-        )
-    }
-
-    @Test("T1476 reply input handles delivered Ctrl-W text input event")
-    @MainActor
-    func replyInputHandlesDeliveredCtrlWTextInputEvent() {
-        let (textView, window) = focusedNotificationReplyTextView(sourceChatId: "reply-source")
-        defer { window.isHidden = true }
-
-        textView.text = "alpha beta"
-        textView.selectedRange = NSRange(location: 10, length: 0)
-
-        textView.insertText("\u{17}")
-
-        #expect(textView.text == "alpha ")
-        #expect(textView.selectedRange == NSRange(location: 6, length: 0))
-    }
-
-    @Test("T1476 reply input delivered Ctrl-W preserves text when reply route is not focused")
-    @MainActor
-    func replyInputDeliveredCtrlWPreservesTextWhenReplyRouteIsNotFocused() {
-        let (textView, window) = focusedNotificationReplyTextView(
-            sourceChatId: "reply-source",
-            isReplyFocused: false
-        )
-        defer { window.isHidden = true }
-
-        textView.text = "alpha beta"
-        textView.selectedRange = NSRange(location: 10, length: 0)
-
-        textView.insertText("\u{17}")
-
-        #expect(textView.text == "alpha beta")
-        #expect(textView.selectedRange == NSRange(location: 10, length: 0))
-    }
-
-    @Test("T1476 reply input Ctrl-W deletes active selection")
-    @MainActor
-    func replyInputCtrlWDeletesActiveSelection() {
-        let (textView, window) = focusedNotificationReplyTextView(sourceChatId: "reply-source")
-        defer { window.isHidden = true }
 
         textView.text = "keep remove tail"
         textView.selectedRange = NSRange(location: 5, length: 7)
-
-        textView.perform(
-            Selector(("didPressCtrlW:")),
-            with: UIKeyCommand(input: "w", modifierFlags: [.control], action: Selector(("didPressCtrlW:")))
-        )
-
+        send("w")
         #expect(textView.text == "keep tail")
-        #expect(textView.selectedRange == NSRange(location: 5, length: 0))
+
+        textView.text = "alpha beta"
+        textView.selectedRange = NSRange(location: 6, length: 0)
+        send("u")
+        #expect(textView.text == "beta")
+
+        textView.text = "alpha beta"
+        textView.selectedRange = NSRange(location: 5, length: 0)
+        send("k")
+        #expect(textView.text == "alpha")
+
+        textView.text = "alpha beta"
+        textView.selectedRange = NSRange(location: 5, length: 0)
+        send("c")
+        #expect(textView.text.isEmpty)
     }
 
-    @Test("T1476 reply input Ctrl-W preserves text when reply route is not focused")
+    @Test("T1476 reply editing shortcuts reconcile stale ownership from actual responder focus")
     @MainActor
-    func replyInputCtrlWPreservesTextWhenReplyRouteIsNotFocused() {
+    func replyEditingShortcutsReconcileStaleOwnershipFromActualResponderFocus() {
         let sourceChatId = "reply-source"
         let (textView, window) = focusedNotificationReplyTextView(
             sourceChatId: sourceChatId,
@@ -674,12 +612,59 @@ struct PromptFocusShortcutActivationTests {
         textView.selectedRange = NSRange(location: 10, length: 0)
 
         textView.perform(
-            Selector(("didPressCtrlW:")),
-            with: UIKeyCommand(input: "w", modifierFlags: [.control], action: Selector(("didPressCtrlW:")))
+            Selector(("didPressTextEditingShortcut:")),
+            with: UIKeyCommand(
+                input: "w",
+                modifierFlags: [.control],
+                action: Selector(("didPressTextEditingShortcut:"))
+            )
+        )
+
+        #expect(textView.text == "alpha ")
+        #expect(textView.selectedRange == NSRange(location: 6, length: 0))
+    }
+
+    @Test("T1476 reply editing shortcuts preserve text when the reply is not first responder")
+    @MainActor
+    func replyEditingShortcutsPreserveTextWhenReplyIsNotFirstResponder() {
+        let (textView, window) = focusedNotificationReplyTextView(sourceChatId: "reply-source")
+        defer { window.isHidden = true }
+        #expect(textView.resignFirstResponder())
+        textView.text = "alpha beta"
+        textView.selectedRange = NSRange(location: 10, length: 0)
+
+        textView.perform(
+            Selector(("didPressTextEditingShortcut:")),
+            with: UIKeyCommand(
+                input: "w",
+                modifierFlags: [.control],
+                action: Selector(("didPressTextEditingShortcut:"))
+            )
         )
 
         #expect(textView.text == "alpha beta")
         #expect(textView.selectedRange == NSRange(location: 10, length: 0))
+    }
+
+    @Test("T1476 hardware Return submits exactly once and remains focused")
+    @MainActor
+    func replyHardwareReturnSubmitsExactlyOnceAndRemainsFocused() {
+        let (textView, window) = focusedNotificationReplyTextView(sourceChatId: "reply-source")
+        defer { window.isHidden = true }
+        var submitCount = 0
+        textView.onSubmit = { submitCount += 1 }
+        textView.text = "reply"
+
+        let returnCommand = textView.keyCommands?.first {
+            $0.input == "\r" && $0.modifierFlags.isEmpty
+        }
+        #expect(returnCommand?.action == Selector(("didPressReturn:")))
+        #expect(returnCommand?.wantsPriorityOverSystemBehavior == true)
+        textView.perform(Selector(("didPressReturn:")), with: returnCommand)
+
+        #expect(submitCount == 1)
+        #expect(textView.text == "reply")
+        #expect(textView.isFirstResponder)
     }
 
     @Test("T342 main prompt software Return delegate path stays submit because Shift-Return is not distinguishable")

@@ -27,6 +27,7 @@ struct SessionStatus: Decodable, Equatable {
         let fastMode: Bool?
         let mode: String?
         let verbosity: String?
+        let codexUsage: CodexUsage?
 
         init(
             model: String?,
@@ -38,7 +39,8 @@ struct SessionStatus: Decodable, Equatable {
             thinkingLevel: String?,
             fastMode: Bool?,
             mode: String?,
-            verbosity: String?
+            verbosity: String?,
+            codexUsage: CodexUsage? = nil
         ) {
             self.model = model
             self.fallbackModels = fallbackModels
@@ -50,6 +52,41 @@ struct SessionStatus: Decodable, Equatable {
             self.fastMode = fastMode
             self.mode = mode
             self.verbosity = verbosity
+            self.codexUsage = codexUsage
+        }
+
+        struct CodexUsage: Decodable, Equatable {
+            enum Freshness: String, Decodable, Equatable {
+                case loading
+                case fresh
+                case stale
+                case unavailable
+            }
+
+            enum UnavailableReason: String, Decodable, Equatable {
+                case accountBindingUnavailable = "account_binding_unavailable"
+                case providerUnavailable = "provider_unavailable"
+                case timeout
+                case invalidUsage = "invalid_usage"
+                case staleExpired = "stale_expired"
+                case resetElapsed = "reset_elapsed"
+            }
+
+            struct Window: Decodable, Equatable {
+                enum Label: String, Decodable, Equatable {
+                    case fiveHour = "5h"
+                    case week = "Week"
+                }
+
+                let label: Label
+                let remainingPercent: Int
+                let resetAt: TimeInterval?
+            }
+
+            let freshness: Freshness
+            let fetchedAt: TimeInterval?
+            let windows: [Window]
+            let unavailableReason: UnavailableReason?
         }
     }
 

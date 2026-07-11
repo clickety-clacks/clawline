@@ -1487,6 +1487,7 @@ struct ProviderServiceTests {
         #expect(status.display.authMode == "oauth")
         #expect(status.display.thinkingLevel == "high")
         #expect(status.display.fastMode == true)
+        #expect(SessionMetadataFooterCell.footerText(for: status) == "claude-sonnet-4.6  ·  Thinking high  ·  Fast on  ·  OAUTH")
         #expect(status.run.state == .running)
         #expect(status.run.queueDepth == 2)
         #expect(status.capabilities.cancelCurrentRun?.supported == false)

@@ -7,6 +7,7 @@
 
 import Testing
 import UIKit
+import SafariServices
 import WebKit
 @testable import Clawline
 
@@ -2499,11 +2500,24 @@ struct BubbleScrollTests {
             presentation: singleLinkPresentation,
             metrics: metrics
         )
-
-        #expect(allGestureRecognizers(in: bubble).contains(where: { $0 is UISwipeGestureRecognizer }) == false)
         let cards = allSubviews(in: bubble).compactMap { $0 as? LinkCardUIKitView }
         #expect(cards.count == 1)
-        #expect(cards.first?.allControlEvents.contains(.touchUpInside) == true)
+        guard let card = cards.first,
+              let interactionSurface = bubbleInteractionSurface(containing: card, within: bubble) else {
+            Issue.record("Expected single-link card on the bubble interaction surface")
+            return
+        }
+        #expect(interactionSurface.gestureRecognizers?.contains(where: { $0 is UISwipeGestureRecognizer }) == false)
+        #expect(card.allControlEvents.contains(.touchUpInside))
+
+        let host = UIViewController()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.addSubview(bubble)
+        card.sendActions(for: .touchUpInside)
+        #expect(host.presentedViewController is SFSafariViewController)
+        window.isHidden = true
     }
 
     @Test("T118-R3/R4: Unrelated overflow tap expansion remains conditional")
@@ -2721,6 +2735,11 @@ struct BubbleScrollTests {
         if forceOverflow, let inner = innerBubbleScrollView(in: bubble) {
             inner.contentSize = CGSize(width: max(1, inner.bounds.width), height: inner.bounds.height + 200)
         }
+        guard let interactionSurface = bubbleInteractionSurface(containing: nil, within: bubble) else {
+            Issue.record("Expected bubble tap interaction surface")
+            return count
+        }
+        #expect(interactionSurface.gestureRecognizers?.contains(where: { $0 is UITapGestureRecognizer }) == true)
 
         _ = bubble.perform(NSSelectorFromString("handleBubbleTap"))
         return count
@@ -2768,8 +2787,17 @@ struct BubbleScrollTests {
         view.subviews + view.subviews.flatMap { allSubviews(in: $0) }
     }
 
-    private func allGestureRecognizers(in view: UIView) -> [UIGestureRecognizer] {
-        (view.gestureRecognizers ?? []) + view.subviews.flatMap { allGestureRecognizers(in: $0) }
+    private func bubbleInteractionSurface(containing descendant: UIView?, within bubble: UIView) -> UIView? {
+        var candidate = descendant?.superview
+        while let view = candidate, view !== bubble {
+            if view.gestureRecognizers?.contains(where: { $0 is UITapGestureRecognizer }) == true {
+                return view
+            }
+            candidate = view.superview
+        }
+        return bubble.subviews.first(where: {
+            $0.gestureRecognizers?.contains(where: { $0 is UITapGestureRecognizer }) == true
+        })
     }
 
     private func allScrollViews(in view: UIView) -> [UIScrollView] {

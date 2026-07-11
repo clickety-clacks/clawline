@@ -31,6 +31,10 @@ Note: "ultrathink" is appended to the prompt to enable extended thinking mode.
 - Avoid postfix force unwraps (`!`) in production code, except static URL literals with explicit code-review sign-off.
 - In protocol/message handlers, do not silently drop decode/transform failures; log or surface an explicit failure path.
 
+## Device and Simulator Testing
+
+Use XcodeBuildMCP when Clawline needs simulator or device execution, screenshots, UI hierarchy, interaction, or log capture. Read the UI hierarchy before coordinate-based interaction; do not guess coordinates from screenshots. Query the MCP server for the current tool names and parameters.
+
 ## GitHub Issue Hygiene
 
 When working on GitHub issues, follow these rules:

@@ -21,6 +21,80 @@ final class T1150NotificationDockUITests: XCTestCase {
     }
 
     @MainActor
+    func testT1591NotificationGlobalShortcutsReachVisibleNotificationsWhileComposerIsFocused() throws {
+        let app = launchDockedNotificationProofApp(skipCollapsedPreview: true)
+        let dockedHitTarget = dockedHitTarget(in: app)
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: dockedHitTarget.frame.minX + 4, dy: dockedHitTarget.frame.midY))
+            .tap()
+        assertUndockedNotificationsRemainVisible(in: app)
+
+        let composer = promptComposer(in: app)
+        composer.tap()
+
+        composer.typeKey("0", modifierFlags: [.command, .alternate])
+        XCTAssertTrue(
+            app.buttons["Close reply"].firstMatch.waitForExistence(timeout: 2),
+            "Cmd-Option-0 should open reply for the first assigned notification while the composer is focused"
+        )
+
+        app.typeKey("0", modifierFlags: [.command, .shift, .alternate])
+        XCTAssertFalse(
+            app.staticTexts["T1174 Alpha"].waitForExistence(timeout: 1),
+            "Cmd-Shift-Option-0 should dismiss the first assigned notification while its reply is focused"
+        )
+        XCTAssertTrue(app.staticTexts["T1174 Beta"].exists, "Assigned dismiss should preserve unrelated notifications")
+
+        app.typeKey("-", modifierFlags: [.command, .shift, .alternate])
+        XCTAssertFalse(
+            app.staticTexts["T1174 Beta"].waitForExistence(timeout: 1),
+            "Cmd-Shift-Option-minus should clear the remaining notifications"
+        )
+    }
+
+    @MainActor
+    func testT1591AssignedOpenShortcutPresentsNotificationActionMenu() throws {
+        let app = launchDockedNotificationProofApp(skipCollapsedPreview: true)
+        let composer = promptComposer(in: app)
+        composer.tap()
+
+        composer.typeKey("0", modifierFlags: [.command])
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["Go to Chat…"].waitForExistence(timeout: 2),
+            "Cmd-0 should present the assigned notification action menu while the composer is focused"
+        )
+    }
+
+    @MainActor
+    func testT1591NotificationDockShortcutExecutesOnceWhileComposerIsFocused() throws {
+        let app = launchDockedNotificationProofApp(skipCollapsedPreview: true)
+        let dockedHitTarget = dockedHitTarget(in: app)
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: dockedHitTarget.frame.minX + 4, dy: dockedHitTarget.frame.midY))
+            .tap()
+        assertUndockedNotificationsRemainVisible(in: app)
+
+        promptComposer(in: app).tap()
+        app.typeKey("\\", modifierFlags: .command)
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)
+                .matching(identifier: "cross_chat_notification_stack_docked")
+                .firstMatch
+                .waitForExistence(timeout: 2),
+            "Cmd-\\ should dock the notification stack exactly once while the composer is focused"
+        )
+        XCTAssertFalse(
+            app.descendants(matching: .any)
+                .matching(identifier: "cross_chat_notification_stack_undocked")
+                .firstMatch
+                .exists,
+            "A second notification-stack owner must not immediately undo Cmd-\\"
+        )
+    }
+
+    @MainActor
     func testRotatedLandscapeChatBubblesComposerAndNotificationsStayWithinScreen() throws {
         let app = launchDockedNotificationProofApp(skipCollapsedPreview: true)
         assertDockedPeekIsOnlyEdgeStrip(in: app)

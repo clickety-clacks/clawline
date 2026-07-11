@@ -489,18 +489,28 @@ struct PromptFocusShortcutActivationTests {
         )
     }
 
-    @Test("T1476 reply input exposes Ctrl-W previous-word delete shortcut")
+    @Test("T1591 reply input exposes the canonical composer text-control shortcuts")
     @MainActor
-    func replyInputExposesCtrlWPreviousWordDeleteShortcut() {
+    func replyInputExposesCanonicalComposerTextControlShortcuts() {
         let textView = NotificationReplyUITextView()
 
-        #expect(
-            textView.keyCommands?.contains { command in
-                command.input == "w"
+        let expectedActions = [
+            "a": Selector(("didPressCtrlA:")),
+            "e": Selector(("didPressCtrlE:")),
+            "w": Selector(("didPressCtrlW:")),
+            "u": Selector(("didPressCtrlU:")),
+            "k": Selector(("didPressCtrlK:")),
+            "c": Selector(("didPressCtrlC:")),
+        ]
+        for (input, action) in expectedActions {
+            #expect(
+                textView.keyCommands?.contains { command in
+                    command.input == input
                     && command.modifierFlags == [.control]
-                    && command.action == Selector(("didPressCtrlW:"))
-            } == true
-        )
+                    && command.action == action
+                } == true
+            )
+        }
     }
 
     @Test("T342 reply input modified Return inserts newline at caret")
@@ -557,6 +567,39 @@ struct PromptFocusShortcutActivationTests {
 
         #expect(textView.text == "alpha ")
         #expect(textView.selectedRange == NSRange(location: 6, length: 0))
+    }
+
+    @Test("T1591 reply input text-control shortcuts match composer editing behavior")
+    @MainActor
+    func replyInputTextControlShortcutsMatchComposerEditingBehavior() {
+        let (textView, window) = focusedNotificationReplyTextView(sourceChatId: "reply-source")
+        defer { window.isHidden = true }
+
+        textView.text = "alpha beta"
+        textView.selectedRange = NSRange(location: 5, length: 0)
+
+        textView.perform(Selector(("didPressCtrlA:")), with: nil)
+        #expect(textView.selectedRange == NSRange(location: 0, length: 0))
+
+        textView.perform(Selector(("didPressCtrlE:")), with: nil)
+        #expect(textView.selectedRange == NSRange(location: 10, length: 0))
+
+        textView.selectedRange = NSRange(location: 5, length: 0)
+        textView.perform(Selector(("didPressCtrlU:")), with: nil)
+        #expect(textView.text == " beta")
+        #expect(textView.selectedRange == NSRange(location: 0, length: 0))
+
+        textView.text = "alpha beta"
+        textView.selectedRange = NSRange(location: 5, length: 0)
+        textView.perform(Selector(("didPressCtrlK:")), with: nil)
+        #expect(textView.text == "alpha")
+        #expect(textView.selectedRange == NSRange(location: 5, length: 0))
+
+        textView.text = "alpha beta"
+        textView.selectedRange = NSRange(location: 5, length: 0)
+        textView.perform(Selector(("didPressCtrlC:")), with: nil)
+        #expect(textView.text.isEmpty)
+        #expect(textView.selectedRange == NSRange(location: 0, length: 0))
     }
 
     @Test("T1476 reply input previous-word deletion helper covers selection and words")
@@ -1267,6 +1310,37 @@ struct PromptFocusShortcutActivationTests {
         #expect(posted.isEmpty)
     }
 
+    @Test("T1591 notification stack responder posts normalized router intents")
+    @MainActor
+    func notificationStackResponderPostsNormalizedRouterIntents() {
+        let center = NotificationCenter.default
+        var posted: [KeyboardCommandIntent] = []
+        let token = center.addObserver(forName: .clawlineKeyboardCommandIntent, object: nil, queue: nil) { notification in
+            if let intent = notification.object as? KeyboardCommandIntent {
+                posted.append(intent)
+            }
+        }
+        defer { center.removeObserver(token) }
+
+        let responder = UIResponder()
+        responder.clawlineNotificationStackCommand(
+            UIKeyCommand(
+                input: "\\",
+                modifierFlags: [.command],
+                action: #selector(UIResponder.clawlineNotificationStackCommand(_:))
+            )
+        )
+        responder.clawlineNotificationStackCommand(
+            UIKeyCommand(
+                input: "-",
+                modifierFlags: [.command, .shift, .alternate],
+                action: #selector(UIResponder.clawlineNotificationStackCommand(_:))
+            )
+        )
+
+        #expect(posted == [.notificationToggleDock, .notificationDismissAll])
+    }
+
     @Test("Notification scroll responders normalize physical Cmd-J/K through root fan-out intents")
     @MainActor
     func notificationScrollRespondersPostNotificationScrollIntents() {
@@ -1741,6 +1815,22 @@ struct PromptFocusShortcutActivationTests {
             command.input == "j" && command.modifierFlags == [.command, .shift]
         }
 
+        let requiredNotificationGlobals: [(String, UIKeyModifierFlags)] = [
+            ("0", [.command]),
+            ("0", [.command, .alternate]),
+            ("0", [.command, .shift, .alternate]),
+            ("j", [.command]),
+            ("k", [.command]),
+            ("\\", [.command]),
+            ("-", [.command, .shift, .alternate]),
+        ]
+        for (input, modifierFlags) in requiredNotificationGlobals {
+            #expect(
+                textView.keyCommands?.contains { command in
+                    command.input == input && command.modifierFlags == modifierFlags
+                } == true
+            )
+        }
         #expect(firstCommandJ?.action == #selector(UIResponder.clawlineScrollDownCommand(_:)))
         #expect(firstCommandShiftJ?.action == #selector(UIResponder.clawlineScrollChatDownCommand(_:)))
     }

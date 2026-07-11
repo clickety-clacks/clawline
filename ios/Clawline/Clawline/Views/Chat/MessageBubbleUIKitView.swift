@@ -3203,6 +3203,15 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
         lastMismatch = nil
     }
 
+    func renderedBubbleFrame(in coordinateSpace: UICoordinateSpace?) -> CGRect {
+        layoutIfNeeded()
+        let bubbleFrame = containerView.bubbleFrameInContainer()
+        if let coordinateSpace {
+            return containerView.convert(bubbleFrame, to: coordinateSpace)
+        }
+        return containerView.convert(bubbleFrame, to: nil)
+    }
+
     func flashUnreadAnchorHighlight(isUnreadTap: Bool) {
         flashOverlayView?.removeFromSuperview()
         flashOverlayView = nil

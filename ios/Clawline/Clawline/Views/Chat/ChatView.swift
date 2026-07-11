@@ -11,12 +11,199 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 import WebKit
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
 #if canImport(GameController)
 import GameController
 #endif
 import os.log
 
 private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "ChatView")
+
+struct SuggestionModeSource: Equatable {
+    let messageId: String
+    let sourceIndex: Int
+    let visibleTextExcerpt: String
+    let sourceRect: CGRect
+}
+
+struct SuggestionCandidate: Equatable {
+    let messageId: String
+    let promptText: String
+}
+
+struct SuggestionHint: Identifiable, Equatable {
+    var id: String { "\(messageId)-\(letter)" }
+    let letter: Character
+    let messageId: String
+    let promptText: String
+    let sourceRect: CGRect
+}
+
+enum SuggestionModePhase: Equatable {
+    case inactive
+    case generating
+    case showing
+}
+
+struct SuggestionModeState: Equatable {
+    var activeChatId: String?
+    var modeId: UUID?
+    var transcriptReloadGeneration: Int?
+    var phase: SuggestionModePhase = .inactive
+    var sources: [SuggestionModeSource] = []
+    var hints: [SuggestionHint] = []
+
+    static let inactive = SuggestionModeState()
+}
+
+enum SuggestionModeReducer {
+    static let assignmentLetters = Array("abcdefghijklmnopqrstuvwxyz")
+
+    static func hints(sources: [SuggestionModeSource], candidates: [SuggestionCandidate]) -> [SuggestionHint] {
+        let sourcesById = Dictionary(uniqueKeysWithValues: sources.map { ($0.messageId, $0) })
+        var acceptedPrompts: [String] = []
+        let grouped = Dictionary(grouping: candidates) { $0.messageId }
+        var orderedHints: [SuggestionHint] = []
+
+        for source in sources.sorted(by: { $0.sourceIndex < $1.sourceIndex }) {
+            guard sourcesById[source.messageId] != nil else { continue }
+            for candidate in grouped[source.messageId] ?? [] {
+                let prompt = candidate.promptText.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !prompt.isEmpty else { continue }
+                let normalized = normalizedPrompt(prompt)
+                guard !acceptedPrompts.contains(where: { isNearDuplicate(normalized, of: $0) }) else { continue }
+                guard orderedHints.count < assignmentLetters.count else { return orderedHints }
+                acceptedPrompts.append(normalized)
+                orderedHints.append(
+                    SuggestionHint(
+                        letter: assignmentLetters[orderedHints.count],
+                        messageId: source.messageId,
+                        promptText: prompt,
+                        sourceRect: source.sourceRect
+                    )
+                )
+            }
+        }
+        return orderedHints
+    }
+
+    static func selectedPrompt(for input: String, hints: [SuggestionHint]) -> String? {
+        guard let letter = input.lowercased().first else { return nil }
+        return hints.first { $0.letter == letter }?.promptText
+    }
+
+    static func isSnapshotValid(sources: [SuggestionModeSource], messageIds: Set<String>) -> Bool {
+        Set(sources.map(\.messageId)).isSubset(of: messageIds)
+    }
+
+    private static func normalizedPrompt(_ prompt: String) -> String {
+        prompt
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .lowercased()
+    }
+
+    private static func isNearDuplicate(_ candidate: String, of accepted: String) -> Bool {
+        guard candidate != accepted else { return true }
+        let candidateTokens = Set(candidate.split(separator: " ").map(String.init))
+        let acceptedTokens = Set(accepted.split(separator: " ").map(String.init))
+        guard !candidateTokens.isEmpty, !acceptedTokens.isEmpty else { return true }
+        let sharedCount = candidateTokens.intersection(acceptedTokens).count
+        return sharedCount * 3 >= max(candidateTokens.count, acceptedTokens.count) * 2
+    }
+}
+
+struct VimSuggestionGenerationService {
+    func generate(sources: [SuggestionModeSource]) async -> [SuggestionCandidate]? {
+        guard !sources.isEmpty else { return nil }
+#if canImport(FoundationModels)
+        if #available(iOS 26.0, visionOS 3.0, *) {
+            let model = SystemLanguageModel.default
+            guard case .available = model.availability else { return nil }
+
+            let instructions = """
+            You create concise next-step prompts from visible assistant chat messages.
+            Return prompt text the user could send directly.
+            Preserve the source messageId for each prompt.
+            Do not include explanations.
+            """
+            let prompt = Self.prompt(for: sources)
+            do {
+                let output = try await Self.withTimeout(.seconds(8)) {
+                    let session = LanguageModelSession(instructions: instructions)
+                    return try await session.respond(to: prompt, generating: VimSuggestionOutput.self).content
+                }
+                return output.suggestions.map {
+                    SuggestionCandidate(messageId: $0.messageId, promptText: $0.promptText)
+                }
+            } catch {
+                return nil
+            }
+        }
+#endif
+        return nil
+    }
+
+    private static func prompt(for sources: [SuggestionModeSource]) -> String {
+        let body = sources.map { source in
+            """
+            messageId: \(source.messageId)
+            text:
+            \(source.visibleTextExcerpt)
+            """
+        }.joined(separator: "\n\n---\n\n")
+        return """
+        Generate zero or more concise next-step prompt suggestions for these currently visible assistant messages.
+        Suggestions must be associated with one supplied messageId.
+
+        \(body)
+        """
+    }
+
+#if canImport(FoundationModels)
+    @available(iOS 26.0, visionOS 3.0, *)
+    private static func withTimeout<T>(
+        _ duration: Duration,
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask {
+                try await operation()
+            }
+            group.addTask {
+                try await Task.sleep(for: duration)
+                throw CancellationError()
+            }
+            guard let value = try await group.next() else {
+                throw CancellationError()
+            }
+            group.cancelAll()
+            return value
+        }
+    }
+#endif
+}
+
+#if canImport(FoundationModels)
+@available(iOS 26.0, visionOS 3.0, *)
+@Generable
+private struct VimSuggestionOutput {
+    @Guide(description: "Concise prompt suggestions grouped by source message id.")
+    var suggestions: [Suggestion]
+
+    @Generable
+    struct Suggestion {
+        @Guide(description: "The exact messageId from the supplied source.")
+        var messageId: String
+
+        @Guide(description: "A concise prompt the user could send directly.")
+        var promptText: String
+    }
+}
+#endif
 
 private enum CrossChatShortcutLabelAvailability {
     static var current: Bool {
@@ -329,6 +516,8 @@ struct ChatView: View {
     @State private var crossChatNotificationFocusedSourceChatId: String?
     @State private var crossChatNotificationFocusedReplySourceChatId: String?
     @State private var chatViewTraceId = UUID().uuidString
+    @State private var suggestionModeState = SuggestionModeState.inactive
+    @State private var suggestionModeTask: Task<Void, Never>?
 #if DEBUG
     @State private var lifecycleDebugOverlayVisible = true
     @State private var lifecycleDebugOverlayDismissTask: Task<Void, Never>?
@@ -370,6 +559,16 @@ struct ChatView: View {
 
     private var isKeyboardVisible: Bool {
         keyboardHeight > 0.5
+    }
+
+    private var activeSuggestionChatMessageIds: Set<String> {
+        guard let sessionKey = suggestionModeState.activeChatId else { return [] }
+        return Set(viewModel.messages(for: sessionKey).map(\.id))
+    }
+
+    private var activeSuggestionTranscriptReloadGeneration: Int {
+        guard let sessionKey = suggestionModeState.activeChatId else { return 0 }
+        return viewModel.forceReReadGeneration(for: sessionKey)
     }
 
     private var fontScaleChangeSequence: Int {
@@ -1185,11 +1384,14 @@ struct ChatView: View {
             notificationCommand
         ))
 
-        let lifecycleRootLayer: AnyView = AnyView(commandFocusedRootLayer
+        let keyboardCommandRootLayer: AnyView = AnyView(commandFocusedRootLayer
         .onReceive(NotificationCenter.default.publisher(for: .clawlineKeyboardCommandIntent)) { notification in
             guard let intent = notification.object as? KeyboardCommandIntent else { return }
             handleRootKeyboardCommandIntent(intent, keyboardOwnershipStore: keyboardOwnershipStore)
         }
+        )
+
+        let lifecycleRootLayer: AnyView = AnyView(keyboardCommandRootLayer
         .onChange(of: layoutInputs) { _, _ in
             layoutCoordinator.updateInputs(layoutInputs, metrics: layoutMetrics)
             layoutCoordinator.markInputsChanged()
@@ -1217,6 +1419,7 @@ struct ChatView: View {
             inputBarSendButtonConnectionState.value = newValue
         }
         .onChange(of: viewModel.uiSelectionSequence) { _, _ in
+            exitSuggestionMode()
             removeResolvedCrossChatMention(restoreFocus: false)
             guard let selectedSessionKey = viewModel.lastUISelectedSessionKey else { return }
             let streamDisplayName = viewModel.stream(for: selectedSessionKey)?.displayName ?? viewModel.activeSessionDisplayName
@@ -1240,6 +1443,25 @@ struct ChatView: View {
                 streamToastBusySince = nil
                 streamToastBusyClearTask?.cancel()
                 streamToastBusyClearTask = nil
+            }
+        }
+        .onChange(of: activeSuggestionChatMessageIds) { _, messageIds in
+            guard suggestionModeState.phase != .inactive,
+                  SuggestionModeReducer.isSnapshotValid(
+                      sources: suggestionModeState.sources,
+                      messageIds: messageIds
+                  )
+            else {
+                exitSuggestionMode()
+                return
+            }
+        }
+        .onChange(of: activeSuggestionTranscriptReloadGeneration) { _, reloadGeneration in
+            guard suggestionModeState.phase != .inactive,
+                  suggestionModeState.transcriptReloadGeneration == reloadGeneration
+            else {
+                exitSuggestionMode()
+                return
             }
         }
         .onChange(of: viewModel.engineActivationCompletedSequence) { _, _ in
@@ -1338,7 +1560,25 @@ struct ChatView: View {
             )
         ))
 
-        let decoratedRootLayer: AnyView = AnyView(promptRootLayer.modifier(
+        let suggestionRootLayer: AnyView = AnyView(promptRootLayer
+            .overlay {
+                suggestionModeOverlay(
+                    containerSize: geometry.size,
+                    globalOrigin: geometry.frame(in: .global).origin
+                )
+            }
+            .background {
+                VimSuggestionKeyboardCapture(
+                    isActive: suggestionModeState.phase != .inactive,
+                    acceptsLetters: suggestionModeState.phase == .showing,
+                    onLetter: { handleSuggestionLetter($0) },
+                    onEscape: { exitSuggestionMode() }
+                )
+                .frame(width: 0, height: 0)
+            }
+        )
+
+        let decoratedRootLayer: AnyView = AnyView(suggestionRootLayer.modifier(
             CancelCurrentPromptConfirmationModifier(
                 isPresented: $isCancelCurrentPromptDialogPresented,
                 anchorFrame: cancelCurrentPromptAnchorFrame,
@@ -1769,6 +2009,10 @@ struct ChatView: View {
         _ intent: KeyboardCommandIntent,
         keyboardOwnershipStore: KeyboardOwnershipStore
     ) {
+        if intent == .enterSuggestionMode {
+            enterSuggestionModeIfPossible(keyboardOwnershipStore: keyboardOwnershipStore)
+            return
+        }
         let notificationNames = ChatRootKeyboardCommandDispatch.notificationNames(
             for: intent,
             keyboardOwnershipStore: keyboardOwnershipStore
@@ -2162,6 +2406,247 @@ struct ChatView: View {
     private func referenceMessageInPrompt(_ message: Message) {
         selectionRange = viewModel.referenceMessageInPrompt(message, selectionRange: selectionRange)
         focusRequestID &+= 1
+    }
+
+    private func enterSuggestionModeIfPossible(keyboardOwnershipStore: KeyboardOwnershipStore) {
+        guard suggestionModeState.phase == .inactive else { return }
+        guard activeSheet == nil,
+              streamPopupRouteController.route == .closed,
+              !isInputFocused,
+              !isAttachmentMenuPresented,
+              !isPhotosPickerPresented,
+              !isFileImporterPresented,
+              case .handled(.transcript) = KeyboardCommandRouter
+                  .route(intent: .enterSuggestionMode, store: keyboardOwnershipStore)
+                  .outcome
+        else {
+            return
+        }
+
+        let sessionKey = viewModel.uiSelectedSessionKey.isEmpty
+            ? viewModel.engineActiveSessionKey
+            : viewModel.uiSelectedSessionKey
+        let sources = layoutCoordinator.visibleSuggestionSources(sessionKey: sessionKey)
+        guard !sources.isEmpty else { return }
+
+        let modeId = UUID()
+        suggestionModeTask?.cancel()
+        suggestionModeState = SuggestionModeState(
+            activeChatId: sessionKey,
+            modeId: modeId,
+            transcriptReloadGeneration: viewModel.forceReReadGeneration(for: sessionKey),
+            phase: .generating,
+            sources: sources,
+            hints: []
+        )
+        suggestionModeTask = Task {
+            let candidates = await VimSuggestionGenerationService().generate(sources: sources) ?? []
+            await MainActor.run {
+                guard suggestionModeState.modeId == modeId,
+                      suggestionModeState.activeChatId == sessionKey,
+                      suggestionModeState.phase == .generating else { return }
+                let hints = SuggestionModeReducer.hints(sources: sources, candidates: candidates)
+                guard !hints.isEmpty else {
+                    exitSuggestionMode()
+                    return
+                }
+                suggestionModeState.hints = hints
+                suggestionModeState.phase = .showing
+            }
+        }
+    }
+
+    private func exitSuggestionMode() {
+        suggestionModeTask?.cancel()
+        suggestionModeTask = nil
+        suggestionModeState = .inactive
+    }
+
+    private func handleSuggestionLetter(_ input: String) {
+        guard suggestionModeState.phase == .showing,
+              let prompt = SuggestionModeReducer.selectedPrompt(for: input, hints: suggestionModeState.hints)
+        else {
+            return
+        }
+        exitSuggestionMode()
+        viewModel.inputContent = NSAttributedString(string: prompt)
+        viewModel.send()
+    }
+
+    @ViewBuilder
+    private func suggestionModeOverlay(containerSize: CGSize, globalOrigin: CGPoint) -> some View {
+        if suggestionModeState.phase == .showing {
+            ZStack(alignment: .topLeading) {
+                ForEach(Array(suggestionModeState.hints.enumerated()), id: \.element.id) { index, hint in
+                    let sourceOrdinal = suggestionModeState.hints[..<index]
+                        .filter { $0.messageId == hint.messageId }
+                        .count
+                    let sourceHintCount = suggestionModeState.hints
+                        .filter { $0.messageId == hint.messageId }
+                        .count
+                    SuggestionHintView(
+                        hint: hint,
+                        maximumHeight: suggestionHintHeight(
+                            sourceHintCount: sourceHintCount,
+                            containerHeight: containerSize.height
+                        )
+                    )
+                        .frame(maxWidth: min(320, max(180, containerSize.width - 32)), alignment: .leading)
+                        .position(suggestionHintPosition(
+                            hint: hint,
+                            sourceOrdinal: sourceOrdinal,
+                            sourceHintCount: sourceHintCount,
+                            containerSize: containerSize,
+                            globalOrigin: globalOrigin
+                        ))
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .allowsHitTesting(false)
+            .accessibilityElement(children: .contain)
+        }
+    }
+
+    private func suggestionHintPosition(
+        hint: SuggestionHint,
+        sourceOrdinal: Int,
+        sourceHintCount: Int,
+        containerSize: CGSize,
+        globalOrigin: CGPoint
+    ) -> CGPoint {
+        let sourceRect = hint.sourceRect.offsetBy(dx: -globalOrigin.x, dy: -globalOrigin.y)
+        let maxWidth = min(320, max(180, containerSize.width - 32))
+        let halfWidth = maxWidth / 2
+        let preferredX = sourceRect.maxX + 12 + halfWidth
+        let compactX = sourceRect.midX
+        let x = containerSize.width > 520
+            ? min(max(preferredX, 16 + halfWidth), containerSize.width - 16 - halfWidth)
+            : min(max(compactX, 16 + halfWidth), containerSize.width - 16 - halfWidth)
+        let verticalMargin: CGFloat = 38
+        let stackSpacing = suggestionHintStackSpacing(
+            sourceHintCount: sourceHintCount,
+            containerHeight: containerSize.height
+        )
+        let stackHeight = stackSpacing * CGFloat(max(0, sourceHintCount - 1))
+        let stackCenter = min(
+            max(sourceRect.midY, verticalMargin + stackHeight / 2),
+            containerSize.height - verticalMargin - stackHeight / 2
+        )
+        let y = stackCenter - stackHeight / 2 + stackSpacing * CGFloat(sourceOrdinal)
+        return CGPoint(x: x, y: y)
+    }
+
+    private func suggestionHintStackSpacing(sourceHintCount: Int, containerHeight: CGFloat) -> CGFloat {
+        guard sourceHintCount > 1 else { return 0 }
+        let availableHeight = max(0, containerHeight - 76)
+        return min(60, availableHeight / CGFloat(sourceHintCount - 1))
+    }
+
+    private func suggestionHintHeight(sourceHintCount: Int, containerHeight: CGFloat) -> CGFloat {
+        guard sourceHintCount > 1 else { return 52 }
+        return max(0, suggestionHintStackSpacing(
+            sourceHintCount: sourceHintCount,
+            containerHeight: containerHeight
+        ) - 2)
+    }
+
+    private struct SuggestionHintView: View {
+        let hint: SuggestionHint
+        let maximumHeight: CGFloat
+
+        var body: some View {
+            let isCompacted = maximumHeight < 52
+            let badgeSize = min(22, max(0, maximumHeight - 8))
+            let fontSize = min(16, max(6, maximumHeight * 0.45))
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(String(hint.letter).uppercased())
+                    .font(.system(size: max(6, fontSize - 1), weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .frame(width: badgeSize, height: badgeSize)
+                    .background(Circle().fill(Color.accentColor))
+
+                Text(hint.promptText)
+                    .font(.system(size: fontSize, weight: .medium))
+                    .lineLimit(isCompacted ? 1 : 2)
+                    .minimumScaleFactor(isCompacted ? 0.5 : 1)
+                    .multilineTextAlignment(.leading)
+                    .foregroundStyle(.primary)
+            }
+            .padding(.vertical, isCompacted ? 1 : 8)
+            .padding(.horizontal, 10)
+            .frame(height: maximumHeight)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.primary.opacity(0.14), lineWidth: 1)
+            )
+            .accessibilityLabel("Suggestion \(String(hint.letter).uppercased()): \(hint.promptText)")
+        }
+    }
+
+    private struct VimSuggestionKeyboardCapture: UIViewRepresentable {
+        let isActive: Bool
+        let acceptsLetters: Bool
+        let onLetter: (String) -> Void
+        let onEscape: () -> Void
+
+        func makeUIView(context _: Context) -> CaptureView {
+            CaptureView()
+        }
+
+        func updateUIView(_ uiView: CaptureView, context _: Context) {
+            uiView.onLetter = onLetter
+            uiView.onEscape = onEscape
+            uiView.isCaptureActive = isActive
+            uiView.acceptsLetters = acceptsLetters
+            uiView.updateResponderState()
+        }
+
+        final class CaptureView: UIView {
+            var isCaptureActive = false
+            var acceptsLetters = false
+            var onLetter: ((String) -> Void)?
+            var onEscape: (() -> Void)?
+
+            override var canBecomeFirstResponder: Bool { isCaptureActive }
+
+            func updateResponderState() {
+                guard window != nil else { return }
+                if isCaptureActive {
+                    becomeFirstResponder()
+                } else if isFirstResponder {
+                    resignFirstResponder()
+                }
+            }
+
+            override func didMoveToWindow() {
+                super.didMoveToWindow()
+                updateResponderState()
+            }
+
+            override var keyCommands: [UIKeyCommand]? {
+                guard isCaptureActive else { return nil }
+                let escapeCommand = UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(handleEscape(_:)))
+                guard acceptsLetters else { return [escapeCommand] }
+                let letterCommands = SuggestionModeReducer.assignmentLetters.flatMap { letter -> [UIKeyCommand] in
+                    let lower = String(letter)
+                    return [
+                        UIKeyCommand(input: lower, modifierFlags: [], action: #selector(handleLetter(_:))),
+                        UIKeyCommand(input: lower.uppercased(), modifierFlags: [.shift], action: #selector(handleLetter(_:)))
+                    ]
+                }
+                return [escapeCommand] + letterCommands
+            }
+
+            @objc private func handleLetter(_ sender: UIKeyCommand) {
+                guard let input = sender.input else { return }
+                onLetter?(input)
+            }
+
+            @objc private func handleEscape(_: UIKeyCommand) {
+                onEscape?()
+            }
+        }
     }
 
     private func messageList(topInset: CGFloat,
@@ -3931,6 +4416,7 @@ enum ChatAppCommandShortcut {
         case openStreamPopup
         case navigatePreviousStream
         case navigateNextStream
+        case enterSuggestionMode
         case scrollDown
         case scrollUp
         case scrollChatDown
@@ -3949,6 +4435,8 @@ enum ChatAppCommandShortcut {
                 return #selector(UIResponder.clawlineNavigateToPreviousStreamCommand(_:))
             case .navigateNextStream:
                 return #selector(UIResponder.clawlineNavigateToNextStreamCommand(_:))
+            case .enterSuggestionMode:
+                return #selector(UIResponder.clawlineEnterSuggestionModeCommand(_:))
             case .scrollDown:
                 return #selector(UIResponder.clawlineScrollDownCommand(_:))
             case .scrollUp:
@@ -4018,6 +4506,8 @@ enum ChatAppCommandShortcut {
             return .navigatePreviousStream
         case .navigateNextStream:
             return .navigateNextStream
+        case .enterSuggestionMode:
+            return .enterSuggestionMode
         case .transcriptBubbleScrollForward:
             return .scrollDown
         case .transcriptBubbleScrollBackward:
@@ -4126,6 +4616,10 @@ extension UIResponder {
     }
 
     @objc func clawlineNavigateToNextStreamCommand(_ sender: UIKeyCommand) {
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: KeyboardCommandBridge.intent(input: sender.input, modifierFlags: sender.modifierFlags))
+    }
+
+    @objc func clawlineEnterSuggestionModeCommand(_ sender: UIKeyCommand) {
         NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: KeyboardCommandBridge.intent(input: sender.input, modifierFlags: sender.modifierFlags))
     }
 

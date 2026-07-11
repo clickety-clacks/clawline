@@ -24,6 +24,7 @@ enum KeyboardCommandIntent: Equatable {
     case transcriptBubbleScrollBackward
     case transcriptChatScrollForward
     case transcriptChatScrollBackward
+    case enterSuggestionMode
     case menuNavigateUp
     case menuNavigateDown
     case menuActivate
@@ -360,6 +361,17 @@ enum KeyboardCommandRouter {
             }
             return decision(.fallthroughToDefault, "PR-07")
 
+        case .enterSuggestionMode:
+            guard reconciledStore.firstActiveSurface(kind: .mentionPicker) == nil,
+                  reconciledStore.firstActiveSurface(kind: .notificationActionMenu) == nil,
+                  reconciledStore.firstActiveSurface(kind: .composer, focusedOnly: true, supporting: .textEditing) == nil,
+                  reconciledStore.firstActiveSurface(kind: .notificationReply, focusedOnly: true, supporting: .textEditing) == nil,
+                  let transcript = reconciledStore.firstActiveSurface(kind: .transcript, supporting: .appNavigation)
+            else {
+                return decision(.fallthroughToDefault, "PR-07")
+            }
+            return decision(.handled(transcript.surfaceId), "PR-07")
+
         case .textSubmit, .textModifiedNewline, .textCancel:
             if intent == .textSubmit,
                let picker = reconciledStore.firstActiveSurface(kind: .mentionPicker, supporting: .pickerAccept) {
@@ -404,6 +416,7 @@ enum KeyboardCommandBridge {
 
     static let navigationSpecs: [KeyCommandSpec] = [
         KeyCommandSpec(input: "l", modifierFlags: [.command], intent: .focusPromptInput),
+        KeyCommandSpec(input: "f", modifierFlags: [.command], intent: .enterSuggestionMode),
         KeyCommandSpec(input: ";", modifierFlags: [.command], intent: .openStreamPopup),
         KeyCommandSpec(input: ";", modifierFlags: [.control], intent: .openStreamPopup),
         KeyCommandSpec(input: "h", modifierFlags: [.command, .shift], intent: .navigatePreviousStream),

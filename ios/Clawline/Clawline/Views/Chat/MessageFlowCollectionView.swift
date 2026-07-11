@@ -5089,6 +5089,64 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         return scrolledCount
     }
 
+    func visibleSuggestionSources() -> [SuggestionModeSource] {
+        collectionView.layoutIfNeeded()
+        let viewport = CGRect(origin: collectionView.contentOffset, size: collectionView.bounds.size)
+        let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
+        let candidates = collectionView.visibleCells.compactMap { cell -> (Int, SuggestionModeSource)? in
+            guard let cell = cell as? MessageBubbleUIKitCell,
+                  !cell.isHidden,
+                  cell.alpha > 0.01,
+                  let indexPath = collectionView.indexPath(for: cell),
+                  let id = dataSource.itemIdentifier(for: indexPath),
+                  let message = messagesById[id],
+                  message.role == .assistant
+            else {
+                return nil
+            }
+            guard viewport.intersects(cell.frame) else { return nil }
+        guard let presentation = viewModel?.presentation(for: message, metrics: metrics),
+              let readableText = presentation.copyableReadableText
+        else {
+            return nil
+        }
+        let text = readableText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+            return (
+                indexPath.item,
+                SuggestionModeSource(
+                    messageId: message.id,
+                    sourceIndex: indexPath.item,
+                    visibleTextExcerpt: Self.boundedSuggestionText(text),
+                    sourceRect: cell.renderedBubbleFrame(in: nil)
+                )
+            )
+        }
+        return candidates
+            .sorted { lhs, rhs in
+                if lhs.1.sourceRect.minY == rhs.1.sourceRect.minY {
+                    return lhs.0 < rhs.0
+                }
+                return lhs.1.sourceRect.minY < rhs.1.sourceRect.minY
+            }
+            .enumerated()
+            .map { offset, candidate in
+                SuggestionModeSource(
+                    messageId: candidate.1.messageId,
+                    sourceIndex: offset,
+                    visibleTextExcerpt: candidate.1.visibleTextExcerpt,
+                    sourceRect: candidate.1.sourceRect
+                )
+            }
+    }
+
+    private static func boundedSuggestionText(_ text: String) -> String {
+        let maxUTF16 = 1_500
+        let ns = text as NSString
+        guard ns.length > maxUTF16 else { return text }
+        return ns.substring(to: maxUTF16)
+    }
+
     func scrollToMessageCentered(messageId: String, animated: Bool) {
         guard let sessionKey = callbackSessionKey() else { return }
         guard let indexPath = dataSource.indexPath(for: messageId) else {

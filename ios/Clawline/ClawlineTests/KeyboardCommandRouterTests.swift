@@ -23,6 +23,7 @@ struct KeyboardCommandRouterTests {
         #expect(KeyboardCommandBridge.intent(input: "-", modifierFlags: [.command, .shift, .alternate]) == .notificationDismissAll)
         #expect(KeyboardCommandBridge.intent(input: "_", modifierFlags: [.command, .shift, .alternate]) == .notificationDismissAll)
         #expect(KeyboardCommandBridge.intent(input: "\\", modifierFlags: [.command]) == .notificationToggleDock)
+        #expect(KeyboardCommandBridge.intent(input: "f", modifierFlags: [.command]) == .enterSuggestionMode)
         #expect(KeyboardCommandBridge.intent(input: "/", modifierFlags: [.command]) == nil)
         #expect(KeyboardCommandBridge.intent(input: ";", modifierFlags: [.command]) == .openStreamPopup)
         #expect(KeyboardCommandBridge.intent(input: ";", modifierFlags: [.control]) == .openStreamPopup)
@@ -50,6 +51,7 @@ struct KeyboardCommandRouterTests {
         assertRoute(.notificationScrollForward, in: store, isHandledBy: .notificationBubble("n0"), rule: "PR-04")
         assertRoute(.textSubmit, in: store, isHandledBy: .mentionPicker, rule: "PR-02")
         assertRoute(.textModifiedNewline, in: store, isHandledBy: .notificationReply("n0"), rule: "PR-05")
+        #expect(KeyboardCommandRouter.route(intent: .enterSuggestionMode, store: store).outcome == .fallthroughToDefault)
     }
 
     @Test("T343 VG-03 mention picker open close cannot poison notification scroll ownership")
@@ -390,6 +392,8 @@ struct KeyboardCommandRouterTests {
                         return .navigatePreviousStream
                     case .navigateNextStream:
                         return .navigateNextStream
+                    case .enterSuggestionMode:
+                        return .enterSuggestionMode
                     case .transcriptBubbleScrollForward:
                         return .scrollDown
                     case .transcriptBubbleScrollBackward:
@@ -488,6 +492,34 @@ struct KeyboardCommandRouterTests {
 
         #expect(KeyboardCommandRouter.route(intent: .focusPromptInput, store: emptyStore).outcome == .fallthroughToDefault)
         assertRoute(.focusPromptInput, in: chatStore, isHandledBy: .transcript, rule: "PR-07")
+        assertRoute(.enterSuggestionMode, in: chatStore, isHandledBy: .transcript, rule: "PR-07")
+    }
+
+    @Test("T314 reducer filters candidates and assigns stable unique letters")
+    func suggestionReducerFiltersCandidatesAndAssignsLetters() {
+        let sources = [
+            SuggestionModeSource(messageId: "assistant-1", sourceIndex: 0, visibleTextExcerpt: "First", sourceRect: .init(x: 10, y: 10, width: 100, height: 40)),
+            SuggestionModeSource(messageId: "assistant-2", sourceIndex: 1, visibleTextExcerpt: "Second", sourceRect: .init(x: 10, y: 80, width: 100, height: 40))
+        ]
+        let candidates = [
+            SuggestionCandidate(messageId: "assistant-2", promptText: "  Ask for risks  "),
+            SuggestionCandidate(messageId: "missing", promptText: "Drop me"),
+            SuggestionCandidate(messageId: "assistant-1", promptText: ""),
+            SuggestionCandidate(messageId: "assistant-1", promptText: "Summarize the plan"),
+            SuggestionCandidate(messageId: "assistant-1", promptText: "summarize the plan"),
+            SuggestionCandidate(messageId: "assistant-1", promptText: "Summarize the plan!"),
+            SuggestionCandidate(messageId: "assistant-1", promptText: "Please summarize the plan")
+        ]
+
+        let hints = SuggestionModeReducer.hints(sources: sources, candidates: candidates)
+
+        #expect(hints.map(\.letter) == Array("ab"))
+        #expect(hints.map(\.messageId) == ["assistant-1", "assistant-2"])
+        #expect(hints.map(\.promptText) == ["Summarize the plan", "Ask for risks"])
+        #expect(SuggestionModeReducer.selectedPrompt(for: "A", hints: hints) == "Summarize the plan")
+        #expect(SuggestionModeReducer.selectedPrompt(for: "z", hints: hints) == nil)
+        #expect(SuggestionModeReducer.isSnapshotValid(sources: sources, messageIds: ["assistant-1", "assistant-2"]))
+        #expect(!SuggestionModeReducer.isSnapshotValid(sources: sources, messageIds: ["assistant-1"]))
     }
 }
 

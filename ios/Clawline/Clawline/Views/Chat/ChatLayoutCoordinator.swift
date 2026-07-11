@@ -182,6 +182,11 @@ final class ChatLayoutCoordinator {
         listViews[sessionKey]?.value?.scrollVisibleBubbleContents(direction: direction, animated: animated)
     }
 
+    func visibleSuggestionSources(sessionKey: String) -> [SuggestionModeSource] {
+        dispatchPrecondition(condition: .onQueue(.main))
+        return listViews[sessionKey]?.value?.visibleSuggestionSources() ?? []
+    }
+
     func scrollToMessageCentered(messageId: String, sessionKey: String, animated: Bool) {
         dispatchPrecondition(condition: .onQueue(.main))
         listViews[sessionKey]?.value?.scrollToMessageCentered(messageId: messageId, animated: animated)

@@ -129,8 +129,9 @@ struct SessionMetadataFooterHitTestingTests {
         }
     }
 
-    @Test("Resting bottom footer search remains visible and hit-testable")
-    func restingBottomFooterSearchRemainsVisibleAndHitTestable() throws {
+#if targetEnvironment(macCatalyst)
+    @Test("R1662-05 Catalyst resting footer search remains visible and hit-testable")
+    func r1662_05_catalystRestingFooterSearchRemainsVisibleAndHitTestable() throws {
         let restingBottom: CGFloat = 440
         let trueBottom: CGFloat = 500
         let cell = makeConfiguredCell()
@@ -152,6 +153,7 @@ struct SessionMetadataFooterHitTestingTests {
         let hitView = try #require(cell.hitTest(searchCenter, with: nil))
         #expect(hitView === searchField || hitView.isDescendant(of: searchField))
     }
+#endif
 
     @Test("Direct label glyph taps resolve to the enabled footer button")
     func directLabelGlyphTapsResolveToTheEnabledFooterButton() throws {

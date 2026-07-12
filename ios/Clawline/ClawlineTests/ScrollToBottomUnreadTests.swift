@@ -113,8 +113,9 @@ struct ScrollToBottomUnreadTests {
         #expect(shouldCompensate == false)
     }
 
-    @Test("SBB resting bottom excludes footer reveal range while footer stays visible")
-    func sbbRestingBottomExcludesFooterRevealRangeWhileFooterStaysVisible() {
+#if !targetEnvironment(macCatalyst)
+    @Test("R1662-01 iPhone footer is invisible at resting bottom")
+    func r1662_01_iPhoneFooterIsInvisibleAtRestingBottom() {
         let contentHeight: CGFloat = 1_200
         let boundsHeight: CGFloat = 700
         let topInset: CGFloat = 40
@@ -140,71 +141,63 @@ struct ScrollToBottomUnreadTests {
         )
 
         #expect(trueBottom - restingBottom == footerHeight)
-        #expect(MessageFlowCollectionViewController.hidesFooterAtRestingBottom == false)
+        #expect(MessageFlowCollectionViewController.hidesFooterAtRestingBottom)
         #expect(MessageFlowCollectionViewController.footerRevealAlpha(
             contentOffsetY: restingBottom,
             restingBottomOffsetY: restingBottom,
             trueBottomOffsetY: trueBottom,
-        ) == 1)
-        #expect(MessageFlowCollectionViewController.footerRevealAlpha(
-            contentOffsetY: restingBottom - 1,
-            restingBottomOffsetY: restingBottom,
-            trueBottomOffsetY: trueBottom
-        ) == 1)
+        ) == 0)
     }
 
-    @Test("Legacy hidden footer policy fades in after SBB resting bottom")
-    func legacyHiddenFooterPolicyFadesInAfterSBBRestingBottom() {
+    @Test("R1662-02 iPhone footer progressively reveals after resting bottom")
+    func r1662_02_iPhoneFooterProgressivelyRevealsAfterRestingBottom() {
         let restingBottom: CGFloat = 440
         let trueBottom: CGFloat = 500
 
         #expect(MessageFlowCollectionViewController.footerRevealAlpha(
             contentOffsetY: restingBottom,
             restingBottomOffsetY: restingBottom,
-            trueBottomOffsetY: trueBottom,
-            hidesFooterAtRestingBottom: true
+            trueBottomOffsetY: trueBottom
         ) == 0)
         #expect(MessageFlowCollectionViewController.footerRevealAlpha(
             contentOffsetY: restingBottom + 1,
             restingBottomOffsetY: restingBottom,
-            trueBottomOffsetY: trueBottom,
-            hidesFooterAtRestingBottom: true
+            trueBottomOffsetY: trueBottom
         ) > 0)
         #expect(MessageFlowCollectionViewController.footerRevealAlpha(
             contentOffsetY: (restingBottom + trueBottom) / 2,
             restingBottomOffsetY: restingBottom,
-            trueBottomOffsetY: trueBottom,
-            hidesFooterAtRestingBottom: true
+            trueBottomOffsetY: trueBottom
         ) == 0.5)
-        #expect(MessageFlowCollectionViewController.footerRevealAlpha(
-            contentOffsetY: trueBottom,
-            restingBottomOffsetY: restingBottom,
-            trueBottomOffsetY: trueBottom,
-            hidesFooterAtRestingBottom: true
-        ) == 1)
     }
 
-    @Test("Initial footer cell alpha is visible at normal resting bottom")
-    func initialFooterCellAlphaIsVisibleAtNormalRestingBottom() {
+    @Test("R1662-03 iPhone footer is fully visible at true bottom")
+    func r1662_03_iPhoneFooterIsFullyVisibleAtTrueBottom() {
         let restingBottom: CGFloat = 440
         let trueBottom: CGFloat = 500
 
+        #expect(MessageFlowCollectionViewController.footerRevealAlpha(
+            contentOffsetY: trueBottom,
+            restingBottomOffsetY: restingBottom,
+            trueBottomOffsetY: trueBottom
+        ) == 1)
+    }
+#endif
+
+#if targetEnvironment(macCatalyst)
+    @Test("R1662-05 Catalyst footer remains visible at resting bottom")
+    func r1662_05_catalystFooterRemainsVisibleAtRestingBottom() {
+        let restingBottom: CGFloat = 440
+        let trueBottom: CGFloat = 500
+
+        #expect(MessageFlowCollectionViewController.hidesFooterAtRestingBottom == false)
         #expect(MessageFlowCollectionViewController.initialFooterCellAlpha(
             contentOffsetY: restingBottom,
             restingBottomOffsetY: restingBottom,
             trueBottomOffsetY: trueBottom
         ) == 1)
-        #expect(MessageFlowCollectionViewController.initialFooterCellAlpha(
-            contentOffsetY: (restingBottom + trueBottom) / 2,
-            restingBottomOffsetY: restingBottom,
-            trueBottomOffsetY: trueBottom
-        ) == 1)
-        #expect(MessageFlowCollectionViewController.initialFooterCellAlpha(
-            contentOffsetY: trueBottom,
-            restingBottomOffsetY: restingBottom,
-            trueBottomOffsetY: trueBottom
-        ) == 1)
     }
+#endif
 
     @Test("Bounds-only layout changes skip redundant snapshot update")
     func boundsOnlyLayoutChangeSkipsSnapshotUpdate() {

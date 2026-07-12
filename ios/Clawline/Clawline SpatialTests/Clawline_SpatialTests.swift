@@ -124,8 +124,8 @@ struct Clawline_SpatialTests {
         #expect(trueBottom - restingBottom == footerHeight)
     }
 
-    @Test("Spatial footer is fully invisible at resting bottom")
-    func spatialFooterIsFullyInvisibleAtRestingBottom() {
+    @Test("R1662-04 Spatial footer remains fully invisible at resting bottom")
+    func r1662_04_spatialFooterRemainsFullyInvisibleAtRestingBottom() {
         let restingBottom: CGFloat = 440
         let trueBottom: CGFloat = 560
 

@@ -3144,10 +3144,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     static var hidesFooterAtRestingBottom: Bool {
-#if os(visionOS)
-        true
-#else
+#if targetEnvironment(macCatalyst)
         false
+#else
+        true
 #endif
     }
 

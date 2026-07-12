@@ -6495,12 +6495,28 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
     private let primaryControlsStackView = UIStackView()
     private let secondaryControlsStackView = UIStackView()
     private let versionStackView = UIStackView()
+    private let versionMetadataStackView = UIStackView()
     private let searchField = FooterSearchField()
     private var primaryRowHeightConstraint: NSLayoutConstraint?
     private var secondaryRowHeightConstraint: NSLayoutConstraint?
+    private var versionRowHeightConstraint: NSLayoutConstraint?
     private var contentSizeTraitObservation: UITraitChangeRegistration?
     private var currentFooterItems: [FooterItem] = []
     private var onSearchQueryChanged: (@MainActor (String) -> Void)?
+    private var lastFooterConfiguration: FooterConfiguration?
+    private var lastConfiguredWidth: CGFloat = .zero
+    private var isReconfiguringForWidth = false
+
+    private struct FooterConfiguration {
+        let status: SessionStatus?
+        let statusUnavailable: Bool
+        let isDark: Bool
+        let isSpatial: Bool
+        let onSelect: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
+        let onTestMenuSelect: (@MainActor (FooterTestMenuAction) -> Void)?
+        let searchQuery: String
+        let onSearchQueryChanged: (@MainActor (String) -> Void)?
+    }
 
     private struct FooterItem {
         enum Row {
@@ -6668,6 +6684,10 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         self.primaryRowHeightConstraint = primaryRowHeightConstraint
         self.secondaryRowHeightConstraint = secondaryRowHeightConstraint
 
+        let versionRowHeightConstraint = versionStackView.heightAnchor.constraint(
+            equalToConstant: Self.versionRowHeight(compatibleWith: traitCollection)
+        )
+        self.versionRowHeightConstraint = versionRowHeightConstraint
         NSLayoutConstraint.activate([
             stackView.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: Self.horizontalPadding),
             stackView.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -Self.horizontalPadding),
@@ -6675,7 +6695,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             stackView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Self.topPadding),
             primaryRowHeightConstraint,
             secondaryRowHeightConstraint,
-            versionStackView.heightAnchor.constraint(equalToConstant: Self.versionRowHeight),
+            versionRowHeightConstraint,
             searchField.heightAnchor.constraint(equalToConstant: Self.searchRowHeight),
             searchField.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
             searchField.widthAnchor.constraint(lessThanOrEqualTo: contentView.widthAnchor, constant: -(Self.horizontalPadding * 2)),
@@ -6695,14 +6715,18 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
     private func updateFontsForPreferredContentSizeCategory() {
         let font = footerFont
         searchField.font = font
-        for view in [primaryControlsStackView, secondaryControlsStackView].flatMap(\.arrangedSubviews) {
+        for view in [primaryControlsStackView, secondaryControlsStackView, versionMetadataStackView].flatMap(\.arrangedSubviews) {
             if let button = view as? UIButton {
                 button.titleLabel?.font = font
             } else if let label = view as? UILabel {
                 label.font = font
             }
         }
+        for label in versionStackView.arrangedSubviews.compactMap({ $0 as? UILabel }) {
+            label.font = font
+        }
         primaryRowHeightConstraint?.constant = Self.controlRowHeight(compatibleWith: traitCollection)
+        versionRowHeightConstraint?.constant = Self.versionRowHeight(compatibleWith: traitCollection)
         secondaryRowHeightConstraint?.constant = secondaryControlsStackView.isHidden
             ? Self.controlRowHeight(compatibleWith: traitCollection)
             : Self.secondaryControlRowHeight(
@@ -6734,6 +6758,26 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         return super.hitTest(point, with: event)
     }
 
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard !isReconfiguringForWidth,
+              let configuration = lastFooterConfiguration,
+              abs(bounds.width - lastConfiguredWidth) > 0.5
+        else { return }
+        isReconfiguringForWidth = true
+        configure(
+            status: configuration.status,
+            statusUnavailable: configuration.statusUnavailable,
+            isDark: configuration.isDark,
+            isSpatial: configuration.isSpatial,
+            onSelect: configuration.onSelect,
+            onTestMenuSelect: configuration.onTestMenuSelect,
+            searchQuery: configuration.searchQuery,
+            onSearchQueryChanged: configuration.onSearchQueryChanged
+        )
+        isReconfiguringForWidth = false
+    }
+
     func configure(
         status: SessionStatus?,
         statusUnavailable: Bool = false,
@@ -6744,6 +6788,17 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         searchQuery: String = "",
         onSearchQueryChanged: (@MainActor (String) -> Void)? = nil
     ) {
+        lastFooterConfiguration = FooterConfiguration(
+            status: status,
+            statusUnavailable: statusUnavailable,
+            isDark: isDark,
+            isSpatial: isSpatial,
+            onSelect: onSelect,
+            onTestMenuSelect: onTestMenuSelect,
+            searchQuery: searchQuery,
+            onSearchQueryChanged: onSearchQueryChanged
+        )
+        lastConfiguredWidth = bounds.width
         let textColor = Self.textColor(isDark: isDark, isSpatial: isSpatial)
         self.onSearchQueryChanged = onSearchQueryChanged
         for row in [primaryControlsStackView, secondaryControlsStackView] {
@@ -6756,23 +6811,41 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             versionStackView.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
+        for view in versionMetadataStackView.arrangedSubviews {
+            versionMetadataStackView.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
         let items = Self.footerItems(for: status, isUnavailable: statusUnavailable, isDark: isDark)
         currentFooterItems = items
-        let usesTwoRows = Self.requiresTwoControlRows(
+        let movesSecondaryMetadataToVersionRow = Self.requiresTwoControlRows(
             items: items,
             availableWidth: bounds.width,
             font: footerFont
         )
         for item in items {
             let itemColor = isSpatial ? textColor : (item.textColor ?? textColor)
-            let row = usesTwoRows && item.row == .secondary ? secondaryControlsStackView : primaryControlsStackView
-            row.addArrangedSubview(footerView(for: item, status: status, color: itemColor, onSelect: onSelect))
+            if movesSecondaryMetadataToVersionRow && item.row == .secondary {
+                versionMetadataStackView.addArrangedSubview(
+                    footerView(for: item, status: status, color: itemColor, onSelect: onSelect)
+                )
+            } else {
+                primaryControlsStackView.addArrangedSubview(
+                    footerView(for: item, status: status, color: itemColor, onSelect: onSelect)
+                )
+            }
         }
-        secondaryControlsStackView.isHidden = !usesTwoRows
-        secondaryRowHeightConstraint?.constant = usesTwoRows
-            ? Self.secondaryControlRowHeight(items: items, availableWidth: bounds.width, font: footerFont)
-            : Self.controlRowHeight(compatibleWith: traitCollection)
+        secondaryControlsStackView.isHidden = true
+        secondaryRowHeightConstraint?.constant = Self.controlRowHeight(compatibleWith: traitCollection)
         versionStackView.addArrangedSubview(versionLabel(color: textColor))
+        if movesSecondaryMetadataToVersionRow {
+            versionMetadataStackView.axis = .horizontal
+            versionMetadataStackView.alignment = .center
+            versionMetadataStackView.distribution = .fill
+            versionMetadataStackView.spacing = 2
+            versionMetadataStackView.setContentHuggingPriority(.required, for: .horizontal)
+            versionMetadataStackView.setContentCompressionResistancePriority(.required, for: .horizontal)
+            versionStackView.addArrangedSubview(versionMetadataStackView)
+        }
         versionStackView.addArrangedSubview(testMenuButton(color: textColor, onSelect: onTestMenuSelect))
         configureSearchField(query: searchQuery, textColor: textColor, isDark: isDark, isSpatial: isSpatial)
         isAccessibilityElement = false
@@ -6784,18 +6857,17 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         width: CGFloat = .greatestFiniteMagnitude,
         compatibleWith traitCollection: UITraitCollection? = nil
     ) -> CGFloat {
-        let items = footerItems(for: status)
-        let font = UIFont.clawline(.timestamp, compatibleWith: traitCollection)
-        let rowCount: CGFloat = requiresTwoControlRows(items: items, availableWidth: width, font: font) ? 2 : 1
         let primaryHeight = controlRowHeight(compatibleWith: traitCollection)
-        let controlsHeight = rowCount == 2
-            ? primaryHeight + secondaryControlRowHeight(items: items, availableWidth: width, font: font)
-            : primaryHeight
-        return ceil(searchRowHeight + footerRowSpacing + controlsHeight + footerRowSpacing + versionRowHeight + topPadding + bottomPadding)
+        return ceil(searchRowHeight + footerRowSpacing + primaryHeight + footerRowSpacing
+            + versionRowHeight(compatibleWith: traitCollection) + topPadding + bottomPadding)
     }
 
     private static func controlRowHeight(compatibleWith traitCollection: UITraitCollection?) -> CGFloat {
         max(actionRegionHeight, ceil(UIFont.clawline(.timestamp, compatibleWith: traitCollection).lineHeight + 4))
+    }
+
+    private static func versionRowHeight(compatibleWith traitCollection: UITraitCollection?) -> CGFloat {
+        max(versionRowHeight, ceil(UIFont.clawline(.timestamp, compatibleWith: traitCollection).lineHeight + 4))
     }
 
     private static func requiresTwoControlRows(items: [FooterItem], availableWidth: CGFloat, font: UIFont) -> Bool {
@@ -6976,7 +7048,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             label.textColor = color
             label.adjustsFontForContentSizeCategory = true
             label.numberOfLines = item.allowsWrapping ? 0 : 1
-            label.lineBreakMode = item.allowsWrapping ? .byWordWrapping : .byTruncatingTail
+            label.lineBreakMode = item.allowsWrapping ? .byWordWrapping : .byClipping
             label.textAlignment = .center
             label.isAccessibilityElement = true
             label.accessibilityLabel = item.accessibilityLabel ?? item.text
@@ -7047,8 +7119,8 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         label.isAccessibilityElement = true
         label.accessibilityLabel = label.text
         label.accessibilityTraits = .staticText
-        label.setContentHuggingPriority(.required, for: .horizontal)
-        label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return label
     }
 
@@ -7308,7 +7380,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                     textColor: ChatFlowUIKitTheme.palette(isDark: isDark).sage,
                     row: .secondary,
                     isStaticLabel: true,
-                    allowsWrapping: true
+                    allowsWrapping: false
                 )
             ] + codexUsageFooterItems(codexUsage)
         case "api_key", "api-key":
@@ -7321,7 +7393,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                     textColor: ChatFlowUIKitTheme.connectionReconnecting(isDark: isDark),
                     row: .secondary,
                     isStaticLabel: true,
-                    allowsWrapping: true
+                    allowsWrapping: false
                 )
             ]
         default:

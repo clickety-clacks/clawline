@@ -127,6 +127,7 @@ struct ScrollToBottomUnreadTests {
 
         #expect(MessageFlowCollectionViewController.hidesFooterAtRestingBottom)
         #expect(controller.footerAlphaForTesting == 0)
+        #expect(controller.displayedFooterAlphaForTesting == 0)
     }
 
     @Test("R1662-02/R6 iPhone production scroll path progressively reveals away from chat-bubble bottom")
@@ -137,15 +138,15 @@ struct ScrollToBottomUnreadTests {
         controller.scrollToBottom(animated: false)
         let chatBubbleBottom = controller.chatBubbleBottomOffsetYForTesting
         controller.setChatScrollOffsetYForTesting(
-            chatBubbleBottom - (SessionMetadataFooterCell.fadeRevealRange / 2)
+            chatBubbleBottom + (SessionMetadataFooterCell.fadeRevealRange / 2)
         )
-        let midpointAlpha = controller.footerAlphaForTesting
+        let midpointAlpha = controller.displayedFooterAlphaForTesting
         controller.setChatScrollOffsetYForTesting(
-            chatBubbleBottom - SessionMetadataFooterCell.fadeRevealRange
+            chatBubbleBottom + SessionMetadataFooterCell.fadeRevealRange
         )
 
         #expect(midpointAlpha == 0.5)
-        #expect(controller.footerAlphaForTesting == 1)
+        #expect(controller.displayedFooterAlphaForTesting == 1)
     }
 
     @Test("R1662-R7 footer content and controls remain unchanged by scroll-state updates")
@@ -156,7 +157,7 @@ struct ScrollToBottomUnreadTests {
         let footerFrame = try #require(controller.footerFrameForTesting)
         controller.scrollToBottom(animated: false)
         controller.setChatScrollOffsetYForTesting(
-            controller.chatBubbleBottomOffsetYForTesting - SessionMetadataFooterCell.fadeRevealRange
+            controller.chatBubbleBottomOffsetYForTesting + SessionMetadataFooterCell.fadeRevealRange
         )
 
         #expect(controller.footerFrameForTesting == footerFrame)

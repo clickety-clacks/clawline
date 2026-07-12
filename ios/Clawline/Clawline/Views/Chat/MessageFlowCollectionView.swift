@@ -3176,7 +3176,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             return 1
         }
         guard revealDistance > 0 else { return 0 }
-        let revealedDistance = chatBubbleBottomOffsetY - contentOffsetY
+        let revealedDistance = contentOffsetY - chatBubbleBottomOffsetY
         return min(1, max(0, revealedDistance / revealDistance))
     }
 
@@ -3331,6 +3331,25 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         )
     }
 
+    private func chatBubbleBottomOffsetY(bottomInset: CGFloat) -> CGFloat? {
+        guard let lastMessageId,
+              let lastMessageIndexPath = dataSource.indexPath(for: lastMessageId),
+              let lastMessageAttributes = collectionView.layoutAttributesForItem(at: lastMessageIndexPath)
+        else {
+            return nil
+        }
+        let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
+        let chatContentBottom = lastMessageAttributes.frame.maxY
+            + metrics.flowGap
+            + flowLayout.sectionInset.bottom
+        return Self.bottomOffsetMaxY(
+            contentHeight: chatContentBottom,
+            boundsHeight: collectionView.bounds.height,
+            topInset: collectionView.contentInset.top,
+            bottomInset: bottomInset
+        )
+    }
+
     private func distanceFromBottomClamped() -> CGFloat {
         let contentInset = collectionView.contentInset
         let minY = -contentInset.top
@@ -3344,9 +3363,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     private func footerRevealAlpha() -> CGFloat {
         guard dataSource.indexPath(for: SessionMetadataFooterCell.itemId) != nil else { return 1 }
+        guard let chatBubbleBottomOffsetY = chatBubbleBottomOffsetY(bottomInset: currentBottomInset) else { return 0 }
         return Self.footerRevealAlpha(
             contentOffsetY: collectionView.contentOffset.y,
-            chatBubbleBottomOffsetY: restingBottomOffsetMaxY(bottomInset: currentBottomInset),
+            chatBubbleBottomOffsetY: chatBubbleBottomOffsetY,
             revealDistance: SessionMetadataFooterCell.fadeRevealRange
         )
     }
@@ -3357,7 +3377,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     var chatBubbleBottomOffsetYForTesting: CGFloat {
-        restingBottomOffsetMaxY(bottomInset: currentBottomInset)
+        chatBubbleBottomOffsetY(bottomInset: currentBottomInset) ?? .nan
+    }
+
+    var displayedFooterAlphaForTesting: CGFloat? {
+        guard let indexPath = dataSource.indexPath(for: SessionMetadataFooterCell.itemId) else { return nil }
+        return collectionView.cellForItem(at: indexPath)?.alpha
     }
 
     var footerFrameForTesting: CGRect? {

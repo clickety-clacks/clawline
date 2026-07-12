@@ -7342,8 +7342,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                     textColor: nil,
                     row: .secondary,
                     accessibilityLabel: usageAccessibilityLabel(for: window),
-                    isStaticLabel: true,
-                    allowsWrapping: true
+                    isStaticLabel: true
                 )
             }
             guard usage.freshness == .stale else { return windows }
@@ -7356,8 +7355,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                     textColor: nil,
                     row: .secondary,
                     accessibilityLabel: staleAccessibilityLabel(fetchedAt: usage.fetchedAt),
-                    isStaticLabel: true,
-                    allowsWrapping: true
+                    isStaticLabel: true
                 )
             ]
         case .loading:
@@ -7375,8 +7373,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             unsupportedReason: nil,
             textColor: nil,
             row: .secondary,
-            isStaticLabel: true,
-            allowsWrapping: true
+            isStaticLabel: true
         )
     }
 

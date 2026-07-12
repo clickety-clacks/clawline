@@ -162,6 +162,17 @@ struct ScrollToBottomUnreadTests {
 
         #expect(controller.footerFrameForTesting == footerFrame)
     }
+
+    @Test("R1662-R7 filtered session anchors fade to its last displayed chat bubble")
+    func r1662_r7_filteredSessionAnchorsFadeToLastDisplayedChatBubble() async throws {
+        let (controller, viewModel) = try await makeFooterScrollController(streamSearchQuery: "message 0")
+        defer { viewModel.onDisappear() }
+
+        controller.scrollToBottom(animated: false)
+
+        #expect(controller.chatBubbleBottomOffsetYForTesting.isFinite)
+        #expect(controller.displayedFooterAlphaForTesting == 0)
+    }
 #endif
 
 #if targetEnvironment(macCatalyst)
@@ -179,7 +190,9 @@ struct ScrollToBottomUnreadTests {
     }
 #endif
 
-    private func makeFooterScrollController() async throws -> (MessageFlowCollectionViewController, ChatViewModel) {
+    private func makeFooterScrollController(
+        streamSearchQuery: String = ""
+    ) async throws -> (MessageFlowCollectionViewController, ChatViewModel) {
         let sessionKey = "agent:main:clawline:user:s_t1662"
         let auth = TestAuthManager()
         auth.storeCredentials(token: "jwt", userId: "user")
@@ -229,7 +242,8 @@ struct ScrollToBottomUnreadTests {
             truncationBottomInset: 0,
             firstUnreadMessageId: nil,
             unreadCount: 0,
-            sessionKey: sessionKey
+            sessionKey: sessionKey,
+            streamSearchQuery: streamSearchQuery
         )
         controller.view.setNeedsLayout()
         controller.view.layoutIfNeeded()

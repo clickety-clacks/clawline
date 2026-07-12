@@ -3332,8 +3332,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     private func chatBubbleBottomOffsetY(bottomInset: CGFloat) -> CGFloat? {
-        guard let lastMessageId,
-              let lastMessageIndexPath = dataSource.indexPath(for: lastMessageId),
+        guard let lastDisplayedMessageId = dataSource.snapshot().itemIdentifiers.reversed().first(where: {
+                  messagesById[$0] != nil
+              }),
+              let lastMessageIndexPath = dataSource.indexPath(for: lastDisplayedMessageId),
               let lastMessageAttributes = collectionView.layoutAttributesForItem(at: lastMessageIndexPath)
         else {
             return nil
@@ -3363,6 +3365,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     private func footerRevealAlpha() -> CGFloat {
         guard dataSource.indexPath(for: SessionMetadataFooterCell.itemId) != nil else { return 1 }
+        guard Self.hidesFooterAtRestingBottom else { return 1 }
         guard let chatBubbleBottomOffsetY = chatBubbleBottomOffsetY(bottomInset: currentBottomInset) else { return 0 }
         return Self.footerRevealAlpha(
             contentOffsetY: collectionView.contentOffset.y,

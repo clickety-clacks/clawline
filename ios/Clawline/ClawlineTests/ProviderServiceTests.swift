@@ -2011,7 +2011,7 @@ struct ProviderServiceTests {
 
 // MARK: - Test doubles
 
-private final class MockWebSocketConnector: WebSocketConnecting {
+final class MockWebSocketConnector: WebSocketConnecting {
     let client: MockWebSocketClient
     private(set) var connectedURL: URL?
 
@@ -2058,7 +2058,7 @@ private final class ProviderServiceTestAuthManager: AuthManaging {
     }
 }
 
-private final class HTTPStubURLProtocol: URLProtocol, @unchecked Sendable {
+final class HTTPStubURLProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
 
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -2119,7 +2119,7 @@ private final class AsyncFallbackMockWebSocketConnector: WebSocketConnecting {
     }
 }
 
-private final class MockWebSocketClient: WebSocketClient {
+final class MockWebSocketClient: WebSocketClient {
     private let stream: AsyncStream<String>
     private let continuation: AsyncStream<String>.Continuation
 

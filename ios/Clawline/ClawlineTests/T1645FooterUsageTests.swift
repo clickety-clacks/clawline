@@ -54,25 +54,36 @@ struct T1645FooterUsageTests {
             "gpt-5.6  ·  Thinking medium  ·  Fast on  ·  OAUTH")
     }
 
-    @Test("T1645 measured width wraps usage before truncating it")
-    func measuredWidthChoosesOneOrTwoRows() throws {
+    @Test("T1673 keeps every usage state on one line at supported Catalyst widths")
+    func usageStatesRemainOnOneLine() throws {
         let status = try decodedStatus(usageJSON: freshUsageJSON)
         let narrowHeight = SessionMetadataFooterCell.height(for: status, width: 320)
         let wideHeight = SessionMetadataFooterCell.height(for: status, width: 900)
 
         #expect(narrowHeight == wideHeight + SessionMetadataFooterCell.actionRegionHeight)
 
-        let narrowCell = configuredCell(status: status, width: 320)
-        let usageLabels = descendants(of: narrowCell).compactMap { $0 as? UILabel }.filter {
-            $0.text == "5h 64%" || $0.text == "Week 28%"
+        let staleStatus = try decodedStatus(
+            usageJSON: freshUsageJSON.replacingOccurrences(of: "\"fresh\"", with: "\"stale\"")
+        )
+        let loadingStatus = try decodedStatus(usageJSON: stateUsageJSON(freshness: "loading", reason: "null"))
+        let unavailableStatus = try decodedStatus(
+            usageJSON: stateUsageJSON(freshness: "unavailable", reason: "\"provider_unavailable\"")
+        )
+        let usageStates = [
+            (status, ["5h 64%", "Week 28%"]),
+            (staleStatus, ["5h 64%", "Week 28%", "Stale"]),
+            (loadingStatus, ["Usage loading"]),
+            (unavailableStatus, ["Usage unavailable"]),
+        ]
+        for (usageStatus, expectedTexts) in usageStates {
+            let cell = configuredCell(status: usageStatus, width: 320)
+            let usageLabels = descendants(of: cell).compactMap { $0 as? UILabel }.filter {
+                expectedTexts.contains($0.text ?? "")
+            }
+            #expect(usageLabels.count == expectedTexts.count)
+            #expect(usageLabels.allSatisfy { $0.numberOfLines == 1 })
+            #expect(usageLabels.allSatisfy { $0.lineBreakMode == .byTruncatingTail })
         }
-        let usageFitsWithoutTruncation = usageLabels.allSatisfy {
-            $0.frame.width >= $0.intrinsicContentSize.width
-        }
-        let usageSupportsDynamicType = usageLabels.allSatisfy(\.adjustsFontForContentSizeCategory)
-        #expect(usageLabels.count == 2)
-        #expect(usageFitsWithoutTruncation)
-        #expect(usageSupportsDynamicType)
 
         let wideCell = configuredCell(status: status, width: 900)
         let hiddenRows = descendants(of: wideCell).compactMap { $0 as? UIStackView }.filter(\.isHidden)

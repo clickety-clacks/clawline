@@ -137,8 +137,8 @@ struct SessionMetadataFooterHitTestingTests {
         let cell = makeConfiguredCell()
         cell.alpha = MessageFlowCollectionViewController.initialFooterCellAlpha(
             contentOffsetY: restingBottom,
-            restingBottomOffsetY: restingBottom,
-            trueBottomOffsetY: trueBottom
+            chatBubbleBottomOffsetY: restingBottom,
+            revealDistance: trueBottom - restingBottom
         )
         let searchField = try footerSearchField(in: cell)
         let searchCenter = searchField.convert(

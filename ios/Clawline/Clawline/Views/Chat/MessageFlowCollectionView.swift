@@ -3140,7 +3140,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     static var excludesFooterRevealRangeAtRestingBottom: Bool {
+#if targetEnvironment(macCatalyst)
+        false
+#else
         true
+#endif
     }
 
     static var hidesFooterAtRestingBottom: Bool {
@@ -3163,30 +3167,29 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     static func footerRevealAlpha(
         contentOffsetY: CGFloat,
-        restingBottomOffsetY: CGFloat,
-        trueBottomOffsetY: CGFloat,
+        chatBubbleBottomOffsetY: CGFloat,
+        revealDistance: CGFloat,
         hidesFooterAtRestingBottom: Bool = MessageFlowCollectionViewController.hidesFooterAtRestingBottom
     ) -> CGFloat {
-        guard restingBottomOffsetY.isFinite, trueBottomOffsetY.isFinite else { return 0 }
+        guard chatBubbleBottomOffsetY.isFinite, revealDistance.isFinite else { return 0 }
         if !hidesFooterAtRestingBottom {
             return 1
         }
-        let revealDistance = trueBottomOffsetY - restingBottomOffsetY
         guard revealDistance > 0 else { return 0 }
-        let revealedDistance = contentOffsetY - restingBottomOffsetY
+        let revealedDistance = chatBubbleBottomOffsetY - contentOffsetY
         return min(1, max(0, revealedDistance / revealDistance))
     }
 
     static func initialFooterCellAlpha(
         contentOffsetY: CGFloat,
-        restingBottomOffsetY: CGFloat,
-        trueBottomOffsetY: CGFloat,
+        chatBubbleBottomOffsetY: CGFloat,
+        revealDistance: CGFloat,
         hidesFooterAtRestingBottom: Bool = MessageFlowCollectionViewController.hidesFooterAtRestingBottom
     ) -> CGFloat {
         footerRevealAlpha(
             contentOffsetY: contentOffsetY,
-            restingBottomOffsetY: restingBottomOffsetY,
-            trueBottomOffsetY: trueBottomOffsetY,
+            chatBubbleBottomOffsetY: chatBubbleBottomOffsetY,
+            revealDistance: revealDistance,
             hidesFooterAtRestingBottom: hidesFooterAtRestingBottom
         )
     }
@@ -3328,15 +3331,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         )
     }
 
-    private func trueBottomOffsetMaxY(bottomInset: CGFloat) -> CGFloat {
-        Self.bottomOffsetMaxY(
-            contentHeight: collectionView.contentSize.height,
-            boundsHeight: collectionView.bounds.height,
-            topInset: collectionView.contentInset.top,
-            bottomInset: bottomInset
-        )
-    }
-
     private func distanceFromBottomClamped() -> CGFloat {
         let contentInset = collectionView.contentInset
         let minY = -contentInset.top
@@ -3352,10 +3346,42 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         guard dataSource.indexPath(for: SessionMetadataFooterCell.itemId) != nil else { return 1 }
         return Self.footerRevealAlpha(
             contentOffsetY: collectionView.contentOffset.y,
-            restingBottomOffsetY: restingBottomOffsetMaxY(bottomInset: currentBottomInset),
-            trueBottomOffsetY: trueBottomOffsetMaxY(bottomInset: currentBottomInset)
+            chatBubbleBottomOffsetY: restingBottomOffsetMaxY(bottomInset: currentBottomInset),
+            revealDistance: SessionMetadataFooterCell.fadeRevealRange
         )
     }
+
+#if DEBUG
+    var footerAlphaForTesting: CGFloat {
+        footerRevealAlpha()
+    }
+
+    var chatBubbleBottomOffsetYForTesting: CGFloat {
+        restingBottomOffsetMaxY(bottomInset: currentBottomInset)
+    }
+
+    var footerFrameForTesting: CGRect? {
+        guard let indexPath = dataSource.indexPath(for: SessionMetadataFooterCell.itemId) else { return nil }
+        collectionView.layoutIfNeeded()
+        return collectionView.layoutAttributesForItem(at: indexPath)?.frame
+    }
+
+    var footerViewportFrameForTesting: CGRect? {
+        footerFrameForTesting.map { collectionView.convert($0, to: collectionView) }
+    }
+
+    var footerViewportBoundsForTesting: CGRect {
+        CGRect(origin: collectionView.contentOffset, size: collectionView.bounds.size)
+    }
+
+    func setChatScrollOffsetYForTesting(_ contentOffsetY: CGFloat) {
+        collectionView.setContentOffset(
+            CGPoint(x: collectionView.contentOffset.x, y: contentOffsetY),
+            animated: false
+        )
+        updateVisibleFooterAlpha()
+    }
+#endif
 
     private func updateVisibleFooterAlpha() {
         guard let indexPath = dataSource.indexPath(for: SessionMetadataFooterCell.itemId),

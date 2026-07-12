@@ -132,8 +132,8 @@ struct Clawline_SpatialTests {
         #expect(MessageFlowCollectionViewController.hidesFooterAtRestingBottom)
         #expect(MessageFlowCollectionViewController.footerRevealAlpha(
             contentOffsetY: restingBottom,
-            restingBottomOffsetY: restingBottom,
-            trueBottomOffsetY: trueBottom,
+            chatBubbleBottomOffsetY: restingBottom,
+            revealDistance: trueBottom - restingBottom,
             hidesFooterAtRestingBottom: MessageFlowCollectionViewController.hidesFooterAtRestingBottom
         ) == 0)
     }

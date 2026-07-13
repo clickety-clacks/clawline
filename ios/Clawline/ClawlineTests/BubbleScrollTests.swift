@@ -7,6 +7,7 @@
 
 import Testing
 import UIKit
+import SafariServices
 import WebKit
 @testable import Clawline
 
@@ -2479,9 +2480,9 @@ struct BubbleScrollTests {
         #expect(expandsWithPreview == 0)
     }
 
-    @Test("T118: Single-link bubble swipe-up opens expanded viewer")
+    @Test("T118-R1/R2: Single-link bubble has no swipe expansion and retains card tap action")
     @MainActor
-    func singleLinkSwipeUpRequestsExpand() {
+    func singleLinkInteractionUsesCardTapOnly() {
         let metrics = ChatFlowTheme.Metrics(isCompact: false)
         let singleLinkMessage = Message(
             id: "single-link-swipe-up",
@@ -2493,42 +2494,50 @@ struct BubbleScrollTests {
             deviceId: nil,
             sessionKey: "server:personal"
         )
-        let multiLinkMessage = Message(
-            id: "multi-link-swipe-up",
+        let singleLinkPresentation = buildPresentation(singleLinkMessage, metrics: metrics, enableLinkPreviews: true)
+        let bubble = configuredBubble(
+            message: singleLinkMessage,
+            presentation: singleLinkPresentation,
+            metrics: metrics
+        )
+        let cards = allSubviews(in: bubble).compactMap { $0 as? LinkCardUIKitView }
+        #expect(cards.count == 1)
+        guard let card = cards.first,
+              let interactionSurface = bubbleInteractionSurface(containing: card, within: bubble) else {
+            Issue.record("Expected single-link card on the bubble interaction surface")
+            return
+        }
+        #expect(interactionSurface.gestureRecognizers?.contains(where: { $0 is UISwipeGestureRecognizer }) == false)
+        #expect(card.allControlEvents.contains(.touchUpInside))
+
+        let host = UIViewController()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.addSubview(bubble)
+        card.sendActions(for: .touchUpInside)
+        #expect(host.presentedViewController is SFSafariViewController)
+        window.isHidden = true
+    }
+
+    @Test("T118-R3/R4: Unrelated overflow tap expansion remains conditional")
+    @MainActor
+    func nonLinkBubbleTapExpandsOnlyWhenOverflowing() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let message = Message(
+            id: "non-link-overflow",
             role: .assistant,
-            content: "Links:\nhttps://a.example\nhttps://b.example",
+            content: "Plain message content",
             timestamp: Date(),
             streaming: false,
             attachments: [],
             deviceId: nil,
             sessionKey: "server:personal"
         )
+        let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: true)
 
-        let singleLinkPresentation = buildPresentation(singleLinkMessage, metrics: metrics, enableLinkPreviews: true)
-        let multiLinkPresentation = buildPresentation(multiLinkMessage, metrics: metrics, enableLinkPreviews: true)
-        let noPreviewPresentation = buildPresentation(singleLinkMessage, metrics: metrics, enableLinkPreviews: false)
-
-        #expect(
-            swipeUpExpandCallbackCount(
-                message: singleLinkMessage,
-                presentation: singleLinkPresentation,
-                metrics: metrics
-            ) == 1
-        )
-        #expect(
-            swipeUpExpandCallbackCount(
-                message: multiLinkMessage,
-                presentation: multiLinkPresentation,
-                metrics: metrics
-            ) == 0
-        )
-        #expect(
-            swipeUpExpandCallbackCount(
-                message: singleLinkMessage,
-                presentation: noPreviewPresentation,
-                metrics: metrics
-            ) == 0
-        )
+        #expect(expandCallbackCount(message: message, presentation: presentation, metrics: metrics) == 1)
+        #expect(expandCallbackCount(message: message, presentation: presentation, metrics: metrics, forceOverflow: false) == 0)
     }
 
     @Test("T028: Link preview uses one outer squircle radius (no inner webview corner radius)")
@@ -2714,52 +2723,35 @@ struct BubbleScrollTests {
     @MainActor
     private func expandCallbackCount(message: Message,
                                      presentation: MessagePresentation,
-                                     metrics: ChatFlowTheme.Metrics) -> Int {
-        let sizeClass = MessageFlowRules.sizeClass(for: presentation)
-        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 360, height: 1))
+                                     metrics: ChatFlowTheme.Metrics,
+                                     forceOverflow: Bool = true) -> Int {
         var count = 0
-
-        bubble.configure(
+        let bubble = configuredBubble(
             message: message,
-            stream: .personal,
             presentation: presentation,
-            sizeClass: sizeClass,
             metrics: metrics,
-            maxWidth: 360,
-            truncationHeightOverride: 44,
-            bubbleSizingV2: nil,
-            showsHeader: true,
-            paddingScale: 1,
-            minWidthOverride: nil,
-            maxWidthOverride: nil,
-            useContinuousCorners: true,
-            isDark: false,
-            onRequestExpand: { count += 1 },
-            onRequestLayout: nil,
-            onInteractiveCallback: nil
+            onRequestExpand: { count += 1 }
         )
-        let measured = bubble.systemLayoutSizeFitting(
-            CGSize(width: 360, height: UIView.layoutFittingCompressedSize.height),
-            withHorizontalFittingPriority: .required,
-            verticalFittingPriority: .fittingSizeLevel
-        )
-        bubble.frame = CGRect(origin: .zero, size: measured)
-        bubble.layoutIfNeeded()
-        if let inner = innerBubbleScrollView(in: bubble) {
+        if forceOverflow, let inner = innerBubbleScrollView(in: bubble) {
             inner.contentSize = CGSize(width: max(1, inner.bounds.width), height: inner.bounds.height + 200)
         }
+        guard let interactionSurface = bubbleInteractionSurface(containing: nil, within: bubble) else {
+            Issue.record("Expected bubble tap interaction surface")
+            return count
+        }
+        #expect(interactionSurface.gestureRecognizers?.contains(where: { $0 is UITapGestureRecognizer }) == true)
 
         _ = bubble.perform(NSSelectorFromString("handleBubbleTap"))
         return count
     }
 
     @MainActor
-    private func swipeUpExpandCallbackCount(message: Message,
-                                            presentation: MessagePresentation,
-                                            metrics: ChatFlowTheme.Metrics) -> Int {
+    private func configuredBubble(message: Message,
+                                  presentation: MessagePresentation,
+                                  metrics: ChatFlowTheme.Metrics,
+                                  onRequestExpand: (() -> Void)? = nil) -> MessageBubbleUIKitView {
         let sizeClass = MessageFlowRules.sizeClass(for: presentation)
         let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 360, height: 1))
-        var count = 0
 
         bubble.configure(
             message: message,
@@ -2776,7 +2768,7 @@ struct BubbleScrollTests {
             maxWidthOverride: nil,
             useContinuousCorners: true,
             isDark: false,
-            onRequestExpand: { count += 1 },
+            onRequestExpand: onRequestExpand,
             onRequestLayout: nil,
             onInteractiveCallback: nil
         )
@@ -2788,8 +2780,24 @@ struct BubbleScrollTests {
         bubble.frame = CGRect(origin: .zero, size: measured)
         bubble.layoutIfNeeded()
 
-        _ = bubble.perform(NSSelectorFromString("handleBubbleSwipeUp"))
-        return count
+        return bubble
+    }
+
+    private func allSubviews(in view: UIView) -> [UIView] {
+        view.subviews + view.subviews.flatMap { allSubviews(in: $0) }
+    }
+
+    private func bubbleInteractionSurface(containing descendant: UIView?, within bubble: UIView) -> UIView? {
+        var candidate = descendant?.superview
+        while let view = candidate, view !== bubble {
+            if view.gestureRecognizers?.contains(where: { $0 is UITapGestureRecognizer }) == true {
+                return view
+            }
+            candidate = view.superview
+        }
+        return bubble.subviews.first(where: {
+            $0.gestureRecognizers?.contains(where: { $0 is UITapGestureRecognizer }) == true
+        })
     }
 
     private func allScrollViews(in view: UIView) -> [UIScrollView] {

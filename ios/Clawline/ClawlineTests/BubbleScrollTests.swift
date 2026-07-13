@@ -11,6 +11,10 @@ import WebKit
 @testable import Clawline
 
 struct BubbleScrollTests {
+    @Test("T1377: repaired bubble sizing path is active in production")
+    func repairedBubbleSizingPathIsActiveInProduction() {
+        #expect(BubbleSizingV2.isEnabled)
+    }
 
     @Test("Bug #62: Truncated bubbles enable inner scroll when link preview pushes content past cap")
     @MainActor

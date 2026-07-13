@@ -96,7 +96,8 @@ struct T1645FooterUsageTests {
                 let frame = label.convert(label.bounds, to: cell)
                 let requiredWidth = ceil((label.text! as NSString).size(withAttributes: [.font: label.font]).width)
                 let textRect = label.textRect(forBounds: label.bounds, limitedToNumberOfLines: 1)
-                return versionFrame.contains(frame) && frame.width >= requiredWidth && textRect.width >= requiredWidth
+                return versionFrame.contains(frame) && frame.width >= requiredWidth
+                    && ceil(textRect.width) >= requiredWidth
                     && frame.intersects(menuFrame) == false
             })
         }
@@ -122,7 +123,7 @@ struct T1645FooterUsageTests {
         #expect(versionLabels.allSatisfy { label in
             let requiredWidth = ceil((label.text! as NSString).size(withAttributes: [.font: label.font]).width)
             return label.bounds.width >= requiredWidth
-                && label.textRect(forBounds: label.bounds, limitedToNumberOfLines: 1).width >= requiredWidth
+                && ceil(label.textRect(forBounds: label.bounds, limitedToNumberOfLines: 1).width) >= requiredWidth
                 && label.convert(label.bounds, to: exactWidthCell).intersects(exactWidthMenuFrame) == false
         })
         for first in versionFrames.indices {

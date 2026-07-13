@@ -711,7 +711,7 @@ final class ChatViewModel {
     }
 
     func sessionStatus(for sessionKey: String) -> SessionStatus? {
-        sessionStatusBySessionKey[sessionKey]
+        sessionStatusBySessionKey[sessionStatusAuthorityKey(for: sessionKey)]
     }
 
     func applySessionControl(
@@ -720,7 +720,7 @@ final class ChatViewModel {
         value: String? = nil,
         enabled: Bool? = nil
     ) {
-        let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedSessionKey = sessionStatusAuthorityKey(for: sessionKey)
         guard !normalizedSessionKey.isEmpty else { return }
         Task { [weak self] in
             guard let self else { return }
@@ -896,6 +896,8 @@ final class ChatViewModel {
     private var refreshStreamsTask: Task<Void, Never>?
     private var refreshTrackableSessionsTask: Task<Void, Never>?
     private(set) var sessionStatusBySessionKey: [String: SessionStatus] = [:]
+    private var runtimeSessionKeyByRoutingSessionKey: [String: String] = [:]
+    private var latestStatusAuthorityClientMessageIDByRoutingSessionKey: [String: String] = [:]
     private var sessionStatusRefreshTasks: [String: Task<Void, Never>] = [:]
     private var sessionStatusFailureCountBySessionKey: [String: Int] = [:]
     private var allowsSessionStatusRefreshes = true
@@ -2227,6 +2229,7 @@ final class ChatViewModel {
         print("[ClawlineSendDiag] vm_begin_send_placeholder id=\(clientId) sessionKey=\(sessionKey) contentChars=\(content.count) attachments=\(pendingAttachments.count) references=\(references.count)")
         upsert(sessionKey: sessionKey, message: placeholder, sourceFlags: .local)
         pendingLocalMessages.append(PendingLocalMessage(id: clientId, sessionKey: sessionKey))
+        latestStatusAuthorityClientMessageIDByRoutingSessionKey[sessionKey] = clientId
         print("[ClawlineSendDiag] vm_begin_send_task_scheduled id=\(clientId) sessionKey=\(sessionKey) pendingLocalCount=\(pendingLocalMessages.count)")
         scheduleSessionStatusRefresh(for: sessionKey, reason: "sendDispatched")
         bumpSendIndicatorRevision()
@@ -4051,6 +4054,10 @@ final class ChatViewModel {
     }
 
     private func handlePromptTurnState(_ event: PromptTurnStateEvent) {
+        bindRuntimeSessionAuthority(
+            runtimeSessionKey: event.payload.sessionKey,
+            clientMessageID: event.payload.messageId
+        )
         let state = event.payload.state.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let terminalState = event.payload.terminalState?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let messageId = event.payload.messageId
@@ -4138,6 +4145,10 @@ final class ChatViewModel {
     private func handleAgentProgress(_ event: AgentProgressEvent) {
         let sessionKey = event.sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !sessionKey.isEmpty else { return }
+        bindRuntimeSessionAuthority(
+            runtimeSessionKey: sessionKey,
+            clientMessageID: event.messageId
+        )
         ensureStreamEntry(for: sessionKey)
 
         let state = event.state?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -4533,11 +4544,11 @@ final class ChatViewModel {
         reason: String,
         delay: Duration = .zero
     ) {
-        let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedSessionKey = sessionStatusAuthorityKey(for: sessionKey)
         guard !normalizedSessionKey.isEmpty else { return }
         guard auth.token != nil else { return }
         guard allowsSessionStatusRefreshes, !isRetired else { return }
-        guard normalizedSessionKey == uiSelectedSessionKey else { return }
+        guard normalizedSessionKey == sessionStatusAuthorityKey(for: uiSelectedSessionKey) else { return }
 
         sessionStatusRefreshTasks[normalizedSessionKey]?.cancel()
         sessionStatusRefreshTasks[normalizedSessionKey] = Task { [weak self] in
@@ -4593,7 +4604,33 @@ final class ChatViewModel {
     static let sessionStatusFailureThreshold = 3
 
     func isSessionStatusUnavailable(for sessionKey: String) -> Bool {
-        sessionStatusUnavailableSessionKeys.contains(sessionKey)
+        sessionStatusUnavailableSessionKeys.contains(sessionStatusAuthorityKey(for: sessionKey))
+    }
+
+    private func sessionStatusAuthorityKey(for sessionKey: String) -> String {
+        let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        return runtimeSessionKeyByRoutingSessionKey[normalizedSessionKey] ?? normalizedSessionKey
+    }
+
+    private func bindRuntimeSessionAuthority(runtimeSessionKey: String, clientMessageID: String?) {
+        let runtimeKey = runtimeSessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !runtimeKey.isEmpty,
+              let clientMessageID = normalizedAgentProgressText(clientMessageID),
+              let routingKey = localMessageSessionKey(for: clientMessageID),
+              latestStatusAuthorityClientMessageIDByRoutingSessionKey[routingKey] == clientMessageID,
+              routingKey != runtimeKey,
+              runtimeSessionKeyByRoutingSessionKey[routingKey] != runtimeKey else {
+            return
+        }
+
+        runtimeSessionKeyByRoutingSessionKey[routingKey] = runtimeKey
+        sessionStatusRefreshTasks.removeValue(forKey: routingKey)?.cancel()
+        sessionStatusBySessionKey.removeValue(forKey: routingKey)
+        sessionStatusFailureCountBySessionKey.removeValue(forKey: routingKey)
+        sessionStatusUnavailableSessionKeys.remove(routingKey)
+        usageFollowUpFreshnessBySessionKey.removeValue(forKey: routingKey)
+        usageFollowUpCountBySessionKey.removeValue(forKey: routingKey)
+        scheduleSessionStatusRefresh(for: runtimeKey, reason: "runtimeSessionResolved")
     }
 
     func recordSessionStatusFetchSuccess(for sessionKey: String) {
@@ -4678,7 +4715,9 @@ final class ChatViewModel {
     }
 
     private func scheduleSessionStatusFollowUpIfNeeded(_ status: SessionStatus, requestedSessionKey: String) {
-        guard uiSelectedSessionKey == requestedSessionKey || engineActiveSessionKey == requestedSessionKey else {
+        let authorityKey = sessionStatusAuthorityKey(for: requestedSessionKey)
+        guard sessionStatusAuthorityKey(for: uiSelectedSessionKey) == authorityKey
+                || sessionStatusAuthorityKey(for: engineActiveSessionKey) == authorityKey else {
             return
         }
         let usage = status.display.codexUsage
@@ -4746,6 +4785,8 @@ final class ChatViewModel {
     private func clearSessionStatusRefreshes() {
         cancelSessionStatusRefreshes()
         sessionStatusBySessionKey.removeAll()
+        runtimeSessionKeyByRoutingSessionKey.removeAll()
+        latestStatusAuthorityClientMessageIDByRoutingSessionKey.removeAll()
     }
 
     private func cancelSessionStatusRefreshes(except retainedSessionKey: String? = nil) {

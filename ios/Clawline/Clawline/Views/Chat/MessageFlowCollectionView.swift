@@ -6696,6 +6696,10 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             primaryRowHeightConstraint,
             secondaryRowHeightConstraint,
             versionRowHeightConstraint,
+            versionStackView.widthAnchor.constraint(
+                equalTo: contentView.widthAnchor,
+                constant: -(Self.horizontalPadding * 2)
+            ),
             searchField.heightAnchor.constraint(equalToConstant: Self.searchRowHeight),
             searchField.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
             searchField.widthAnchor.constraint(lessThanOrEqualTo: contentView.widthAnchor, constant: -(Self.horizontalPadding * 2)),
@@ -7060,7 +7064,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             )
             let titleWidth = ceil((item.text as NSString).size(withAttributes: [.font: footerFont]).width)
             label.widthAnchor.constraint(
-                greaterThanOrEqualToConstant: item.allowsTruncation || item.allowsWrapping ? 44 : max(44, titleWidth + 8)
+                greaterThanOrEqualToConstant: item.allowsTruncation || item.allowsWrapping ? 44 : titleWidth
             ).isActive = true
             return label
         }

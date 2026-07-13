@@ -19,6 +19,158 @@ private final class ObservationFlag {
 
 @Suite(.serialized)
 struct ChatViewModelTests {
+    @Test("T1673 Personal footer status follows the concrete runtime session")
+    @MainActor
+    func personalFooterStatusFollowsConcreteRuntimeSession() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let runtimeSessionKey = "agent:main:clawline:user:s_runtime"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        chatService.sessionStatusBySessionKey[runtimeSessionKey] = makeSessionStatus(
+            sessionKey: runtimeSessionKey,
+            state: .running,
+            provider: "openai",
+            model: "gpt-5.6-sol",
+            thinkingLevel: "high",
+            authMode: "oauth",
+            fastMode: true,
+            queueDepth: 0
+        )
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.activate(origin: "test.t1673.personalConcreteAuthority")
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        viewModel.inputContent = NSAttributedString(string: "Prove runtime authority")
+        #expect(viewModel.send())
+
+        for _ in 0..<50 {
+            if chatService.lastSentId != nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let clientMessageID = try #require(chatService.lastSentId)
+        chatService.resetFetchedSessionStatusKeys()
+        chatService.emitServiceEvent(
+            .agentProgress(
+                AgentProgressEvent(
+                    version: 1,
+                    sessionKey: runtimeSessionKey,
+                    runId: "run_t1673",
+                    messageId: clientMessageID,
+                    seq: 1,
+                    state: "running",
+                    summary: "Working"
+                )
+            )
+        )
+
+        for _ in 0..<100 {
+            if viewModel.sessionStatus(for: personalSessionKey)?.sessionKey == runtimeSessionKey { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(chatService.fetchedSessionStatusKeys.contains(runtimeSessionKey))
+        #expect(!chatService.fetchedSessionStatusKeys.contains(personalSessionKey))
+        #expect(viewModel.sessionStatus(for: personalSessionKey)?.sessionKey == runtimeSessionKey)
+        #expect(viewModel.sessionStatus(for: personalSessionKey)?.display.model == "gpt-5.6-sol")
+
+        let fetchCountAfterBinding = chatService.fetchSessionStatusCallCount
+        chatService.emitServiceEvent(
+            .agentProgress(
+                AgentProgressEvent(
+                    version: 1,
+                    sessionKey: runtimeSessionKey,
+                    runId: "run_t1673",
+                    messageId: clientMessageID,
+                    seq: 2,
+                    state: "running",
+                    summary: "Still working"
+                )
+            )
+        )
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(chatService.fetchSessionStatusCallCount == fetchCountAfterBinding)
+
+        viewModel.applySessionControl(
+            sessionKey: personalSessionKey,
+            action: .setFastMode,
+            enabled: true
+        )
+        for _ in 0..<50 {
+            if chatService.lastSessionControl?.sessionKey == runtimeSessionKey { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(chatService.lastSessionControl?.sessionKey == runtimeSessionKey)
+
+        chatService.emitServiceEvent(.messageAcked(id: clientMessageID))
+        let newerRuntimeSessionKey = "agent:main:clawline:user:s_newer"
+        chatService.sessionStatusBySessionKey[newerRuntimeSessionKey] = makeSessionStatus(
+            sessionKey: newerRuntimeSessionKey,
+            state: .idle,
+            provider: "openai",
+            model: "gpt-5.7",
+            thinkingLevel: "medium",
+            authMode: "oauth",
+            fastMode: false,
+            queueDepth: 0
+        )
+        viewModel.inputContent = NSAttributedString(string: "Use the newer runtime")
+        #expect(viewModel.send())
+        for _ in 0..<50 {
+            if chatService.lastSentId != clientMessageID { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let newerClientMessageID = try #require(chatService.lastSentId)
+        chatService.emitServiceEvent(
+            .agentProgress(
+                AgentProgressEvent(
+                    version: 1,
+                    sessionKey: newerRuntimeSessionKey,
+                    runId: "run_t1673_newer",
+                    messageId: newerClientMessageID,
+                    seq: 1,
+                    state: "running",
+                    summary: "Working"
+                )
+            )
+        )
+        for _ in 0..<100 {
+            if viewModel.sessionStatus(for: personalSessionKey)?.sessionKey == newerRuntimeSessionKey { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        chatService.emitServiceEvent(
+            .agentProgress(
+                AgentProgressEvent(
+                    version: 1,
+                    sessionKey: runtimeSessionKey,
+                    runId: "run_t1673",
+                    messageId: clientMessageID,
+                    seq: 2,
+                    state: "completed"
+                )
+            )
+        )
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(viewModel.sessionStatus(for: personalSessionKey)?.sessionKey == newerRuntimeSessionKey)
+        #expect(viewModel.sessionStatus(for: personalSessionKey)?.display.model == "gpt-5.7")
+    }
+
     @Test("T307 cross-chat mention sends to destination only")
     @MainActor
     func crossChatMentionSendRoutesToDestinationOnly() async throws {
@@ -76,12 +228,7 @@ struct ChatViewModelTests {
         #expect(chatService.lastSessionKey == destinationSessionKey)
         #expect(chatService.lastSentContent == "route this")
         #expect(viewModel.messages.isEmpty)
-        for _ in 0..<50 {
-            if viewModel.sessionStatus(for: destinationSessionKey)?.run.state == .running { break }
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        #expect(chatService.fetchedSessionStatusKeys.contains(destinationSessionKey))
-        #expect(viewModel.sessionStatus(for: destinationSessionKey)?.run.state == .running)
+        #expect(!chatService.fetchedSessionStatusKeys.contains(destinationSessionKey))
         #expect(viewModel.sessionStatus(for: personalSessionKey)?.run.state != .running)
     }
 

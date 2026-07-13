@@ -54,25 +54,89 @@ struct T1645FooterUsageTests {
             "gpt-5.6  ·  Thinking medium  ·  Fast on  ·  OAUTH")
     }
 
-    @Test("T1645 measured width wraps usage before truncating it")
-    func measuredWidthChoosesOneOrTwoRows() throws {
+    @Test("T1673 puts complete OAuth usage states on the Version row without collision at iPhone width")
+    func usageStatesMoveToVersionRowWithoutWrappingOrTruncation() throws {
         let status = try decodedStatus(usageJSON: freshUsageJSON)
         let narrowHeight = SessionMetadataFooterCell.height(for: status, width: 320)
         let wideHeight = SessionMetadataFooterCell.height(for: status, width: 900)
 
-        #expect(narrowHeight == wideHeight + SessionMetadataFooterCell.actionRegionHeight)
+        #expect(narrowHeight == wideHeight)
 
-        let narrowCell = configuredCell(status: status, width: 320)
-        let usageLabels = descendants(of: narrowCell).compactMap { $0 as? UILabel }.filter {
-            $0.text == "5h 64%" || $0.text == "Week 28%"
+        let staleStatus = try decodedStatus(
+            usageJSON: freshUsageJSON.replacingOccurrences(of: "\"fresh\"", with: "\"stale\"")
+        )
+        let loadingStatus = try decodedStatus(usageJSON: stateUsageJSON(freshness: "loading", reason: "null"))
+        let unavailableStatus = try decodedStatus(
+            usageJSON: stateUsageJSON(freshness: "unavailable", reason: "\"provider_unavailable\"")
+        )
+        let usageStates = [
+            (status, ["5h 64%", "Week 28%"]),
+            (staleStatus, ["5h 64%", "Week 28%", "Stale"]),
+            (loadingStatus, ["Usage loading"]),
+            (unavailableStatus, ["Usage unavailable"]),
+        ]
+        for (usageStatus, expectedTexts) in usageStates {
+            let cell = configuredCell(status: usageStatus, width: 320)
+            let labels = descendants(of: cell).compactMap { $0 as? UILabel }
+            let usageLabels = labels.filter {
+                expectedTexts.contains($0.text ?? "") || $0.text == "OAUTH"
+            }
+            let versionLabel = try #require(labels.first { $0.text == SessionMetadataFooterCell.versionBuildText() })
+            let versionRow = try #require(versionLabel.superview)
+            let versionFrame = versionRow.convert(versionRow.bounds, to: cell)
+            let menuButton = try #require(
+                descendants(of: cell).compactMap { $0 as? UIButton }.first { $0.accessibilityLabel == "Test menu" }
+            )
+            let menuFrame = menuButton.convert(menuButton.bounds, to: cell)
+
+            #expect(usageLabels.count == expectedTexts.count + 1)
+            #expect(usageLabels.allSatisfy { $0.numberOfLines == 1 })
+            #expect(usageLabels.allSatisfy { $0.lineBreakMode == .byClipping })
+            #expect(usageLabels.allSatisfy { label in
+                let frame = label.convert(label.bounds, to: cell)
+                let requiredWidth = ceil((label.text! as NSString).size(withAttributes: [.font: label.font]).width)
+                let textRect = label.textRect(forBounds: label.bounds, limitedToNumberOfLines: 1)
+                return versionFrame.contains(frame) && frame.width >= requiredWidth
+                    && ceil(textRect.width) >= requiredWidth
+                    && frame.intersects(menuFrame) == false
+            })
         }
-        let usageFitsWithoutTruncation = usageLabels.allSatisfy {
-            $0.frame.width >= $0.intrinsicContentSize.width
+
+        let longStatus = try decodedStatus(
+            model: "openai/gpt-5.6-long-protected-model",
+            thinkingLevel: "extra-long-thinking-value",
+            fastMode: true,
+            usageJSON: stateUsageJSON(freshness: "unavailable", reason: "\"provider_unavailable\"")
+        )
+        let exactWidthCell = configuredCell(status: longStatus, width: 420)
+        let exactWidthLabels = descendants(of: exactWidthCell).compactMap { $0 as? UILabel }
+        let versionLabel = try #require(exactWidthLabels.first { $0.text == SessionMetadataFooterCell.versionBuildText() })
+        let versionRow = try #require(versionLabel.superview)
+        let versionLabels = exactWidthLabels.filter { ["OAUTH", "Usage unavailable"].contains($0.text) }
+        let versionFrames = ([versionLabel] + versionLabels).map { $0.convert($0.bounds, to: exactWidthCell) }
+        let exactWidthMenu = try #require(
+            descendants(of: exactWidthCell).compactMap { $0 as? UIButton }.first { $0.accessibilityLabel == "Test menu" }
+        )
+        let exactWidthMenuFrame = exactWidthMenu.convert(exactWidthMenu.bounds, to: exactWidthCell)
+        #expect(versionLabels.count == 2)
+        #expect(versionFrames.allSatisfy { versionRow.convert(versionRow.bounds, to: exactWidthCell).contains($0) })
+        #expect(versionLabels.allSatisfy { label in
+            let requiredWidth = ceil((label.text! as NSString).size(withAttributes: [.font: label.font]).width)
+            return label.bounds.width >= requiredWidth
+                && ceil(label.textRect(forBounds: label.bounds, limitedToNumberOfLines: 1).width) >= requiredWidth
+                && label.convert(label.bounds, to: exactWidthCell).intersects(exactWidthMenuFrame) == false
+        })
+        for first in versionFrames.indices {
+            for second in versionFrames.indices where first < second {
+                #expect(versionFrames[first].intersection(versionFrames[second]).isNull)
+            }
         }
-        let usageSupportsDynamicType = usageLabels.allSatisfy(\.adjustsFontForContentSizeCategory)
-        #expect(usageLabels.count == 2)
-        #expect(usageFitsWithoutTruncation)
-        #expect(usageSupportsDynamicType)
+
+        exactWidthCell.frame.size.width = 320
+        exactWidthCell.setNeedsLayout()
+        exactWidthCell.layoutIfNeeded()
+        let resizedLabels = descendants(of: exactWidthCell).compactMap { $0 as? UILabel }
+        #expect(resizedLabels.filter { ["OAUTH", "Usage unavailable"].contains($0.text) }.count == 2)
 
         let wideCell = configuredCell(status: status, width: 900)
         let hiddenRows = descendants(of: wideCell).compactMap { $0 as? UIStackView }.filter(\.isHidden)
@@ -164,17 +228,23 @@ struct T1645FooterUsageTests {
         """
     }
 
-    private func decodedStatus(authMode: String = "oauth", usageJSON: String?) throws -> SessionStatus {
+    private func decodedStatus(
+        authMode: String = "oauth",
+        model: String = "gpt-5.6",
+        thinkingLevel: String = "medium",
+        fastMode: Bool = true,
+        usageJSON: String?
+    ) throws -> SessionStatus {
         let usageField = usageJSON.map { ", \"codexUsage\": \($0)" } ?? ""
         let json = """
         {
           "sessionKey": "agent:main:clawline:user:s_t1645",
           "display": {
-            "model": "gpt-5.6",
+            "model": "\(model)",
             "provider": "openai-codex",
             "authMode": "\(authMode)",
-            "thinkingLevel": "medium",
-            "fastMode": true
+            "thinkingLevel": "\(thinkingLevel)",
+            "fastMode": \(fastMode)
             \(usageField)
           },
           "run": {"state": "idle"},

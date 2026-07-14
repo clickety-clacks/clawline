@@ -15,6 +15,7 @@ struct SelectableAttributedText: UIViewRepresentable {
 
     func makeUIView(context: Context) -> UITextView {
         let textView = TraitResponsiveTextView()
+        textView.onTextMetricsTraitChange = context.coordinator.invalidateMeasurementMemo
         UnifiedMarkdownRenderer.configureTextView(
             textView,
             delegate: context.coordinator,
@@ -30,54 +31,51 @@ struct SelectableAttributedText: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UITextView, context: Context) {
-        context.coordinator.isUpdatingFromSwiftUI = true
-        defer { context.coordinator.isUpdatingFromSwiftUI = false }
-
-        let style: UIUserInterfaceStyle = colorScheme == .dark ? .dark : .light
-        if uiView.overrideUserInterfaceStyle != style {
-            uiView.overrideUserInterfaceStyle = style
-        }
-        if Self.needsAttributedTextUpdate(current: uiView.attributedText, next: attributedString) {
-            uiView.attributedText = attributedString
-        }
-        uiView.textAlignment = alignment
-        if context.coordinator.consumeSelectionResetToken(selectionResetToken) {
-            context.coordinator.invalidateDeferredSelectionChanges()
-            if uiView.selectedRange.length > 0 {
-                uiView.selectedRange = NSRange(location: uiView.selectedRange.location, length: 0)
-            }
-            context.coordinator.emitSelectionChange(false)
-        }
+        context.coordinator.update(
+            view: uiView,
+            attributedString: attributedString,
+            alignment: alignment,
+            userInterfaceStyle: colorScheme == .dark ? .dark : .light,
+            selectionResetToken: selectionResetToken
+        )
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
         guard let width = proposal.width, width > 0 else { return nil }
-        let fitting = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
-        return CGSize(width: width, height: ceil(fitting.height))
+        return context.coordinator.measuredSize(width: width, using: uiView)
     }
 
-    private final class TraitResponsiveTextView: UITextView {
-        private var traitObservation: (any NSObjectProtocol)?
+    final class TraitResponsiveTextView: UITextView {
+        var onTextMetricsTraitChange: (() -> Void)?
+
+        private var colorTraitObservation: (any NSObjectProtocol)?
+        private var textMetricsTraitObservation: (any NSObjectProtocol)?
 
         override init(frame: CGRect, textContainer: NSTextContainer?) {
             super.init(frame: frame, textContainer: textContainer)
-            registerColorTraitObservation()
+            registerTraitObservations()
         }
 
         required init?(coder: NSCoder) {
             super.init(coder: coder)
-            registerColorTraitObservation()
+            registerTraitObservations()
         }
 
-        private func registerColorTraitObservation() {
-            traitObservation = registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (_: TraitResponsiveTextView, previousTraitCollection: UITraitCollection) in
+        private func registerTraitObservations() {
+            colorTraitObservation = registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (_: TraitResponsiveTextView, previousTraitCollection: UITraitCollection) in
                 guard let self else { return }
                 guard self.traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) else { return }
                 self.refreshAttributedTextForCurrentTraits()
             }
+            textMetricsTraitObservation = registerForTraitChanges([
+                UITraitPreferredContentSizeCategory.self,
+                UITraitLegibilityWeight.self,
+            ]) { [weak self] (_: TraitResponsiveTextView, _: UITraitCollection) in
+                self?.onTextMetricsTraitChange?()
+            }
         }
 
-        private func refreshAttributedTextForCurrentTraits() {
+        func refreshAttributedTextForCurrentTraits() {
             // TextKit can cache resolved run colors; reassigning forces it to resolve dynamic UIColor
             // attributes with the new trait collection.
             let selection = selectedRange
@@ -96,8 +94,15 @@ struct SelectableAttributedText: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {
+        private static let measurementMemoCapacity = 8
+
         private let onSelectionChange: (Bool) -> Void
         private let onLinkTap: (URL) -> Void
+        private var measurementMemo: [CGFloat: CGFloat] = [:]
+        private var lastAppliedAttributedString: NSAttributedString?
+        private var lastAppliedAlignment: NSTextAlignment?
+        private(set) var measurementMissCount = 0
+        var measurementMemoEntryCount: Int { measurementMemo.count }
         var isUpdatingFromSwiftUI = false
         private var lastHasSelection: Bool?
         private var lastSelectionResetToken: Int?
@@ -106,6 +111,58 @@ struct SelectableAttributedText: UIViewRepresentable {
         init(onSelectionChange: @escaping (Bool) -> Void, onLinkTap: @escaping (URL) -> Void) {
             self.onSelectionChange = onSelectionChange
             self.onLinkTap = onLinkTap
+        }
+
+        func measuredSize(width: CGFloat, using textView: UITextView) -> CGSize {
+            if let height = measurementMemo[width] {
+                return CGSize(width: width, height: height)
+            }
+
+            let fitting = textView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+            let height = ceil(fitting.height)
+            if measurementMemo.count == Self.measurementMemoCapacity {
+                invalidateMeasurementMemo()
+            }
+            measurementMemo[width] = height
+            measurementMissCount += 1
+            return CGSize(width: width, height: height)
+        }
+
+        func invalidateMeasurementMemo() {
+            measurementMemo.removeAll()
+        }
+
+        func update(
+            view uiView: UITextView,
+            attributedString: NSAttributedString,
+            alignment: NSTextAlignment,
+            userInterfaceStyle: UIUserInterfaceStyle,
+            selectionResetToken: Int
+        ) {
+            isUpdatingFromSwiftUI = true
+            defer { isUpdatingFromSwiftUI = false }
+
+            if uiView.overrideUserInterfaceStyle != userInterfaceStyle {
+                uiView.overrideUserInterfaceStyle = userInterfaceStyle
+            }
+            let currentAttributedString = lastAppliedAttributedString ?? uiView.attributedText
+            if SelectableAttributedText.needsAttributedTextUpdate(current: currentAttributedString, next: attributedString) {
+                uiView.attributedText = attributedString
+                invalidateMeasurementMemo()
+            }
+            lastAppliedAttributedString = NSAttributedString(attributedString: attributedString)
+            if lastAppliedAlignment != alignment {
+                uiView.textAlignment = alignment
+                lastAppliedAlignment = alignment
+                invalidateMeasurementMemo()
+            }
+            if consumeSelectionResetToken(selectionResetToken) {
+                invalidateDeferredSelectionChanges()
+                if uiView.selectedRange.length > 0 {
+                    uiView.selectedRange = NSRange(location: uiView.selectedRange.location, length: 0)
+                }
+                emitSelectionChange(false)
+            }
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {

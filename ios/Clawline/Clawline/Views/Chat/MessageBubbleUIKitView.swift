@@ -1062,7 +1062,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         bodyTap.delaysTouchesEnded = false
         bodyTap.delegate = self
         bodyLabel.addGestureRecognizer(bodyTap)
-        let bodyHover = UIHoverGestureRecognizer(target: self, action: #selector(handleBodyHover(_:)))
+        let bodyHover = UIHoverGestureRecognizer(target: self, action: #selector(handleTextHover(_:)))
         bodyLabel.addGestureRecognizer(bodyHover)
 #if targetEnvironment(macCatalyst)
         bodyLabel.addInteraction(UIContextMenuInteraction(delegate: self))
@@ -2463,11 +2463,14 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         handleBubbleTap()
     }
 
-    @objc private func handleBodyHover(_ recognizer: UIHoverGestureRecognizer) {
+    @objc private func handleTextHover(_ recognizer: UIHoverGestureRecognizer) {
         guard recognizer.state == .began || recognizer.state == .changed else {
             return
         }
-        _ = Self.presentGeneratedTextLinkPopupForHover(in: bodyLabel, at: recognizer.location(in: bodyLabel))
+        guard let textView = recognizer.view as? UITextView else {
+            return
+        }
+        _ = Self.presentGeneratedTextLinkPopupForHover(in: textView, at: recognizer.location(in: textView))
     }
 
     @objc private func handleBubbleTap() {
@@ -3073,6 +3076,8 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             enableDataDetectors: false
         )
         textView.attributedText = attributed
+        let hover = UIHoverGestureRecognizer(target: self, action: #selector(handleTextHover(_:)))
+        textView.addGestureRecognizer(hover)
 
         container.addSubview(textView)
         let textPrefersFillWidth = textView.widthAnchor.constraint(equalTo: container.widthAnchor)

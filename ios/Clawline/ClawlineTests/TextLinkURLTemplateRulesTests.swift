@@ -895,6 +895,60 @@ struct TextLinkURLTemplateRulesTests {
         #expect(popupURLs == [popupURL])
     }
 
+    @Test("T1192: supplemental transcript text blocks expose popup hover routing")
+    @MainActor
+    func supplementalTranscriptTextBlocksExposePopupHoverRouting() throws {
+        let popupRule = TextLinkURLTemplateRule(
+            id: "popup",
+            enabled: true,
+            pattern: #"T([0-9]+)"#,
+            urlTemplate: "https://example.com/popup/{match}",
+            displayMode: .popup
+        )
+        let message = Message(
+            id: "t1192-supplemental-hover",
+            role: .assistant,
+            content: "Primary T1192.\n\n```swift\nlet separator = true\n```\n\nSupplemental T1192.",
+            timestamp: Date(timeIntervalSince1970: 1_773_600_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:test:s_t1192"
+        )
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        var streamingState = StreamingTableParseState()
+        let presentation = MessagePresentationBuilder.build(
+            from: message,
+            metrics: metrics,
+            streamingState: &streamingState
+        )
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 360, height: 1))
+
+        try withConfiguredRules([popupRule]) {
+            bubble.configure(
+                message: message,
+                stream: .personal,
+                presentation: presentation,
+                sizeClass: .long,
+                metrics: metrics,
+                maxWidth: 360,
+                onRequestExpand: nil,
+                onRequestLayout: nil,
+                onInteractiveCallback: nil
+            )
+        }
+
+        let supplementalTextView = try #require(
+            textViews(in: bubble).first { $0.attributedText.string.contains("Supplemental T1192") }
+        )
+        #expect(supplementalTextView.gestureRecognizers?.contains { $0 is UIHoverGestureRecognizer } == true)
+        let tokenRange = range("T1192", in: supplementalTextView.attributedText)
+        #expect(TextLinkURLTemplateRules.displayMode(
+            in: supplementalTextView.attributedText,
+            characterRange: tokenRange
+        ) == .popup)
+    }
+
     @Test("T1192: popup hover route carries anchor point")
     @MainActor
     func popupHoverRouteCarriesAnchorPoint() throws {

@@ -397,6 +397,61 @@ struct TextLinkURLTemplateRulesTests {
         })
     }
 
+
+    @Test("T1578: expanded detail sizes and renders the selected overflow content")
+    @MainActor
+    func expandedDetailSizesAndRendersSelectedOverflowContent() async {
+        let selectedContent = "T1578 selected overflow content must remain visible in the expanded detail viewer. "
+            + String(repeating: "This is the real selected message rendering path. ", count: 12)
+        let message = Message(
+            id: "t1578-selected-overflow-detail",
+            role: .user,
+            content: selectedContent,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal",
+            sender: "Mike"
+        )
+        let presentation = MessagePresentation(
+            parts: [.text(selectedContent)],
+            copyableReadableText: selectedContent,
+            wordCount: selectedContent.split(whereSeparator: \.isWhitespace).count,
+            hasTextualContent: true,
+            isEmojiOnly: false,
+            hasMediaOnly: false,
+            detectedURLs: [],
+            detectedURLCount: 0,
+            hasSingleURL: false
+        )
+        let pool = TerminalSessionConnectionPool { _ in
+            fatalError("T1578 text detail must not create a terminal service")
+        }
+        let host = UIHostingController(
+            rootView: ExpandedMessageSheet(
+                message: message,
+                presentation: presentation,
+                fontScaleChangeSequence: 0,
+                terminalConnectionPool: pool
+            )
+            .environment(\.horizontalSizeClass, .regular)
+        )
+        let fittedSize = host.sizeThatFits(in: CGSize(width: 1_000, height: 1_000))
+        let window = UIWindow(frame: CGRect(origin: .zero, size: fittedSize))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.frame = window.bounds
+        host.view.layoutIfNeeded()
+        await Task.yield()
+        host.view.layoutIfNeeded()
+
+        let renderedText = textViews(in: host.view).map(\.text).joined(separator: "\n")
+        #expect(fittedSize.width >= 420)
+        #expect(fittedSize.height >= 320)
+        #expect(renderedText.contains(selectedContent))
+    }
+
     @Test("T1369: expanded detail resolves selected snapshot to canonical message text")
     @MainActor
     func expandedDetailResolvesSelectedSnapshotToCanonicalMessageText() {

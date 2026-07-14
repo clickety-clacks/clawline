@@ -1671,8 +1671,23 @@ struct BubbleScrollTests {
             metrics: metrics,
             injectedViewportHeight: 260
         )
+        let shortMessage = Message(
+            id: "t1390-multiline-user-baseline",
+            role: .user,
+            content: "OK",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:flynn:s_111df227"
+        )
+        let shortMeasured = measuredUserBubble(
+            message: shortMessage,
+            metrics: metrics,
+            injectedViewportHeight: 260
+        )
 
-        #expect(measured.height > 80)
+        #expect(measured.height > shortMeasured.height)
         #expect(measured.height < 150)
     }
 

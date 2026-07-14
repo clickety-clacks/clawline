@@ -401,8 +401,10 @@ struct TextLinkURLTemplateRulesTests {
     @Test("T1578: expanded detail sizes and renders the selected overflow content")
     @MainActor
     func expandedDetailSizesAndRendersSelectedOverflowContent() async {
-        let selectedContent = "T1578 selected overflow content must remain visible in the expanded detail viewer. "
-            + String(repeating: "This is the real selected message rendering path. ", count: 12)
+        let selectedContent = (
+            "T1578 selected overflow content must remain visible in the expanded detail viewer. "
+                + String(repeating: "This is the real selected message rendering path. ", count: 12)
+        ).trimmingCharacters(in: .whitespaces)
         let message = Message(
             id: "t1578-selected-overflow-detail",
             role: .user,

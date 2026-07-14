@@ -1395,14 +1395,16 @@ private struct StreamSelectorShortcutKeyCommandBridge: UIViewRepresentable {
     }
 }
 
-private struct StreamPopupRowStatusDot: View {
+struct StreamPopupRowStatusDot: View {
     let isActive: Bool
     let dotState: StreamDotState
     let colorScheme: ColorScheme
 
     var body: some View {
-        Circle()
-            .fill(
+        Image(systemName: "circle.fill")
+            .resizable()
+            .scaledToFit()
+            .foregroundStyle(
                 StreamDotColor.resolve(
                     isActive: isActive,
                     dotState: dotState,
@@ -1411,6 +1413,7 @@ private struct StreamPopupRowStatusDot: View {
             )
             .frame(width: 8, height: 8)
             .fixedSize()
+            .accessibilityHidden(true)
             .shadow(
                 color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
                 radius: isActive ? StreamDotColor.activeOuterGlowRadius(colorScheme: colorScheme) : 0

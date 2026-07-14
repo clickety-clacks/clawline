@@ -5461,8 +5461,9 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
         uiView.updatePageDots(pageDotsView, gap: pageDotsGap)
         // Seed the pinned gap immediately on every SwiftUI update so launch layout matches the
         // steady-state hidden-keyboard position even before coordinator-driven transitions fire.
+        // Constraint changes must leave this SwiftUI update before UIKit performs layout.
         if uiView.updateDesiredBottomGapIfNeeded(desiredBottomGap, isKeyboardVisible: isKeyboardVisible) {
-            uiView.layoutIfNeeded()
+            uiView.setNeedsLayout()
         }
         uiView.setOnBarHeightChange { [weak layoutCoordinator] height in
             // Break potential SwiftUI layout cycles by only propagating meaningful bar height changes.
@@ -5522,6 +5523,12 @@ enum KeyboardPinnedChromeEventRouting {
     }
 }
 
+enum KeyboardPinnedChromeLayoutDisposition: Equatable {
+    case unchanged
+    case deferred
+    case animated
+}
+
 final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedContainerViewProtocol {
     let hostingController: UIHostingController<Content>
     private var scrollButtonHost: UIHostingController<AnyView>?
@@ -5578,6 +5585,7 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
         onBarHeightChange = handler
     }
 
+    @discardableResult
     func updateScrollButton(
         _ view: AnyView?,
         isVisible: Bool,
@@ -5586,7 +5594,7 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
         maxHorizontalOffset: CGFloat,
         horizontalSettleStartOffset: CGFloat?,
         horizontalAnimationToken: Int
-    ) {
+    ) -> KeyboardPinnedChromeLayoutDisposition {
 #if os(visionOS)
         _ = view
         _ = isVisible
@@ -5595,12 +5603,13 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
         _ = maxHorizontalOffset
         _ = horizontalSettleStartOffset
         _ = horizontalAnimationToken
-        return
+        return .unchanged
 #else
         // Ensure the bar view is mounted so we can anchor the scroll button above it.
         ensureConstraints(desiredBottomGap: 0)
-        guard let hostingView = hostingController.view else { return }
+        guard let hostingView = hostingController.view else { return .unchanged }
 
+        var needsDeferredLayout = false
         if scrollButtonHost == nil {
             let host = UIHostingController(rootView: AnyView(EmptyView()))
             host.view.backgroundColor = .clear
@@ -5624,6 +5633,7 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
                 centerX,
                 bottom,
             ])
+            needsDeferredLayout = true
         }
 
         scrollButtonBaseHorizontalOffset = horizontalOffset
@@ -5638,19 +5648,31 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
             scrollButtonLiveTranslation = 0
             scrollButtonHost?.view.transform = .identity
         }
-        scrollButtonHost?.view.isHidden = KeyboardPinnedChromeEventRouting.scrollButtonHostIsHidden(
+        let scrollButtonIsHidden = KeyboardPinnedChromeEventRouting.scrollButtonHostIsHidden(
             hasView: view != nil,
             isVisible: isVisible
         )
-        scrollButtonHost?.view.isUserInteractionEnabled = scrollButtonReceivesEvents
-        scrollButtonPanGestureRecognizer?.isEnabled = scrollButtonReceivesEvents
-        scrollButtonBottomToBarTop?.constant = -gap
+        if scrollButtonHost?.view.isHidden != scrollButtonIsHidden {
+            scrollButtonHost?.view.isHidden = scrollButtonIsHidden
+        }
+        if scrollButtonHost?.view.isUserInteractionEnabled != scrollButtonReceivesEvents {
+            scrollButtonHost?.view.isUserInteractionEnabled = scrollButtonReceivesEvents
+        }
+        if scrollButtonPanGestureRecognizer?.isEnabled != scrollButtonReceivesEvents {
+            scrollButtonPanGestureRecognizer?.isEnabled = scrollButtonReceivesEvents
+        }
+        needsDeferredLayout = updateConstraint(scrollButtonBottomToBarTop, constant: -gap)
+            || needsDeferredLayout
         if scrollButtonIsPanning {
-            scrollButtonCenterX?.constant = horizontalOffset
+            needsDeferredLayout = updateConstraint(scrollButtonCenterX, constant: horizontalOffset)
+                || needsDeferredLayout
             if scrollButtonHost?.view.transform.tx != scrollButtonLiveTranslation {
                 scrollButtonHost?.view.transform = CGAffineTransform(translationX: scrollButtonLiveTranslation, y: 0)
             }
-            return
+            if needsDeferredLayout {
+                setNeedsLayout()
+            }
+            return needsDeferredLayout ? .deferred : .unchanged
         }
         let shouldAnimateOffset = horizontalAnimationToken != lastScrollButtonHorizontalAnimationToken
         lastScrollButtonHorizontalAnimationToken = horizontalAnimationToken
@@ -5658,11 +5680,11 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
         if shouldAnimateOffset {
             if let horizontalSettleStartOffset {
                 scrollButtonHost?.view.transform = .identity
-                scrollButtonCenterX?.constant = horizontalSettleStartOffset
+                _ = updateConstraint(scrollButtonCenterX, constant: horizontalSettleStartOffset)
                 // Force the spring to start from the drag-release position.
                 layoutIfNeeded()
             }
-            scrollButtonCenterX?.constant = horizontalOffset
+            _ = updateConstraint(scrollButtonCenterX, constant: horizontalOffset)
             UIView.animate(
                 withDuration: 0.46,
                 delay: 0,
@@ -5672,10 +5694,18 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
             ) {
                 self.layoutIfNeeded()
             }
+            return .animated
         } else {
-            scrollButtonHost?.view.transform = .identity
-            scrollButtonCenterX?.constant = horizontalOffset
-            layoutIfNeeded()
+            if scrollButtonHost?.view.transform != .identity {
+                scrollButtonHost?.view.transform = .identity
+            }
+            needsDeferredLayout = updateConstraint(scrollButtonCenterX, constant: horizontalOffset)
+                || needsDeferredLayout
+            // Repeated representable updates must not synchronously re-enter hosting layout.
+            if needsDeferredLayout {
+                setNeedsLayout()
+            }
+            return needsDeferredLayout ? .deferred : .unchanged
         }
 #endif
     }
@@ -5684,16 +5714,18 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
         onScrollButtonPanEnded = handler
     }
 
-    func updatePageDots(_ view: AnyView?, gap: CGFloat) {
+    @discardableResult
+    func updatePageDots(_ view: AnyView?, gap: CGFloat) -> KeyboardPinnedChromeLayoutDisposition {
 #if os(visionOS)
         _ = view
         _ = gap
-        return
+        return .unchanged
 #else
         // Mount above the input bar so dots track the same runtime anchor as the bar.
         ensureConstraints(desiredBottomGap: 0)
-        guard let hostingView = hostingController.view else { return }
+        guard let hostingView = hostingController.view else { return .unchanged }
 
+        var needsDeferredLayout = false
         if pageDotsHost == nil {
             let host = UIHostingController(rootView: AnyView(EmptyView()))
             host.view.backgroundColor = .clear
@@ -5715,22 +5747,37 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
                 host.view.centerXAnchor.constraint(equalTo: centerXAnchor),
                 bottom,
             ])
+            needsDeferredLayout = true
         }
 
         pageDotsHost?.rootView = view ?? AnyView(EmptyView())
-        pageDotsHost?.view.isHidden = (view == nil)
-        pageDotsHost?.view.isUserInteractionEnabled = (view != nil)
-        pageDotsBottomToBarTop?.constant = -gap
-        syncPageDotsHostLayout()
+        let pageDotsAreHidden = view == nil
+        let pageDotsReceiveEvents = !pageDotsAreHidden
+        if pageDotsHost?.view.isHidden != pageDotsAreHidden {
+            pageDotsHost?.view.isHidden = pageDotsAreHidden
+            needsDeferredLayout = true
+        }
+        if pageDotsHost?.view.isUserInteractionEnabled != pageDotsReceiveEvents {
+            pageDotsHost?.view.isUserInteractionEnabled = pageDotsReceiveEvents
+        }
+        needsDeferredLayout = updateConstraint(pageDotsBottomToBarTop, constant: -gap)
+            || needsDeferredLayout
+        // The hosting controller owns content-size invalidation. The wrapper only requests a
+        // deferred pass when its own visibility or anchor geometry changes.
+        if needsDeferredLayout {
+            pageDotsHost?.view.invalidateIntrinsicContentSize()
+            pageDotsHost?.view.setNeedsLayout()
+            setNeedsLayout()
+        }
+        return needsDeferredLayout ? .deferred : .unchanged
 #endif
     }
 
-    private func syncPageDotsHostLayout() {
-        guard let pageDotsView = pageDotsHost?.view else { return }
-        pageDotsView.invalidateIntrinsicContentSize()
-        pageDotsView.setNeedsLayout()
-        setNeedsLayout()
-        layoutIfNeeded()
+    @discardableResult
+    private func updateConstraint(_ constraint: NSLayoutConstraint?, constant: CGFloat) -> Bool {
+        guard let constraint, abs(constraint.constant - constant) > 0.5 else { return false }
+        constraint.constant = constant
+        return true
     }
 
     func setDesiredBottomGap(_ gap: CGFloat, isKeyboardVisible: Bool) {

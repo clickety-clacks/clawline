@@ -2,15 +2,7 @@ import Foundation
 import UIKit
 
 enum BubbleSizingV2 {
-    // Read once at app launch (static let) to avoid mid-session behavior changes.
-    static let isEnabled: Bool = {
-        let processInfo = ProcessInfo.processInfo
-        let envValue = processInfo.environment["CLAWLINE_BUBBLE_SIZING_V2"]
-        if envValue == "1" { return true }
-        if envValue == "0" { return false }
-        if processInfo.arguments.contains("--bubble-sizing-v2") { return true }
-        return false
-    }()
+    static let isEnabled = true
 
     struct Environment: Hashable {
         let containerWidth: CGFloat

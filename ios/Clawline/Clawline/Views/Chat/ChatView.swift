@@ -1419,7 +1419,7 @@ struct ChatView: View {
         let keyboardGeometryRefreshKey = ChatKeyboardGeometryRefreshKey(
             size: geometry.size,
             safeAreaBottom: geometry.safeAreaInsets.bottom,
-            notificationVisibleCount: crossChatNotificationObservation.visibleCount
+            notificationVisibleCount: viewModel.crossChatNotificationBubbles.count
         )
         let streamSelectorSpacingFromMessageBarTop: CGFloat = 8
         let streamSelectorMaxHeight = max(
@@ -1766,6 +1766,9 @@ struct ChatView: View {
         }
 
         .onChange(of: keyboardGeometryRefreshKey) { _, _ in
+            logger.debug(
+                "T1377_PROFILE global_refresh raw_notification_count=\(viewModel.crossChatNotificationBubbles.count) presentation_visible_count=\(crossChatNotificationObservation.visibleCount)"
+            )
             layoutRevision &+= 1
             keyboardRefreshToken &+= 1
         }

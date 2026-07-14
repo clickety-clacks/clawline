@@ -214,6 +214,50 @@ struct BubbleScrollTests {
         )
     }
 
+    @Test("T1377: async preview height feedback converges within the four-point epsilon")
+    func bubbleSizingV2AsyncPreviewHeightConvergencePolicy() {
+        #expect(
+            MessageFlowCollectionViewController.bubbleSizingV2AsyncPreviewHeightChanged(
+                previous: nil,
+                next: 240
+            )
+        )
+        #expect(
+            !MessageFlowCollectionViewController.bubbleSizingV2AsyncPreviewHeightChanged(
+                previous: 240,
+                next: 244
+            )
+        )
+        #expect(
+            MessageFlowCollectionViewController.bubbleSizingV2AsyncPreviewHeightChanged(
+                previous: 240,
+                next: 245
+            )
+        )
+    }
+
+    @Test("T1377: only settled content accepts one consumed remeasure per settle")
+    func bubbleSizingV2SettleAcceptancePolicy() {
+        #expect(
+            MessageFlowCollectionViewController.shouldQueueBubbleSizingV2AsyncRemeasure(
+                isContentSettled: true,
+                alreadyAcceptedInSettle: false
+            )
+        )
+        #expect(
+            !MessageFlowCollectionViewController.shouldQueueBubbleSizingV2AsyncRemeasure(
+                isContentSettled: true,
+                alreadyAcceptedInSettle: true
+            )
+        )
+        #expect(
+            !MessageFlowCollectionViewController.shouldQueueBubbleSizingV2AsyncRemeasure(
+                isContentSettled: false,
+                alreadyAcceptedInSettle: false
+            )
+        )
+    }
+
     @Test("BubbleSizingV2 short bubbles honor the plan min width instead of the legacy 120pt floor")
     @MainActor
     func bubbleSizingV2ShortBubbleUsesPlanMinWidthConstraint() {

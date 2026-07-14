@@ -374,6 +374,14 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         configuredURLKey
     }
 
+    var currentLoadToken: UUID {
+        loadToken
+    }
+
+    var hasSettledHeight: Bool {
+        isDirectMediaPreview || isHeightLocked || state == .failed
+    }
+
     func configure(url: URL,
                    maxHeight: CGFloat? = nil,
                    ownerItemId: String? = nil,
@@ -659,6 +667,9 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
     private func loadURL(_ url: URL) {
         // Temporarily disabled (#35) - re-enable useProtocolCachePolicy once stabilization is proven solid.
         let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: Constants.loadTimeout)
+        logger.debug(
+            "T1377_PROFILE preview_load message_id=\(self.ownerItemId ?? "unknown", privacy: .public) preview_load=\(self.loadToken.uuidString, privacy: .public)"
+        )
         webView.load(request)
     }
 
@@ -823,20 +834,24 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         if isHeightLocked {
             return
         }
-        if abs(webViewHeightConstraint.constant - clamped) <= 10 {
-            return
+        let heightChanged = abs(webViewHeightConstraint.constant - clamped) > 10
+        if heightChanged {
+            webViewHeightConstraint.constant = clamped
+            invalidateIntrinsicContentSize()
         }
-        webViewHeightConstraint.constant = clamped
-        invalidateIntrinsicContentSize()
-        onHeightChange?()
 
         // Flynn directive: lock and cache preview height once it's determined post-load.
+        var didSettleHeight = false
         if canLockHeight {
             isHeightLocked = true
             canLockHeight = false
+            didSettleHeight = true
             if let configuredURLKey {
                 Self.heightCache.setObject(NSNumber(value: Double(clamped)), forKey: configuredURLKey as NSString)
             }
+        }
+        if heightChanged || didSettleHeight {
+            onHeightChange?()
         }
     }
 
@@ -1025,16 +1040,14 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
     }
 
     func webView(_: WKWebView, didFinish _: WKNavigation!) {
-        guard state == .loading else { return }
+        guard state == .loading || state == .loaded else { return }
         markLoadedIfNeeded()
         if isDirectMediaPreview {
             syncDirectMediaPreviewHeightIfNeeded()
             return
         }
         canLockHeight = !isHeightLocked
-        if heightUpdates == 0 {
-            evaluateHeightFallback()
-        }
+        evaluateHeightFallback()
         scheduleFallbackMeasurement()
     }
 

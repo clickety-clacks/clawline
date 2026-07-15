@@ -204,25 +204,6 @@ struct T1645FooterUsageTests {
         #expect(ChatViewModel.sessionStatusFollowUpDelay(usage: fresh, usageFollowUpCount: 0, runState: .running) == .seconds(5))
     }
 
-    @Test("T1673 retains last-known OAuth windows as stale when refresh becomes unavailable")
-    func retainsLastKnownUsageAcrossTransientUnavailableRefresh() throws {
-        let freshStatus = try decodedStatus(usageJSON: freshUsageJSON)
-        let unavailableStatus = try decodedStatus(
-            usageJSON: stateUsageJSON(freshness: "unavailable", reason: "\"provider_unavailable\"")
-        )
-        let fresh = try #require(freshStatus.display.codexUsage)
-        let unavailable = try #require(unavailableStatus.display.codexUsage)
-
-        let resolved = try #require(
-            ChatViewModel.resolvedSessionStatusUsage(incoming: unavailable, cached: fresh)
-        )
-
-        #expect(resolved.freshness == .stale)
-        #expect(resolved.fetchedAt == fresh.fetchedAt)
-        #expect(resolved.windows == fresh.windows)
-        #expect(resolved.unavailableReason == .providerUnavailable)
-    }
-
     private var freshUsageJSON: String {
         """
         {

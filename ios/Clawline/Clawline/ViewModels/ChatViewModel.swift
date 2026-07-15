@@ -4695,10 +4695,7 @@ final class ChatViewModel {
                 fastMode: incoming.display.fastMode ?? cached.display.fastMode,
                 mode: incoming.display.mode,
                 verbosity: incoming.display.verbosity,
-                codexUsage: Self.resolvedSessionStatusUsage(
-                    incoming: incoming.display.codexUsage,
-                    cached: cached.display.codexUsage
-                )
+                codexUsage: incoming.display.codexUsage
             ),
             run: incoming.run,
             context: incoming.context,
@@ -4706,28 +4703,6 @@ final class ChatViewModel {
             capabilities: incoming.capabilities,
             modelCatalog: incoming.modelCatalog ?? cached.modelCatalog
         )
-    }
-
-    static func resolvedSessionStatusUsage(
-        incoming: SessionStatus.Display.CodexUsage?,
-        cached: SessionStatus.Display.CodexUsage?
-    ) -> SessionStatus.Display.CodexUsage? {
-        switch incoming?.freshness {
-        case .fresh, .stale:
-            return incoming
-        case .loading, .unavailable, nil:
-            guard let cached,
-                  cached.freshness == .fresh || cached.freshness == .stale,
-                  !cached.windows.isEmpty else {
-                return incoming
-            }
-            return .init(
-                freshness: .stale,
-                fetchedAt: cached.fetchedAt,
-                windows: cached.windows,
-                unavailableReason: incoming?.unavailableReason
-            )
-        }
     }
 
     private func stickyDisplayString(_ incoming: String?, cached: String?) -> String? {

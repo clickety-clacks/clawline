@@ -6095,9 +6095,9 @@ struct ChatViewModelTests {
         #expect(status?.display.thinkingLevel == "high")
     }
 
-    @Test("Selected-session OAuth usage retains valid windows as stale across a transient provider state")
+    @Test("Selected-session OAuth usage clears windows on authoritative binding failure")
     @MainActor
-    func selectedSessionOAuthUsageRetainsValidWindowsAcrossTransientState() async throws {
+    func selectedSessionOAuthUsageClearsWindowsOnAuthoritativeBindingFailure() async throws {
         resetChatPersistence()
         let auth = TestAuthManager()
         auth.storeCredentials(token: "jwt", userId: "user")
@@ -6136,6 +6136,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
+        await viewModel.activate(origin: "test.t1673.oauthBindingFailure")
         await viewModel.onAppear()
         chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
         for _ in 0..<50 {
@@ -6158,14 +6159,14 @@ struct ChatViewModelTests {
                 freshness: .unavailable,
                 fetchedAt: nil,
                 windows: [],
-                unavailableReason: .providerUnavailable
+                unavailableReason: .accountBindingUnavailable
             ),
             queueDepth: 0
         )
         chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
         for _ in 0..<50 {
             if chatService.fetchSessionStatusCallCount > fetchCount,
-               viewModel.sessionStatus(for: personalSessionKey)?.display.codexUsage?.freshness == .stale {
+               viewModel.sessionStatus(for: personalSessionKey)?.display.codexUsage?.freshness == .unavailable {
                 break
             }
             try await Task.sleep(for: .milliseconds(20))
@@ -6173,11 +6174,11 @@ struct ChatViewModelTests {
 
         let status = try #require(viewModel.sessionStatus(for: personalSessionKey))
         let usage = try #require(status.display.codexUsage)
-        #expect(usage.freshness == .stale)
-        #expect(usage.windows == freshUsage.windows)
-        #expect(usage.unavailableReason == .providerUnavailable)
+        #expect(usage.freshness == .unavailable)
+        #expect(usage.windows.isEmpty)
+        #expect(usage.unavailableReason == .accountBindingUnavailable)
         #expect(SessionMetadataFooterCell.footerText(for: status)?.hasSuffix(
-            "OAUTH  ·  5h 64%  ·  Week 28%  ·  Stale"
+            "OAUTH  ·  Usage unavailable"
         ) == true)
     }
 

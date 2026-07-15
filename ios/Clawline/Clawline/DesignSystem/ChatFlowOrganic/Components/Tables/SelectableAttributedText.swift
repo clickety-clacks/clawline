@@ -99,7 +99,7 @@ struct SelectableAttributedText: UIViewRepresentable {
         private let onSelectionChange: (Bool) -> Void
         private let onLinkTap: (URL) -> Void
         private var measurementMemo: [CGFloat: CGFloat] = [:]
-        private var lastAppliedAttributedString: NSAttributedString?
+        private(set) var lastSubmittedAttributedString: NSAttributedString?
         private var lastAppliedAlignment: NSTextAlignment?
         private(set) var measurementMissCount = 0
         var measurementMemoEntryCount: Int { measurementMemo.count }
@@ -145,12 +145,14 @@ struct SelectableAttributedText: UIViewRepresentable {
             if uiView.overrideUserInterfaceStyle != userInterfaceStyle {
                 uiView.overrideUserInterfaceStyle = userInterfaceStyle
             }
-            let currentAttributedString = lastAppliedAttributedString ?? uiView.attributedText
-            if SelectableAttributedText.needsAttributedTextUpdate(current: currentAttributedString, next: attributedString) {
+            if SelectableAttributedText.needsAttributedTextUpdate(
+                current: lastSubmittedAttributedString,
+                next: attributedString
+            ) {
                 uiView.attributedText = attributedString
+                lastSubmittedAttributedString = NSAttributedString(attributedString: attributedString)
                 invalidateMeasurementMemo()
             }
-            lastAppliedAttributedString = NSAttributedString(attributedString: attributedString)
             if lastAppliedAlignment != alignment {
                 uiView.textAlignment = alignment
                 lastAppliedAlignment = alignment

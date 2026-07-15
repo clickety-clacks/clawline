@@ -59,11 +59,42 @@ struct SelectableAttributedTextMeasurementTests {
         _ = coordinator.measuredSize(width: 220, using: textView)
         #expect(coordinator.measurementMissCount == initialMisses + 1)
 
+        let mutableSource = NSMutableAttributedString(string: "Mutable source")
+        coordinator.update(
+            view: textView,
+            attributedString: mutableSource,
+            alignment: .left,
+            userInterfaceStyle: .light,
+            selectionResetToken: 0
+        )
+        _ = coordinator.measuredSize(width: 220, using: textView)
+        let snapshotBeforeMutation = try #require(coordinator.lastSubmittedAttributedString)
+        let missesBeforeMutation = coordinator.measurementMissCount
+        mutableSource.append(NSAttributedString(string: " changed"))
+        #expect(snapshotBeforeMutation.string == "Mutable source")
+        #expect(coordinator.lastSubmittedAttributedString?.string == "Mutable source")
+        #expect(snapshotBeforeMutation !== mutableSource)
+
+        coordinator.update(
+            view: textView,
+            attributedString: mutableSource,
+            alignment: .left,
+            userInterfaceStyle: .light,
+            selectionResetToken: 0
+        )
+        _ = coordinator.measuredSize(width: 220, using: textView)
+        #expect(coordinator.measurementMissCount == missesBeforeMutation + 1)
+        let snapshotAfterMutation = try #require(coordinator.lastSubmittedAttributedString)
+        #expect(snapshotAfterMutation.string == "Mutable source changed")
+        #expect(snapshotAfterMutation !== mutableSource)
+
         let cell = try makeCell("Stable `code` cell")
         let firstTable = makeTable()
         let secondTable = makeTable()
         let first = firstTable.styledAttributedString(for: cell, alignment: .leading, isHeader: false)
         let second = secondTable.styledAttributedString(for: cell, alignment: .leading, isHeader: false)
+        #expect(first.isEqual(to: second))
+        #expect(SelectableAttributedText.needsAttributedTextUpdate(current: first, next: second) == false)
         coordinator.update(
             view: textView,
             attributedString: first,
@@ -71,6 +102,7 @@ struct SelectableAttributedTextMeasurementTests {
             userInterfaceStyle: .light,
             selectionResetToken: 0
         )
+        #expect(!textView.attributedText.isEqual(to: first))
         _ = coordinator.measuredSize(width: 220, using: textView)
         let stableMisses = coordinator.measurementMissCount
 
@@ -88,8 +120,8 @@ struct SelectableAttributedTextMeasurementTests {
     @Test("SMP-T4: alignment clears; appearance and selection reset do not")
     func invalidationNegativeCases() {
         let coordinator = makeCoordinator()
-        let attributed = NSAttributedString(string: "Selection and appearance")
-        let textView = makeTextView(attributed.string)
+        let textView = makeTextView("Selection and appearance")
+        let attributed = NSAttributedString(attributedString: textView.attributedText)
         coordinator.update(
             view: textView,
             attributedString: attributed,
@@ -98,6 +130,7 @@ struct SelectableAttributedTextMeasurementTests {
             selectionResetToken: 0
         )
         _ = coordinator.measuredSize(width: 210, using: textView)
+        let missesBeforeAlignment = coordinator.measurementMissCount
 
         coordinator.update(
             view: textView,
@@ -108,6 +141,7 @@ struct SelectableAttributedTextMeasurementTests {
         )
         _ = coordinator.measuredSize(width: 210, using: textView)
         let missesAfterAlignment = coordinator.measurementMissCount
+        #expect(missesAfterAlignment == missesBeforeAlignment + 1)
 
         textView.selectedRange = NSRange(location: 0, length: 3)
         coordinator.update(
@@ -125,7 +159,7 @@ struct SelectableAttributedTextMeasurementTests {
     }
 
     @Test("SMP-T5: Dynamic Type trait change invalidates hosted measurement")
-    func dynamicTypeTraitChangeInvalidatesHostedMeasurement() async {
+    func dynamicTypeTraitChangeInvalidatesHostedMeasurement() async throws {
         guard let windowScene = UIApplication.shared.connectedScenes
             .compactMap({ $0 as? UIWindowScene })
             .first
@@ -151,15 +185,27 @@ struct SelectableAttributedTextMeasurementTests {
         await drainMainQueue()
         #expect(textView.traitCollection.preferredContentSizeCategory == .large)
 
-        _ = coordinator.measuredSize(width: 160, using: textView)
+        let initialSize = coordinator.measuredSize(width: 160, using: textView)
+        let initialFont = try #require(textView.attributedText.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)
         let initialMisses = coordinator.measurementMissCount
         host.view.traitOverrides.preferredContentSizeCategory = .accessibilityExtraExtraExtraLarge
         host.view.layoutIfNeeded()
         await drainMainQueue()
         #expect(textView.traitCollection.preferredContentSizeCategory == .accessibilityExtraExtraExtraLarge)
-        _ = coordinator.measuredSize(width: 160, using: textView)
+        let changedSize = coordinator.measuredSize(width: 160, using: textView)
+        let changedFont = try #require(textView.attributedText.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)
 
         #expect(coordinator.measurementMissCount == initialMisses + 1)
+        #expect(changedFont.pointSize > initialFont.pointSize)
+        #expect(changedSize.height > initialSize.height)
+
+        let missesBeforeLegibilityChange = coordinator.measurementMissCount
+        host.view.traitOverrides.legibilityWeight = .bold
+        host.view.layoutIfNeeded()
+        await drainMainQueue()
+        #expect(textView.traitCollection.legibilityWeight == .bold)
+        _ = coordinator.measuredSize(width: 160, using: textView)
+        #expect(coordinator.measurementMissCount == missesBeforeLegibilityChange + 1)
         window.isHidden = true
     }
 
@@ -195,7 +241,18 @@ struct SelectableAttributedTextMeasurementTests {
         let foreground = try #require(first.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor)
         let codeRange = (first.string as NSString).range(of: "code")
         let background = try #require(first.attribute(.backgroundColor, at: codeRange.location, effectiveRange: nil) as? UIColor)
+        let bodyFont = try #require(first.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)
+        let codeFont = try #require(first.attribute(.font, at: codeRange.location, effectiveRange: nil) as? UIFont)
+        let paragraph = try #require(first.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)
+        let header = firstTable.styledAttributedString(for: cell, alignment: .leading, isHeader: true)
+        let headerFont = try #require(header.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)
         #expect(fullRange.length > 0)
+        #expect(first.attribute(.inlinePresentationIntent, at: codeRange.location, effectiveRange: nil) != nil)
+        #expect(bodyFont == UIFont.clawline(.bodyText))
+        #expect(codeFont == UIFont.clawlineMonospaced(.secondaryLabel))
+        #expect(headerFont == UIFont.clawline(.mediumMessage))
+        #expect(paragraph.alignment == .left)
+        #expect(paragraph.lineBreakMode == .byWordWrapping)
 
         let lightTraits = UITraitCollection(userInterfaceStyle: .light)
         let darkTraits = UITraitCollection(userInterfaceStyle: .dark)

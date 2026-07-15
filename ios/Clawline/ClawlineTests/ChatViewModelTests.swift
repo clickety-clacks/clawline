@@ -6095,6 +6095,92 @@ struct ChatViewModelTests {
         #expect(status?.display.thinkingLevel == "high")
     }
 
+    @Test("Selected-session OAuth usage retains valid windows as stale across a transient provider state")
+    @MainActor
+    func selectedSessionOAuthUsageRetainsValidWindowsAcrossTransientState() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        let freshUsage = SessionStatus.Display.CodexUsage(
+            freshness: .fresh,
+            fetchedAt: 1_784_000_000_000,
+            windows: [
+                .init(label: .fiveHour, remainingPercent: 64, resetAt: 1_784_003_600_000),
+                .init(label: .week, remainingPercent: 28, resetAt: 1_784_604_800_000),
+            ],
+            unavailableReason: nil
+        )
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .idle,
+            provider: "openai",
+            model: "gpt-5.6",
+            thinkingLevel: "high",
+            authMode: "oauth",
+            fastMode: true,
+            codexUsage: freshUsage,
+            queueDepth: 0
+        )
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        for _ in 0..<50 {
+            if viewModel.sessionStatus(for: personalSessionKey)?.display.codexUsage?.freshness == .fresh {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let fetchCount = chatService.fetchSessionStatusCallCount
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .idle,
+            provider: "openai",
+            model: "gpt-5.6",
+            thinkingLevel: "high",
+            authMode: "oauth",
+            fastMode: true,
+            codexUsage: .init(
+                freshness: .unavailable,
+                fetchedAt: nil,
+                windows: [],
+                unavailableReason: .providerUnavailable
+            ),
+            queueDepth: 0
+        )
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        for _ in 0..<50 {
+            if chatService.fetchSessionStatusCallCount > fetchCount,
+               viewModel.sessionStatus(for: personalSessionKey)?.display.codexUsage?.freshness == .stale {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let status = try #require(viewModel.sessionStatus(for: personalSessionKey))
+        let usage = try #require(status.display.codexUsage)
+        #expect(usage.freshness == .stale)
+        #expect(usage.windows == freshUsage.windows)
+        #expect(usage.unavailableReason == .providerUnavailable)
+        #expect(SessionMetadataFooterCell.footerText(for: status)?.hasSuffix(
+            "OAUTH  ·  5h 64%  ·  Week 28%  ·  Stale"
+        ) == true)
+    }
+
     @Test("Session control applies typed provider response without chat text")
     @MainActor
     func sessionControlAppliesTypedProviderResponse() async throws {
@@ -8077,6 +8163,7 @@ private func makeSessionStatus(
     thinkingLevel: String?,
     authMode: String? = nil,
     fastMode: Bool? = nil,
+    codexUsage: SessionStatus.Display.CodexUsage? = nil,
     queueDepth: Int,
     canCancelCurrentRun: Bool = false
 ) -> SessionStatus {
@@ -8092,7 +8179,8 @@ private func makeSessionStatus(
             thinkingLevel: thinkingLevel,
             fastMode: fastMode,
             mode: nil,
-            verbosity: nil
+            verbosity: nil,
+            codexUsage: codexUsage
         ),
         run: .init(
             state: state,

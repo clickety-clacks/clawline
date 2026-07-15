@@ -1404,16 +1404,25 @@ struct ProviderServiceTests {
             {
               "sessionKey": "agent:main:clawline:user:s_status",
               "display": {
-                "model": "claude-sonnet-4.6",
+                "model": "gpt-5.6",
                 "fallbackModels": null,
-                "provider": "anthropic",
-                "harness": null,
+                "provider": "openai",
+                "harness": "codex",
                 "authMode": "oauth",
                 "reasoningLevel": null,
                 "thinkingLevel": "high",
                 "fastMode": true,
                 "mode": null,
-                "verbosity": null
+                "verbosity": null,
+                "codexUsage": {
+                  "freshness": "fresh",
+                  "fetchedAt": 1784000000000,
+                  "windows": [
+                    { "label": "5h", "remainingPercent": 64, "resetAt": 1784003600000 },
+                    { "label": "Week", "remainingPercent": 28, "resetAt": 1784604800000 }
+                  ],
+                  "unavailableReason": null
+                }
               },
               "run": {
                 "state": "running",
@@ -1482,11 +1491,14 @@ struct ProviderServiceTests {
         let status = try await service.fetchSessionStatus(sessionKey: sessionKey)
 
         #expect(status.sessionKey == sessionKey)
-        #expect(status.display.provider == "anthropic")
-        #expect(status.display.model == "claude-sonnet-4.6")
+        #expect(status.display.provider == "openai")
+        #expect(status.display.model == "gpt-5.6")
         #expect(status.display.authMode == "oauth")
         #expect(status.display.thinkingLevel == "high")
         #expect(status.display.fastMode == true)
+        #expect(status.display.codexUsage?.freshness == .fresh)
+        #expect(status.display.codexUsage?.windows.map(\.label) == [.fiveHour, .week])
+        #expect(status.display.codexUsage?.windows.map(\.remainingPercent) == [64, 28])
         #expect(status.run.state == .running)
         #expect(status.run.queueDepth == 2)
         #expect(status.capabilities.cancelCurrentRun?.supported == false)

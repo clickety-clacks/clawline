@@ -29,6 +29,20 @@ struct SessionStatus: Decodable, Equatable {
         let verbosity: String?
         let codexUsage: CodexUsage?
 
+        private enum CodingKeys: String, CodingKey {
+            case model
+            case fallbackModels
+            case provider
+            case harness
+            case authMode
+            case reasoningLevel
+            case thinkingLevel
+            case fastMode
+            case mode
+            case verbosity
+            case codexUsage
+        }
+
         init(
             model: String?,
             fallbackModels: [String]?,
@@ -52,7 +66,48 @@ struct SessionStatus: Decodable, Equatable {
             self.fastMode = fastMode
             self.mode = mode
             self.verbosity = verbosity
-            self.codexUsage = codexUsage
+            self.codexUsage = Self.resolvedCodexUsage(
+                codexUsage,
+                authMode: authMode,
+                harness: harness
+            )
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            self.init(
+                model: try container.decodeIfPresent(String.self, forKey: .model),
+                fallbackModels: try container.decodeIfPresent([String].self, forKey: .fallbackModels),
+                provider: try container.decodeIfPresent(String.self, forKey: .provider),
+                harness: try container.decodeIfPresent(String.self, forKey: .harness),
+                authMode: try container.decodeIfPresent(String.self, forKey: .authMode),
+                reasoningLevel: try container.decodeIfPresent(String.self, forKey: .reasoningLevel),
+                thinkingLevel: try container.decodeIfPresent(String.self, forKey: .thinkingLevel),
+                fastMode: try container.decodeIfPresent(Bool.self, forKey: .fastMode),
+                mode: try container.decodeIfPresent(String.self, forKey: .mode),
+                verbosity: try container.decodeIfPresent(String.self, forKey: .verbosity),
+                codexUsage: try container.decodeIfPresent(CodexUsage.self, forKey: .codexUsage)
+            )
+        }
+
+        private static func resolvedCodexUsage(
+            _ codexUsage: CodexUsage?,
+            authMode: String?,
+            harness: String?
+        ) -> CodexUsage? {
+            if let codexUsage {
+                return codexUsage
+            }
+            guard authMode?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "oauth",
+                  harness?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "codex" else {
+                return nil
+            }
+            return CodexUsage(
+                freshness: .unavailable,
+                fetchedAt: nil,
+                windows: [],
+                unavailableReason: .providerUnavailable
+            )
         }
 
         struct CodexUsage: Decodable, Equatable {

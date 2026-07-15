@@ -17,8 +17,9 @@ struct T1645FooterUsageTests {
         #expect(usage.windows.map(\.resetAt) == [1_784_003_600_000, 1_784_604_800_000])
         #expect(usage.unavailableReason == nil)
 
-        let legacyStatus = try decodedStatus(usageJSON: nil)
-        #expect(legacyStatus.display.codexUsage == nil)
+        let missingUsageStatus = try decodedStatus(usageJSON: nil)
+        #expect(missingUsageStatus.display.codexUsage?.freshness == .unavailable)
+        #expect(missingUsageStatus.display.codexUsage?.unavailableReason == .providerUnavailable)
     }
 
     @Test("T1645 renders exact fresh, stale, loading, and unavailable suffixes")
@@ -39,7 +40,7 @@ struct T1645FooterUsageTests {
         #expect(SessionMetadataFooterCell.footerText(for: unavailable)?.hasSuffix("OAUTH  ·  Usage unavailable") == true)
     }
 
-    @Test("T1645 omits usage for API-key, token, and absent usage contracts")
+    @Test("T1645 omits usage outside OAuth and makes a missing OAuth Codex contract explicit")
     func omitsUsageOutsideOAuthContract() throws {
         let apiKey = try decodedStatus(authMode: "api_key", usageJSON: freshUsageJSON)
         #expect(SessionMetadataFooterCell.footerText(for: apiKey) ==
@@ -51,7 +52,7 @@ struct T1645FooterUsageTests {
 
         let oauthWithoutUsage = try decodedStatus(usageJSON: nil)
         #expect(SessionMetadataFooterCell.footerText(for: oauthWithoutUsage) ==
-            "gpt-5.6  ·  Thinking medium  ·  Fast on  ·  OAUTH")
+            "gpt-5.6  ·  Thinking medium  ·  Fast on  ·  OAUTH  ·  Usage unavailable")
     }
 
     @Test("T1673 puts complete OAuth usage states on the Version row without collision at iPhone width")
@@ -203,6 +204,25 @@ struct T1645FooterUsageTests {
         #expect(ChatViewModel.sessionStatusFollowUpDelay(usage: fresh, usageFollowUpCount: 0, runState: .running) == .seconds(5))
     }
 
+    @Test("T1673 retains last-known OAuth windows as stale when refresh becomes unavailable")
+    func retainsLastKnownUsageAcrossTransientUnavailableRefresh() throws {
+        let freshStatus = try decodedStatus(usageJSON: freshUsageJSON)
+        let unavailableStatus = try decodedStatus(
+            usageJSON: stateUsageJSON(freshness: "unavailable", reason: "\"provider_unavailable\"")
+        )
+        let fresh = try #require(freshStatus.display.codexUsage)
+        let unavailable = try #require(unavailableStatus.display.codexUsage)
+
+        let resolved = try #require(
+            ChatViewModel.resolvedSessionStatusUsage(incoming: unavailable, cached: fresh)
+        )
+
+        #expect(resolved.freshness == .stale)
+        #expect(resolved.fetchedAt == fresh.fetchedAt)
+        #expect(resolved.windows == fresh.windows)
+        #expect(resolved.unavailableReason == .providerUnavailable)
+    }
+
     private var freshUsageJSON: String {
         """
         {
@@ -242,6 +262,7 @@ struct T1645FooterUsageTests {
           "display": {
             "model": "\(model)",
             "provider": "openai-codex",
+            "harness": "codex",
             "authMode": "\(authMode)",
             "thinkingLevel": "\(thinkingLevel)",
             "fastMode": \(fastMode)

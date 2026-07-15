@@ -1,7 +1,11 @@
 import Testing
 import CoreGraphics
+import Foundation
+import UIKit
 @testable import Clawline
 
+@MainActor
+@Suite(.serialized)
 struct ScrollToBottomUnreadTests {
     @Test("Appended message IDs: previous nil yields empty")
     func appendedIdsPreviousNil() {
@@ -113,97 +117,138 @@ struct ScrollToBottomUnreadTests {
         #expect(shouldCompensate == false)
     }
 
-    @Test("SBB resting bottom excludes footer reveal range while footer stays visible")
-    func sbbRestingBottomExcludesFooterRevealRangeWhileFooterStaysVisible() {
-        let contentHeight: CGFloat = 1_200
-        let boundsHeight: CGFloat = 700
-        let topInset: CGFloat = 40
-        let bottomInset: CGFloat = 180
-        let footerHeight = SessionMetadataFooterCell.fadeRevealRange
-            + SessionMetadataFooterCell.bottomPadding
-        let restingContentHeight = MessageFlowCollectionViewController.restingBottomContentHeight(
-            contentSizeHeight: contentHeight,
-            footerHeight: footerHeight,
-            hasFooter: true
+#if !targetEnvironment(macCatalyst)
+    @Test("R1662-01/R6 iPhone production scroll path fades footer to zero at chat-bubble bottom")
+    func r1662_01_r6_iPhoneProductionScrollPathFadesFooterToZeroAtChatBubbleBottom() async throws {
+        let (controller, viewModel) = try await makeFooterScrollController()
+        defer { viewModel.onDisappear() }
+
+        controller.scrollToBottom(animated: false)
+
+        #expect(MessageFlowCollectionViewController.hidesFooterAtRestingBottom)
+        #expect(controller.footerAlphaForTesting == 0)
+        #expect(controller.displayedFooterAlphaForTesting == 0)
+    }
+
+    @Test("R1662-02/R6 iPhone production scroll path progressively reveals away from chat-bubble bottom")
+    func r1662_02_r6_iPhoneProductionScrollPathProgressivelyRevealsAwayFromChatBubbleBottom() async throws {
+        let (controller, viewModel) = try await makeFooterScrollController()
+        defer { viewModel.onDisappear() }
+
+        controller.scrollToBottom(animated: false)
+        let chatBubbleBottom = controller.chatBubbleBottomOffsetYForTesting
+        controller.setChatScrollOffsetYForTesting(
+            chatBubbleBottom + (SessionMetadataFooterCell.fadeRevealRange / 2)
         )
-        let restingBottom = MessageFlowCollectionViewController.bottomOffsetMaxY(
-            contentHeight: restingContentHeight,
-            boundsHeight: boundsHeight,
-            topInset: topInset,
-            bottomInset: bottomInset
-        )
-        let trueBottom = MessageFlowCollectionViewController.bottomOffsetMaxY(
-            contentHeight: contentHeight,
-            boundsHeight: boundsHeight,
-            topInset: topInset,
-            bottomInset: bottomInset
+        let midpointAlpha = controller.displayedFooterAlphaForTesting
+        controller.setChatScrollOffsetYForTesting(
+            chatBubbleBottom + SessionMetadataFooterCell.fadeRevealRange
         )
 
-        #expect(trueBottom - restingBottom == footerHeight)
+        #expect(midpointAlpha == 0.5)
+        #expect(controller.displayedFooterAlphaForTesting == 1)
+    }
+
+    @Test("R1662-R7 footer content and controls remain unchanged by scroll-state updates")
+    func r1662_r7_footerContentAndControlsRemainUnchangedByScrollStateUpdates() async throws {
+        let (controller, viewModel) = try await makeFooterScrollController()
+        defer { viewModel.onDisappear() }
+
+        let footerFrame = try #require(controller.footerFrameForTesting)
+        controller.scrollToBottom(animated: false)
+        controller.setChatScrollOffsetYForTesting(
+            controller.chatBubbleBottomOffsetYForTesting + SessionMetadataFooterCell.fadeRevealRange
+        )
+
+        #expect(controller.footerFrameForTesting == footerFrame)
+    }
+
+    @Test("R1662-R7 filtered session anchors fade to its last displayed chat bubble")
+    func r1662_r7_filteredSessionAnchorsFadeToLastDisplayedChatBubble() async throws {
+        let (controller, viewModel) = try await makeFooterScrollController(streamSearchQuery: "message 0")
+        defer { viewModel.onDisappear() }
+
+        controller.scrollToBottom(animated: false)
+
+        #expect(controller.chatBubbleBottomOffsetYForTesting.isFinite)
+        #expect(controller.displayedFooterAlphaForTesting == 0)
+    }
+#endif
+
+#if targetEnvironment(macCatalyst)
+    @Test("R1662-05 Catalyst production resting viewport contains its always-visible footer")
+    func r1662_05_catalystProductionRestingViewportContainsAlwaysVisibleFooter() async throws {
+        let (controller, viewModel) = try await makeFooterScrollController()
+        defer { viewModel.onDisappear() }
+
+        controller.scrollToBottom(animated: false)
+        let footerFrame = try #require(controller.footerFrameForTesting)
         #expect(MessageFlowCollectionViewController.hidesFooterAtRestingBottom == false)
-        #expect(MessageFlowCollectionViewController.footerRevealAlpha(
-            contentOffsetY: restingBottom,
-            restingBottomOffsetY: restingBottom,
-            trueBottomOffsetY: trueBottom,
-        ) == 1)
-        #expect(MessageFlowCollectionViewController.footerRevealAlpha(
-            contentOffsetY: restingBottom - 1,
-            restingBottomOffsetY: restingBottom,
-            trueBottomOffsetY: trueBottom
-        ) == 1)
+        #expect(MessageFlowCollectionViewController.excludesFooterRevealRangeAtRestingBottom == false)
+        #expect(controller.footerViewportBoundsForTesting.intersects(footerFrame))
+        #expect(controller.footerAlphaForTesting == 1)
     }
+#endif
 
-    @Test("Legacy hidden footer policy fades in after SBB resting bottom")
-    func legacyHiddenFooterPolicyFadesInAfterSBBRestingBottom() {
-        let restingBottom: CGFloat = 440
-        let trueBottom: CGFloat = 500
+    private func makeFooterScrollController(
+        streamSearchQuery: String = ""
+    ) async throws -> (MessageFlowCollectionViewController, ChatViewModel) {
+        let sessionKey = "agent:main:clawline:user:s_t1662"
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        _ = chatService.incomingMessages
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: UploadService(auth: auth),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        await viewModel.onAppear()
+        viewModel.setActiveSessionKeyForTesting(sessionKey)
 
-        #expect(MessageFlowCollectionViewController.footerRevealAlpha(
-            contentOffsetY: restingBottom,
-            restingBottomOffsetY: restingBottom,
-            trueBottomOffsetY: trueBottom,
-            hidesFooterAtRestingBottom: true
-        ) == 0)
-        #expect(MessageFlowCollectionViewController.footerRevealAlpha(
-            contentOffsetY: restingBottom + 1,
-            restingBottomOffsetY: restingBottom,
-            trueBottomOffsetY: trueBottom,
-            hidesFooterAtRestingBottom: true
-        ) > 0)
-        #expect(MessageFlowCollectionViewController.footerRevealAlpha(
-            contentOffsetY: (restingBottom + trueBottom) / 2,
-            restingBottomOffsetY: restingBottom,
-            trueBottomOffsetY: trueBottom,
-            hidesFooterAtRestingBottom: true
-        ) == 0.5)
-        #expect(MessageFlowCollectionViewController.footerRevealAlpha(
-            contentOffsetY: trueBottom,
-            restingBottomOffsetY: restingBottom,
-            trueBottomOffsetY: trueBottom,
-            hidesFooterAtRestingBottom: true
-        ) == 1)
-    }
+        for index in 0..<12 {
+            chatService.emit(Message(
+                id: "t1662-\(index)",
+                role: index.isMultiple(of: 2) ? .user : .assistant,
+                content: String(repeating: "Footer regression production-path message \(index). ", count: 8),
+                timestamp: .now,
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: sessionKey
+            ))
+        }
+        for _ in 0..<100 where viewModel.messages(for: sessionKey).count < 12 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(viewModel.messages(for: sessionKey).count == 12)
 
-    @Test("Initial footer cell alpha is visible at normal resting bottom")
-    func initialFooterCellAlphaIsVisibleAtNormalRestingBottom() {
-        let restingBottom: CGFloat = 440
-        let trueBottom: CGFloat = 500
-
-        #expect(MessageFlowCollectionViewController.initialFooterCellAlpha(
-            contentOffsetY: restingBottom,
-            restingBottomOffsetY: restingBottom,
-            trueBottomOffsetY: trueBottom
-        ) == 1)
-        #expect(MessageFlowCollectionViewController.initialFooterCellAlpha(
-            contentOffsetY: (restingBottom + trueBottom) / 2,
-            restingBottomOffsetY: restingBottom,
-            trueBottomOffsetY: trueBottom
-        ) == 1)
-        #expect(MessageFlowCollectionViewController.initialFooterCellAlpha(
-            contentOffsetY: trueBottom,
-            restingBottomOffsetY: restingBottom,
-            trueBottomOffsetY: trueBottom
-        ) == 1)
+        let controller = MessageFlowCollectionViewController(nibName: nil, bundle: nil)
+        controller.loadViewIfNeeded()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 700)
+        controller.update(
+            viewModel: viewModel,
+            isCompact: true,
+            isActiveSession: true,
+            isRenderPolicyFrozen: false,
+            isInputActive: false,
+            keepsKeyboardPinned: false,
+            isTypingActive: false,
+            topInset: 40,
+            truncationBottomInset: 0,
+            firstUnreadMessageId: nil,
+            unreadCount: 0,
+            sessionKey: sessionKey,
+            streamSearchQuery: streamSearchQuery
+        )
+        controller.view.setNeedsLayout()
+        controller.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(20))
+        return (controller, viewModel)
     }
 
     @Test("Bounds-only layout changes skip redundant snapshot update")

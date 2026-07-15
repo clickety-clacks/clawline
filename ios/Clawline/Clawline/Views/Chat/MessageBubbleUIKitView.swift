@@ -788,7 +788,6 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private var currentSessionKey: String?
     private var wasOverflowingOnLastLayout = false
     private var suppressExpandTapForLinkCards = false
-    private var allowSwipeUpExpandForSingleLink = false
     private var timestampDate: Date?
     private var timestampRefreshTimer: Timer?
 
@@ -840,7 +839,6 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         bodyLabel.isSelectable = !isCollapsedUserOnlyMode
         bodyLabel.dataDetectorTypes = isCollapsedUserOnlyMode || !enableDataDetectors ? [] : [.link]
         dynamicContentStack.isUserInteractionEnabled = !isCollapsedUserOnlyMode
-        allowSwipeUpExpandForSingleLink = isCollapsedUserOnlyMode ? false : allowSwipeUpExpandForSingleLink
     }
 
     override init(frame: CGRect) {
@@ -883,12 +881,6 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         bubbleTap.delaysTouchesEnded = false
         bubbleTap.delegate = self
         bubbleBackgroundView.addGestureRecognizer(bubbleTap)
-        let bubbleSwipeUp = UISwipeGestureRecognizer(target: self, action: #selector(handleBubbleSwipeUp))
-        bubbleSwipeUp.direction = .up
-        bubbleSwipeUp.cancelsTouchesInView = false
-        bubbleSwipeUp.delaysTouchesBegan = false
-        bubbleSwipeUp.delaysTouchesEnded = false
-        bubbleBackgroundView.addGestureRecognizer(bubbleSwipeUp)
 #if targetEnvironment(macCatalyst)
         bubbleBackgroundView.addInteraction(UIContextMenuInteraction(delegate: self))
 #endif
@@ -1070,7 +1062,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         bodyTap.delaysTouchesEnded = false
         bodyTap.delegate = self
         bodyLabel.addGestureRecognizer(bodyTap)
-        let bodyHover = UIHoverGestureRecognizer(target: self, action: #selector(handleBodyHover(_:)))
+        let bodyHover = UIHoverGestureRecognizer(target: self, action: #selector(handleTextHover(_:)))
         bodyLabel.addGestureRecognizer(bodyHover)
 #if targetEnvironment(macCatalyst)
         bodyLabel.addInteraction(UIContextMenuInteraction(delegate: self))
@@ -1547,7 +1539,6 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             return nil
         }).first
         let shouldShowInlineReloadButton = isSingleLinkPreview && linkPreviewURL != nil
-        allowSwipeUpExpandForSingleLink = isSingleLinkPreview
         applyCollapsedUserOnlyInteractionMode()
 
         // Flynn: URLs should render as tappable cards per the design-system, independent of embedded preview success.
@@ -2096,7 +2087,6 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         updateReplyIndicator()
         applyCollapsedUserOnlyInteractionMode()
         suppressExpandTapForLinkCards = false
-        allowSwipeUpExpandForSingleLink = false
         timestampDate = nil
         timestampRefreshTimer?.invalidate()
         timestampRefreshTimer = nil
@@ -2473,11 +2463,14 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         handleBubbleTap()
     }
 
-    @objc private func handleBodyHover(_ recognizer: UIHoverGestureRecognizer) {
+    @objc private func handleTextHover(_ recognizer: UIHoverGestureRecognizer) {
         guard recognizer.state == .began || recognizer.state == .changed else {
             return
         }
-        _ = Self.presentGeneratedTextLinkPopupForHover(in: bodyLabel, at: recognizer.location(in: bodyLabel))
+        guard let textView = recognizer.view as? UITextView else {
+            return
+        }
+        _ = Self.presentGeneratedTextLinkPopupForHover(in: textView, at: recognizer.location(in: textView))
     }
 
     @objc private func handleBubbleTap() {
@@ -2628,13 +2621,6 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             view = current.superview
         }
         return true
-    }
-
-    @objc private func handleBubbleSwipeUp() {
-        guard allowSwipeUpExpandForSingleLink else {
-            return
-        }
-        onRequestExpand?()
     }
 
     private func stripAttachmentSummaryIfNeeded() {
@@ -3090,6 +3076,8 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             enableDataDetectors: false
         )
         textView.attributedText = attributed
+        let hover = UIHoverGestureRecognizer(target: self, action: #selector(handleTextHover(_:)))
+        textView.addGestureRecognizer(hover)
 
         container.addSubview(textView)
         let textPrefersFillWidth = textView.widthAnchor.constraint(equalTo: container.widthAnchor)

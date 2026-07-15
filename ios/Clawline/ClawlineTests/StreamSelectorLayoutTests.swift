@@ -8,6 +8,10 @@
 import Testing
 import CoreGraphics
 import Foundation
+import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 @testable import Clawline
 
 struct StreamSelectorLayoutTests {
@@ -389,6 +393,27 @@ struct StreamSelectorLayoutTests {
         #expect(listViewportHeight + actionBarHeight == allocatedHeight)
     }
 
+#if canImport(UIKit)
+    @MainActor
+    @Test("T1374 popup row status dot renders visible pixels")
+    func popupRowStatusDotRendersVisiblePixels() throws {
+        let renderer = ImageRenderer(
+            content: StreamPopupRowStatusDot(
+                isActive: true,
+                dotState: .unread,
+                colorScheme: .dark
+            )
+            .frame(width: 32, height: 32)
+        )
+        renderer.scale = CGFloat(2)
+
+        let image = try #require(renderer.uiImage)
+        let visiblePixels = Self.nonTransparentPixelCount(in: image)
+
+        #expect(visiblePixels > 0)
+    }
+#endif
+
     @Test("Stream manager popup grows for longer titles but respects the cap")
     func streamManagerPopupWidthTracksContentWithinCap() {
         let contentWidth = CGFloat(410)
@@ -761,3 +786,32 @@ struct StreamSelectorLayoutTests {
         )
     }
 }
+
+#if canImport(UIKit)
+private extension StreamSelectorLayoutTests {
+    static func nonTransparentPixelCount(in image: UIImage) -> Int {
+        guard let cgImage = image.cgImage else { return 0 }
+        let width = cgImage.width
+        let height = cgImage.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        guard let context = CGContext(
+            data: &pixels,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return 0
+        }
+
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return stride(from: 3, to: pixels.count, by: 4).reduce(into: 0) { count, alphaOffset in
+            if pixels[alphaOffset] > 0 {
+                count += 1
+            }
+        }
+    }
+}
+#endif

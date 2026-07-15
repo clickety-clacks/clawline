@@ -96,6 +96,8 @@ struct ExpandedMessageSheet: View {
         )
     }
 
+    static let minimumRegularDetailSize = CGSize(width: 420, height: 320)
+
     var body: some View {
         let _ = fontScaleChangeSequence
         NavigationStack {
@@ -127,6 +129,10 @@ struct ExpandedMessageSheet: View {
         }
         .offset(x: dragOffset)
         .opacity(1.0 - Double(abs(dragOffset)) / 300.0)
+        .frame(
+            minWidth: isCompact ? 0 : Self.minimumRegularDetailSize.width,
+            minHeight: Self.minimumRegularDetailSize.height
+        )
         .gesture(
             DragGesture()
                 .onChanged { value in
@@ -252,6 +258,7 @@ struct ExpandedMessageSheet: View {
             ForEach(Array(mediaParts.enumerated()), id: \.offset) { item in
                 mediaPartView(item.element)
             }
+
         }
         .font(.clawline(.bodyText))
         .foregroundColor(ChatFlowTheme.ink(effectiveColorScheme))
@@ -397,8 +404,8 @@ struct ExpandedMessageSheet: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }
         case .gallery(let attachments):
-            ForEach(attachments) { attachment in
-                if let data = attachment.data, let uiImage = UIImage(data: data) {
+            ForEach(Array(attachments.enumerated()), id: \.offset) { item in
+                if let data = item.element.data, let uiImage = UIImage(data: data) {
                     Image(uiImage: uiImage)
                         .resizable()
                         .scaledToFit()

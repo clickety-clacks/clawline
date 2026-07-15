@@ -195,6 +195,55 @@ struct MessageFlowCacheSeamIntegrityTests {
         )
     }
 
+    @Test("T1377: async sizing waits for settle and preserves preview view identity")
+    func asyncSizingUsesSettledGeometryOnlyPreviewFeedback() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Clawline/Views/Chat/MessageFlowCollectionView.swift")
+        let contents = try String(contentsOf: sourceURL, encoding: .utf8)
+        let lines = contents.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+
+        guard let handlerStart = lines.firstIndex(where: { $0.contains("private func handleCellRequestedLayout") }),
+              let handlerEnd = lines[handlerStart...].firstIndex(where: { $0.contains("private func applyRequestedLayoutNow") }),
+              let deferredStart = lines.firstIndex(where: { $0.contains("private func flushDeferredPreviewRemeasuresIfPossible") }),
+              let deferredEnd = lines[deferredStart...].firstIndex(where: { $0.contains("private func handleBubbleSizingV2LinkPreviewLayout") }),
+              let flushStart = lines.firstIndex(where: { $0.contains("private func flushBubbleSizingV2RemeasureIfPossible") }),
+              let flushEnd = lines[flushStart...].firstIndex(where: { $0.contains("private func invalidateBubbleSizingV2Cache") }) else {
+            Issue.record("Unable to locate the T1377 async sizing production seams.")
+            return
+        }
+
+        let handler = lines[handlerStart..<handlerEnd].joined(separator: "\n")
+        let deferred = lines[deferredStart..<deferredEnd].joined(separator: "\n")
+        let flush = lines[flushStart..<flushEnd].joined(separator: "\n")
+
+        #expect(handler.contains("? isBubbleSizingV2ScrollAtRest()"))
+        guard let settleGate = handler.range(of: "guard isSettled"),
+              let v2Branch = handler.range(of: "if bubbleSizingV2Enabled") else {
+            Issue.record("Unable to locate the settle gate or V2 branch.")
+            return
+        }
+        #expect(settleGate.lowerBound < v2Branch.lowerBound)
+        #expect(deferred.contains("handleCellRequestedLayout(messageId: id)"))
+        #expect(!deferred.contains("applyRequestedLayoutNow(messageId: id)"))
+        #expect(flush.contains("BubbleSizingV2AcceptedRemeasureKey(messageId: id)"))
+        #expect(!flush.contains("scheduleReconfigure(for: id)"))
+        #expect(contents.contains("let outcome = bubbleSizingV2PendingRemeasureIds.contains(messageId) ? \"coalesced\" : \"queued\""))
+    }
+
+    @Test("T1377: preview loads expose a stable production counter")
+    func linkPreviewLoadHasProductionCounter() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Clawline/Views/Chat/LinkPreviewView.swift")
+        let contents = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        #expect(contents.contains("T1377_PROFILE preview_load message_id="))
+        #expect(contents.contains("preview_load=\\(self.loadToken.uuidString"))
+    }
+
     @Test("T1465: row flow keeps ordinary bubbles content-shaped")
     func rowFlowKeepsOrdinaryBubblesContentShaped() throws {
         let sourceRoot = URL(fileURLWithPath: #filePath)

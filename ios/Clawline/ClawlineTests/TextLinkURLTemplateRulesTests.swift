@@ -397,6 +397,63 @@ struct TextLinkURLTemplateRulesTests {
         })
     }
 
+
+    @Test("T1578: expanded detail sizes and renders the selected overflow content")
+    @MainActor
+    func expandedDetailSizesAndRendersSelectedOverflowContent() async {
+        let selectedContent = (
+            "T1578 selected overflow content must remain visible in the expanded detail viewer. "
+                + String(repeating: "This is the real selected message rendering path. ", count: 12)
+        ).trimmingCharacters(in: .whitespaces)
+        let message = Message(
+            id: "t1578-selected-overflow-detail",
+            role: .user,
+            content: selectedContent,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal",
+            sender: "Mike"
+        )
+        let presentation = MessagePresentation(
+            parts: [.text(selectedContent)],
+            copyableReadableText: selectedContent,
+            wordCount: selectedContent.split(whereSeparator: \.isWhitespace).count,
+            hasTextualContent: true,
+            isEmojiOnly: false,
+            hasMediaOnly: false,
+            detectedURLs: [],
+            detectedURLCount: 0,
+            hasSingleURL: false
+        )
+        let pool = TerminalSessionConnectionPool { _ in
+            fatalError("T1578 text detail must not create a terminal service")
+        }
+        let host = UIHostingController(
+            rootView: ExpandedMessageSheet(
+                message: message,
+                presentation: presentation,
+                fontScaleChangeSequence: 0,
+                terminalConnectionPool: pool
+            )
+            .environment(\.horizontalSizeClass, .regular)
+        )
+        let fittedSize = host.sizeThatFits(in: CGSize(width: 1_000, height: 1_000))
+        let window = UIWindow(frame: CGRect(origin: .zero, size: fittedSize))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.frame = window.bounds
+        host.view.layoutIfNeeded()
+        await Task.yield()
+        host.view.layoutIfNeeded()
+
+        let renderedText = textViews(in: host.view).map(\.text).joined(separator: "\n")
+        #expect(fittedSize.width >= 420)
+        #expect(fittedSize.height >= 320)
+        #expect(renderedText.contains(selectedContent))
+    }
+
     @Test("T1369: expanded detail resolves selected snapshot to canonical message text")
     @MainActor
     func expandedDetailResolvesSelectedSnapshotToCanonicalMessageText() {
@@ -893,6 +950,60 @@ struct TextLinkURLTemplateRulesTests {
 
         #expect(GeneratedTextLinkActivationRouter.presentResolvedURLPopup(popupURL, nil))
         #expect(popupURLs == [popupURL])
+    }
+
+    @Test("T1192: supplemental transcript text blocks expose popup hover routing")
+    @MainActor
+    func supplementalTranscriptTextBlocksExposePopupHoverRouting() throws {
+        let popupRule = TextLinkURLTemplateRule(
+            id: "popup",
+            enabled: true,
+            pattern: #"T([0-9]+)"#,
+            urlTemplate: "https://example.com/popup/{match}",
+            displayMode: .popup
+        )
+        let message = Message(
+            id: "t1192-supplemental-hover",
+            role: .assistant,
+            content: "Primary T1192.\n\n```swift\nlet separator = true\n```\n\nSupplemental T1192.",
+            timestamp: Date(timeIntervalSince1970: 1_773_600_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:test:s_t1192"
+        )
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        var streamingState = StreamingTableParseState()
+        let presentation = MessagePresentationBuilder.build(
+            from: message,
+            metrics: metrics,
+            streamingState: &streamingState
+        )
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 360, height: 1))
+
+        try withConfiguredRules([popupRule]) {
+            bubble.configure(
+                message: message,
+                stream: .personal,
+                presentation: presentation,
+                sizeClass: .long,
+                metrics: metrics,
+                maxWidth: 360,
+                onRequestExpand: nil,
+                onRequestLayout: nil,
+                onInteractiveCallback: nil
+            )
+        }
+
+        let supplementalTextView = try #require(
+            textViews(in: bubble).first { $0.attributedText.string.contains("Supplemental T1192") }
+        )
+        #expect(supplementalTextView.gestureRecognizers?.contains { $0 is UIHoverGestureRecognizer } == true)
+        let tokenRange = range("T1192", in: supplementalTextView.attributedText)
+        #expect(TextLinkURLTemplateRules.displayMode(
+            in: supplementalTextView.attributedText,
+            characterRange: tokenRange
+        ) == .popup)
     }
 
     @Test("T1192: popup hover route carries anchor point")

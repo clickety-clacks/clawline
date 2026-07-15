@@ -7,6 +7,10 @@
 
 Follow the shared instructions in [COMMON.md](./COMMON.md).
 
+## Device and Simulator Testing
+
+When the required simulator and product path are available, do not stop after focused tests or a successful build. Launch Clawline in the simulator and smoke-test the changed behavior plus nearby user-visible behavior that shares the same screen, state, data flow, or interaction path. Choose a small, risk-based set of adjacent checks that could realistically regress from the change. Record what you exercised and the result. If simulator execution is unavailable or cannot reach the relevant production path, record the exact limitation; do not replace it with demo, mock, fixture, or bypass evidence.
+
 ## Editing and Viewing Text Files
 
 If I ask you to view or edit a text file, use tmux to create a new pane to the right, and open the text file using nvim:

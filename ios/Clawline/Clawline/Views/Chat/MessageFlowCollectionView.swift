@@ -2774,6 +2774,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         )
         if !needsFullLayout, lastAppliedMessageSetIdentity == messageSetIdentity {
             StreamSwitchTiming.log("messageFlow_update_fast_path", sessionKey: effectiveSessionKey)
+            if isActiveSession {
+                viewModel.markEngineActivationRenderedIfNeeded(for: effectiveSessionKey)
+            }
             return
         }
 

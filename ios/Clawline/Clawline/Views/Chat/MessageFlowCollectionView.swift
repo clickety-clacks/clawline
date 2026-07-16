@@ -523,6 +523,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         var bubbleSizingV2RemeasureBatchStartTime: CFAbsoluteTime?
         var bubbleSizingV2RemeasureDeferredUntilNearBottom = false
         var bubbleSizingV2PendingRemeasureIds: Set<String> = []
+        var bubbleSizingV2PendingLiveMeasurementIds: Set<String> = []
         var bubbleSizingV2AcceptedRemeasureKeys: Set<BubbleSizingV2AcceptedRemeasureKey> = []
         var bubbleSizingV2ScrollSettleEpoch: UInt64 = 0
         var bubbleSizingV2RemeasureDebounceTimer: Timer?
@@ -1044,6 +1045,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
     }
 
+    private var bubbleSizingV2PendingLiveMeasurementIds: Set<String> {
+        get { activeStateKey().map { readState(for: $0).bubbleSizingV2PendingLiveMeasurementIds } ?? [] }
+        set {
+            guard let key = activeStateKey() else { return }
+            mutateState(for: key) { $0.bubbleSizingV2PendingLiveMeasurementIds = newValue }
+        }
+    }
+
     private var bubbleSizingV2AcceptedRemeasureKeys: Set<BubbleSizingV2AcceptedRemeasureKey> {
         get { activeStateKey().map { readState(for: $0).bubbleSizingV2AcceptedRemeasureKeys } ?? [] }
         set {
@@ -1284,12 +1293,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         bubbleSizingV2LayoutStateCache.removeAll()
         bubbleSizingV2KeysByMessageId.removeAll()
         bubbleSizingV2LinkPreviewStateVersionByMessageId.removeAll()
+        bubbleSizingV2PendingLiveMeasurementIds.removeAll()
         bubbleSizingV2AcceptedRemeasureKeys.removeAll()
     }
 
     private func removeBubbleV2PreviewVersions(for ids: [String]) {
         ids.forEach { bubbleSizingV2LinkPreviewStateVersionByMessageId.removeValue(forKey: $0) }
         let removedIds = Set(ids)
+        bubbleSizingV2PendingLiveMeasurementIds.subtract(removedIds)
         bubbleSizingV2AcceptedRemeasureKeys = Set(
             bubbleSizingV2AcceptedRemeasureKeys.filter { !removedIds.contains($0.messageId) }
         )
@@ -1904,8 +1915,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 state.bubbleSizingV2RemeasureDebounceTimer = nil
                 state.bubbleSizingV2DeferredFlushTimer?.invalidate()
                 state.bubbleSizingV2DeferredFlushTimer = nil
+                state.bubbleSizingV2RemeasureBatchStartTime = nil
+                state.bubbleSizingV2RemeasureDeferredUntilNearBottom = false
+                state.bubbleSizingV2PendingRemeasureIds.removeAll()
+                state.bubbleSizingV2PendingLiveMeasurementIds.removeAll()
+                state.bubbleSizingV2AcceptedRemeasureKeys.removeAll()
                 state.deferredPreviewRemeasureTimer?.invalidate()
                 state.deferredPreviewRemeasureTimer = nil
+                state.deferredPreviewRemeasureIds.removeAll()
                 state.bottomInsetRemeasureTimer?.invalidate()
                 state.bottomInsetRemeasureTimer = nil
                 state.pendingBottomInsetHeightCapInvalidation?.cancel()
@@ -5207,7 +5224,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             linkPreviewStateVersion: initialLinkVersion
         )
         if let cached = bubbleV2LayoutState(for: key) {
-            return cached
+            return applyingLiveMeasuredCellSize(cached, messageId: message.id)
         }
         if let cachedMeasurement = bubbleV2Measurement(for: key) {
             let layoutState = bubbleSizingV2MakeLayoutState(
@@ -5219,7 +5236,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 measurement: cachedMeasurement
             )
             recordBubbleV2LayoutState(layoutState, key: key, messageId: message.id)
-            return layoutState
+            return applyingLiveMeasuredCellSize(layoutState, messageId: message.id)
         }
 
         logger.debug(
@@ -5236,7 +5253,31 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             showsHeader: showsHeader
         )
         recordBubbleV2LayoutState(measured, key: key, messageId: message.id)
-        return measured
+        return applyingLiveMeasuredCellSize(measured, messageId: message.id)
+    }
+
+    private func applyingLiveMeasuredCellSize(
+        _ layoutState: BubbleSizingV2.LayoutState,
+        messageId: String
+    ) -> BubbleSizingV2.LayoutState {
+        guard let liveSize = sizeCache[messageId] else { return layoutState }
+        let measurement = layoutState.measurement
+        return BubbleSizingV2.LayoutState(
+            plan: layoutState.plan,
+            measurement: BubbleSizingV2.Measurement(
+                measuredCellSize: liveSize,
+                measuredBubbleWidth: measurement.measuredBubbleWidth,
+                contentHeight: measurement.contentHeight,
+                chromeHeight: measurement.chromeHeight,
+                outerScrollEnabled: measurement.outerScrollEnabled,
+                outerScrollViewportHeight: measurement.outerScrollViewportHeight,
+                isFinal: measurement.isFinal
+            ),
+            linkPreviewCacheKey: layoutState.linkPreviewCacheKey,
+            linkPreviewEstimatedHeight: layoutState.linkPreviewEstimatedHeight,
+            linkPreviewMinHeight: layoutState.linkPreviewMinHeight,
+            linkPreviewMaxHeight: layoutState.linkPreviewMaxHeight
+        )
     }
 
     private func bubbleSizingV2LayoutFingerprintSeed(plan: BubbleSizingV2.Plan,
@@ -5888,9 +5929,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                     if case .linkPreview = part { return true }
                     return false
                 }
-                if hasLinkPreview {
+                let hasInteractiveHTML = presentation.parts.contains { part in
+                    if case .interactiveHTML = part { return true }
+                    return false
+                }
+                if hasLinkPreview && !hasInteractiveHTML {
                     handleBubbleSizingV2LinkPreviewLayout(messageId: messageId)
                 } else {
+                    var producerRevision = "generic"
                     if let indexPath = dataSource.indexPath(for: messageId),
                        let cell = collectionView.cellForItem(at: indexPath)
                     {
@@ -5904,18 +5950,29 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                             )
                             return
                         }
+                        producerRevision = genericAsyncProducerRevision(in: cell.contentView)
                     }
-                    guard queueBubbleSizingV2Remeasure(messageId: messageId, previewLoadToken: nil) else {
+                    guard queueBubbleSizingV2Remeasure(
+                        messageId: messageId,
+                        producerRevision: producerRevision,
+                        previewLoadToken: nil
+                    ) else {
                         return
                     }
                     bubbleSizingV2PendingRemeasureIds.insert(messageId)
+                    bubbleSizingV2PendingLiveMeasurementIds.insert(messageId)
                     scheduleBubbleSizingV2Remeasure()
                 }
             } else {
-                guard queueBubbleSizingV2Remeasure(messageId: messageId, previewLoadToken: nil) else {
+                guard queueBubbleSizingV2Remeasure(
+                    messageId: messageId,
+                    producerRevision: "generic",
+                    previewLoadToken: nil
+                ) else {
                     return
                 }
                 bubbleSizingV2PendingRemeasureIds.insert(messageId)
+                bubbleSizingV2PendingLiveMeasurementIds.insert(messageId)
                 scheduleBubbleSizingV2Remeasure()
             }
             return
@@ -5945,7 +6002,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             return
         }
 
-        // Link previews (WKWebView) only have meaningful sizes when attached to a window.
+        // Async WebKit content only has meaningful final geometry while attached to a window.
         // Measure the live cell (not the offscreen sizer) and feed the result back into the cache.
         cell.setNeedsLayout()
         cell.layoutIfNeeded()
@@ -6032,15 +6089,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             invalidateLayout(for: messageId)
             return
         }
-        guard Self.shouldQueueBubbleSizingV2AsyncRemeasure(
-            isContentSettled: previewView.hasSettledHeight,
-            alreadyAcceptedInSettle: false
-        ) else {
-            logger.debug(
-                "T1377_PROFILE async_callback outcome=awaiting_content_settle message_id=\(messageId, privacy: .public) preview_load=\(previewView.currentLoadToken.uuidString, privacy: .public) settle_epoch=\(self.bubbleSizingV2ScrollSettleEpoch)"
-            )
-            return
-        }
         guard let cacheKey = previewView.configuredCacheKey else {
             invalidateLayout(for: messageId)
             return
@@ -6062,6 +6110,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
         guard queueBubbleSizingV2Remeasure(
             messageId: messageId,
+            producerRevision: "preview:\(previewView.currentLoadToken.uuidString):\(Int(newHeight.rounded()))",
             previewLoadToken: previewView.currentLoadToken
         ) else { return }
         _ = recordAsyncPreview(messageId: messageId, key: cacheKey, height: newHeight)
@@ -6072,10 +6121,18 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     private struct BubbleSizingV2AcceptedRemeasureKey: Hashable {
         let messageId: String
+        let producerRevision: String
     }
 
-    private func queueBubbleSizingV2Remeasure(messageId: String, previewLoadToken: UUID?) -> Bool {
-        let key = BubbleSizingV2AcceptedRemeasureKey(messageId: messageId)
+    private func queueBubbleSizingV2Remeasure(
+        messageId: String,
+        producerRevision: String,
+        previewLoadToken: UUID?
+    ) -> Bool {
+        let key = BubbleSizingV2AcceptedRemeasureKey(
+            messageId: messageId,
+            producerRevision: producerRevision
+        )
         guard Self.shouldQueueBubbleSizingV2AsyncRemeasure(
             isContentSettled: true,
             alreadyAcceptedInSettle: bubbleSizingV2AcceptedRemeasureKeys.contains(key)
@@ -6085,6 +6142,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             )
             return false
         }
+        bubbleSizingV2AcceptedRemeasureKeys.insert(key)
         let outcome = bubbleSizingV2PendingRemeasureIds.contains(messageId) ? "coalesced" : "queued"
         logger.debug(
             "T1377_PROFILE async_callback outcome=\(outcome, privacy: .public) message_id=\(messageId, privacy: .public) preview_load=\(previewLoadToken?.uuidString ?? "generic", privacy: .public) settle_epoch=\(self.bubbleSizingV2ScrollSettleEpoch)"
@@ -6101,6 +6159,18 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     static func bubbleSizingV2AsyncPreviewHeightChanged(previous: CGFloat?, next: CGFloat) -> Bool {
         previous == nil || abs((previous ?? 0) - next) > 4
+    }
+
+    static func bubbleSizingV2AsyncProducerRevision(
+        htmlGeometryRevisions: [Int],
+        previewLoadToken: UUID?,
+        previewHeight: CGFloat?
+    ) -> String {
+        var components = htmlGeometryRevisions.map { "html:\($0)" }
+        if let previewLoadToken, let previewHeight {
+            components.append("preview:\(previewLoadToken.uuidString):\(Int(previewHeight.rounded()))")
+        }
+        return components.isEmpty ? "generic" : components.joined(separator: "|")
     }
 
     private func scheduleBubbleSizingV2Remeasure() {
@@ -6205,16 +6275,19 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
         let ids = Array(bubbleSizingV2PendingRemeasureIds)
         bubbleSizingV2PendingRemeasureIds.removeAll()
+        let liveMeasurementIds = bubbleSizingV2PendingLiveMeasurementIds
+        bubbleSizingV2PendingLiveMeasurementIds.removeAll()
         bubbleSizingV2RemeasureBatchStartTime = nil
         guard !ids.isEmpty else { return }
         let viewportAnchor = captureBubbleSizingV2ViewportAnchor()
 
         for id in ids {
-            invalidateBubbleSizingV2Cache(for: id)
-            invalidateLayout(for: id)
-            bubbleSizingV2AcceptedRemeasureKeys.insert(
-                BubbleSizingV2AcceptedRemeasureKey(messageId: id)
-            )
+            if liveMeasurementIds.contains(id) {
+                applyRequestedLayoutNow(messageId: id)
+            } else {
+                invalidateBubbleSizingV2Cache(for: id)
+                invalidateLayout(for: id)
+            }
         }
         logger.debug(
             "T1377_PROFILE geometry_pass settle_epoch=\(self.bubbleSizingV2ScrollSettleEpoch) message_count=\(ids.count) reconfigure_count=0"
@@ -6406,6 +6479,26 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             linkCards.append(contentsOf: findLinkCardViews(in: subview))
         }
         return linkCards
+    }
+
+    private func genericAsyncProducerRevision(in view: UIView) -> String {
+        let preview = findLinkPreviewView(in: view)
+        return Self.bubbleSizingV2AsyncProducerRevision(
+            htmlGeometryRevisions: findInteractiveHTMLViews(in: view).map(\.geometryRevision),
+            previewLoadToken: preview?.currentLoadToken,
+            previewHeight: preview?.reportedHeight
+        )
+    }
+
+    private func findInteractiveHTMLViews(in view: UIView) -> [InteractiveHTMLBubbleUIKitView] {
+        var htmlViews: [InteractiveHTMLBubbleUIKitView] = []
+        if let htmlView = view as? InteractiveHTMLBubbleUIKitView {
+            htmlViews.append(htmlView)
+        }
+        for subview in view.subviews {
+            htmlViews.append(contentsOf: findInteractiveHTMLViews(in: subview))
+        }
+        return htmlViews
     }
 
     private func scheduleReconfigure(for messageId: String) {

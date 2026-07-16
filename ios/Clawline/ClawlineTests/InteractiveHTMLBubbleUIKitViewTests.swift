@@ -202,6 +202,71 @@ struct InteractiveHTMLBubbleUIKitViewTests {
         #expect(firstWebView(in: bubble) == nil)
         #expect(visibleLabelText(in: bubble)?.contains("Content crashed") == true)
     }
+
+    @Test("T1377: Interactive HTML commits didFinish geometry and one explicit resize")
+    func interactiveBubbleCommitsOneProducerResize() async throws {
+        guard let windowScene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first
+        else {
+            Issue.record("No UIWindowScene available for interactive bubble test")
+            return
+        }
+
+        let window = UIWindow(windowScene: windowScene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let host = UIViewController()
+        host.view.frame = window.bounds
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+
+        try await warmUpInteractiveWebKit(in: host.view)
+
+        let bubble = InteractiveHTMLBubbleUIKitView()
+        bubble.translatesAutoresizingMaskIntoConstraints = false
+        host.view.addSubview(bubble)
+        NSLayoutConstraint.activate([
+            bubble.leadingAnchor.constraint(equalTo: host.view.leadingAnchor, constant: 16),
+            bubble.topAnchor.constraint(equalTo: host.view.topAnchor, constant: 16),
+            bubble.widthAnchor.constraint(equalToConstant: 320)
+        ])
+        host.view.layoutIfNeeded()
+
+        var observedRevisions: [Int] = []
+        bubble.onHeightChange = {
+            observedRevisions.append(bubble.geometryRevision)
+        }
+        bubble.configure(
+            descriptor: viewportDrivenDescriptor(),
+            messageId: "msg-one-resize",
+            isDark: false
+        )
+
+        try await waitFor(timeout: .seconds(3), poll: .milliseconds(25)) {
+            bubble.geometryRevision == 1 && (firstWebView(in: bubble)?.alpha ?? 0) >= 0.99
+        }
+        let webView = try #require(firstWebView(in: bubble))
+        #expect(observedRevisions == [1])
+
+        try await evaluateNoResult(
+            webView: webView,
+            js: "window.webkit.messageHandlers.clawline.postMessage({action:'_resize',height:260}); 0"
+        )
+        try await waitFor(timeout: .seconds(1), poll: .milliseconds(25)) {
+            bubble.geometryRevision == 2 && abs(heightConstraintConstant(for: webView) - 260) <= 0.5
+        }
+        #expect(observedRevisions == [1, 2])
+
+        try await evaluateNoResult(
+            webView: webView,
+            js: "window.webkit.messageHandlers.clawline.postMessage({action:'_resize',height:320}); 0"
+        )
+        try await Task.sleep(forDuration: .milliseconds(150))
+        #expect(bubble.geometryRevision == 2)
+        #expect(abs(heightConstraintConstant(for: webView) - 260) <= 0.5)
+        #expect(observedRevisions == [1, 2])
+    }
 }
 
 @MainActor
@@ -299,6 +364,19 @@ private func evaluateString(webView: WKWebView, js: String) async throws -> Stri
                 return
             }
             continuation.resume(returning: (value as? String) ?? "")
+        }
+    }
+}
+
+@MainActor
+private func evaluateNoResult(webView: WKWebView, js: String) async throws {
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        webView.evaluateJavaScript(js) { _, error in
+            if let error {
+                continuation.resume(throwing: error)
+                return
+            }
+            continuation.resume()
         }
     }
 }

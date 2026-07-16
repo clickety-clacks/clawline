@@ -208,6 +208,10 @@ struct MessageFlowCacheSeamIntegrityTests {
               let handlerEnd = lines[handlerStart...].firstIndex(where: { $0.contains("private func applyRequestedLayoutNow") }),
               let deferredStart = lines.firstIndex(where: { $0.contains("private func flushDeferredPreviewRemeasuresIfPossible") }),
               let deferredEnd = lines[deferredStart...].firstIndex(where: { $0.contains("private func handleBubbleSizingV2LinkPreviewLayout") }),
+              let queueStart = lines.firstIndex(where: { $0.contains("private func queueBubbleSizingV2Remeasure") }),
+              let queueEnd = lines[queueStart...].firstIndex(where: { $0.contains("static func shouldQueueBubbleSizingV2AsyncRemeasure") }),
+              let previewStart = lines.firstIndex(where: { $0.contains("private func handleBubbleSizingV2LinkPreviewLayout") }),
+              let previewEnd = lines[previewStart...].firstIndex(where: { $0.contains("private struct BubbleSizingV2AcceptedRemeasureKey") }),
               let flushStart = lines.firstIndex(where: { $0.contains("private func flushBubbleSizingV2RemeasureIfPossible") }),
               let flushEnd = lines[flushStart...].firstIndex(where: { $0.contains("private func invalidateBubbleSizingV2Cache") }) else {
             Issue.record("Unable to locate the T1377 async sizing production seams.")
@@ -216,6 +220,8 @@ struct MessageFlowCacheSeamIntegrityTests {
 
         let handler = lines[handlerStart..<handlerEnd].joined(separator: "\n")
         let deferred = lines[deferredStart..<deferredEnd].joined(separator: "\n")
+        let queue = lines[queueStart..<queueEnd].joined(separator: "\n")
+        let preview = lines[previewStart..<previewEnd].joined(separator: "\n")
         let flush = lines[flushStart..<flushEnd].joined(separator: "\n")
 
         #expect(handler.contains("? isBubbleSizingV2ScrollAtRest()"))
@@ -227,9 +233,49 @@ struct MessageFlowCacheSeamIntegrityTests {
         #expect(settleGate.lowerBound < v2Branch.lowerBound)
         #expect(deferred.contains("handleCellRequestedLayout(messageId: id)"))
         #expect(!deferred.contains("applyRequestedLayoutNow(messageId: id)"))
-        #expect(flush.contains("BubbleSizingV2AcceptedRemeasureKey(messageId: id)"))
+        #expect(handler.contains("bubbleSizingV2PendingLiveMeasurementIds.insert(messageId)"))
+        #expect(queue.contains("producerRevision: String"))
+        #expect(queue.contains("bubbleSizingV2AcceptedRemeasureKeys.insert(key)"))
+        #expect(preview.contains("bubbleSizingV2AsyncPreviewHeightChanged"))
+        #expect(preview.contains("previewView.currentLoadToken.uuidString):\\(Int(newHeight.rounded()))"))
+        #expect(!preview.contains("isContentSettled: previewView.hasSettledHeight"))
+        #expect(contents.contains("previewHeight: preview?.reportedHeight"))
+        #expect(flush.contains("liveMeasurementIds.contains(id)"))
+        #expect(flush.contains("applyRequestedLayoutNow(messageId: id)"))
         #expect(!flush.contains("scheduleReconfigure(for: id)"))
+        #expect(contents.contains("return applyingLiveMeasuredCellSize(cached, messageId: message.id)"))
+        #expect(contents.contains("return applyingLiveMeasuredCellSize(layoutState, messageId: message.id)"))
+        #expect(contents.contains("return applyingLiveMeasuredCellSize(measured, messageId: message.id)"))
         #expect(contents.contains("let outcome = bubbleSizingV2PendingRemeasureIds.contains(messageId) ? \"coalesced\" : \"queued\""))
+        #expect(contents.contains("state.bubbleSizingV2AcceptedRemeasureKeys.removeAll()"))
+        #expect(contents.contains("state.deferredPreviewRemeasureIds.removeAll()"))
+    }
+
+    @Test("T1377: preview settlement restores last-good post-load measurement semantics")
+    func previewSettlementUsesMeaningfulPostLoadMeasurement() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Clawline/Views/Chat/LinkPreviewView.swift")
+        let contents = try String(contentsOf: sourceURL, encoding: .utf8)
+        let lines = contents.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+
+        let applyStart = try #require(lines.firstIndex(where: { $0.contains("private func applyMeasuredHeight") }))
+        let applyEnd = try #require(lines[applyStart...].firstIndex(where: { $0.contains("private func handleFailure") }))
+        let finishStart = try #require(lines.firstIndex(where: { $0.contains("func webView(_: WKWebView, didFinish") }))
+        let finishEnd = try #require(lines[finishStart...].firstIndex(where: { $0.contains("func webView(_: WKWebView, didFail") }))
+        let apply = lines[applyStart..<applyEnd].joined(separator: "\n")
+        let finish = lines[finishStart..<finishEnd].joined(separator: "\n")
+
+        #expect(apply.contains("guard abs(webViewHeightConstraint.constant - clamped) > 10 else { return false }"))
+        #expect(apply.contains("onHeightChange?()"))
+        #expect(apply.contains("Self.heightCache.setObject"))
+        #expect(contents.contains("if applyMeasuredHeight(heightValue)"))
+        #expect(!contents.contains("heightUpdates += 1\n        applyMeasuredHeight(heightValue)"))
+        #expect(!contents.contains("if heightUpdates >= 2"))
+        #expect(finish.contains("guard state == .loading else { return }"))
+        #expect(finish.contains("if heightUpdates == 0"))
+        #expect(!finish.contains("state == .loading || state == .loaded"))
     }
 
     @Test("T1377: preview loads expose a stable production counter")

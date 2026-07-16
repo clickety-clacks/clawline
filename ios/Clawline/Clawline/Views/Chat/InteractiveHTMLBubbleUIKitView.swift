@@ -33,6 +33,7 @@ final class InteractiveHTMLBubbleUIKitView: UIView {
     private var callbackWindowStart: CFAbsoluteTime = 0
     private var callbackWindowCount: Int = 0
 
+    private(set) var geometryRevision = 0
     var onHeightChange: (() -> Void)?
     var onCallback: ((String, JSONValue?) -> Void)?
 
@@ -99,6 +100,7 @@ final class InteractiveHTMLBubbleUIKitView: UIView {
         webContentProcessReloadedAfterTermination = false
         callbackWindowStart = 0
         callbackWindowCount = 0
+        geometryRevision = 0
         summaryLabel.isHidden = true
         summaryLabel.text = nil
         errorLabel.isHidden = true
@@ -119,6 +121,7 @@ final class InteractiveHTMLBubbleUIKitView: UIView {
         self.isInitialLoadInProgress = true
         self.heightLocked = false
         self.resizeUsed = false
+        self.geometryRevision = 0
         self.webContentProcessReloadedAfterTermination = false
         self.summaryLabel.isHidden = true
         self.errorLabel.isHidden = true
@@ -252,6 +255,7 @@ final class InteractiveHTMLBubbleUIKitView: UIView {
             return
         }
         webViewHeightConstraint.constant = clamped
+        geometryRevision += 1
         onHeightChange?()
         updateScrollability(maxHeight: maxHeight, lockedHeight: clamped)
     }
@@ -499,6 +503,7 @@ extension InteractiveHTMLBubbleUIKitView: WKScriptMessageHandler {
             teardownWebView()
             placeholder.stopAnimating()
             errorLabel.isHidden = true
+            geometryRevision += 1
             onHeightChange?()
             return
         }

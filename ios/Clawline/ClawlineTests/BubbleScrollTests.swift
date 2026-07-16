@@ -258,6 +258,25 @@ struct BubbleScrollTests {
         )
     }
 
+    @Test("T1377: mixed web producers retain late preview geometry in the production revision")
+    func bubbleSizingV2MixedWebProducerRevisionTracksFinalGeometry() throws {
+        let token = try #require(UUID(uuidString: "11111111-2222-3333-4444-555555555555"))
+        let initial = MessageFlowCollectionViewController.bubbleSizingV2AsyncProducerRevision(
+            htmlGeometryRevisions: [1],
+            previewLoadToken: token,
+            previewHeight: 180
+        )
+        let late = MessageFlowCollectionViewController.bubbleSizingV2AsyncProducerRevision(
+            htmlGeometryRevisions: [1],
+            previewLoadToken: token,
+            previewHeight: 260
+        )
+
+        #expect(initial == "html:1|preview:11111111-2222-3333-4444-555555555555:180")
+        #expect(late == "html:1|preview:11111111-2222-3333-4444-555555555555:260")
+        #expect(initial != late)
+    }
+
     @Test("BubbleSizingV2 short bubbles honor the plan min width instead of the legacy 120pt floor")
     @MainActor
     func bubbleSizingV2ShortBubbleUsesPlanMinWidthConstraint() {
@@ -2639,6 +2658,61 @@ struct BubbleScrollTests {
         #expect(webView.configuration.preferences.isElementFullscreenEnabled == false)
     }
 
+    @Test("T1377: production preview observer commits late JavaScript geometry")
+    @MainActor
+    func linkPreviewCommitsLateJavaScriptGeometry() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        )
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let host = UIViewController()
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+
+        let preview = LinkPreviewView()
+        preview.frame = CGRect(x: 16, y: 16, width: 320, height: 800)
+        host.view.addSubview(preview)
+        var reportedHeights: [CGFloat] = []
+        preview.onHeightChange = { reportedHeights.append(preview.reportedHeight) }
+        let url = try #require(URL(string: "https://example.com/t1377-late-growth"))
+        preview.configure(url: url, maxHeight: 800)
+        host.view.layoutIfNeeded()
+
+        let webView = try #require(firstWebView(in: preview))
+        let loadDeadline = ContinuousClock.now + .seconds(8)
+        while (webView.url == nil || webView.isLoading), ContinuousClock.now < loadDeadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        #expect(webView.url != nil && !webView.isLoading)
+
+        let baselineHeight = preview.reportedHeight
+        try await evaluateNoResult(
+            webView: webView,
+            script: """
+            var late = document.createElement('div');
+            late.id = 't1377-late-growth';
+            for (var index = 0; index < 16; index += 1) {
+              var paragraph = document.createElement('p');
+              paragraph.textContent = 'Late production preview content ' + index;
+              late.appendChild(paragraph);
+            }
+            document.body.appendChild(late);
+            0;
+            """
+        )
+
+        let geometryDeadline = ContinuousClock.now + .seconds(3)
+        while preview.reportedHeight < baselineHeight + 200, ContinuousClock.now < geometryDeadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+
+        #expect(preview.reportedHeight >= baselineHeight + 200)
+        #expect(reportedHeights.last == preview.reportedHeight)
+        #expect(reportedHeights.count <= 2)
+    }
+
     @Test("T191: Direct video previews use embedded aspect-height sizing")
     @MainActor
     func directVideoPreviewUsesAspectHeightSizing() {
@@ -3077,6 +3151,19 @@ struct BubbleScrollTests {
             }
         }
         return nil
+    }
+
+    @MainActor
+    private func evaluateNoResult(webView: WKWebView, script: String) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            webView.evaluateJavaScript(script) { _, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
     }
 
     private struct ImmediateHighlightService: SalientHighlightServicing {

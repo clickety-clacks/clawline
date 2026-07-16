@@ -105,8 +105,20 @@ struct T1645FooterUsageTests {
                     #expect(primaryFrame.maxY <= usageFrame.minY)
                     #expect(usageFrame.maxY <= versionFrame.minY)
                     #expect(abs(usageFrame.midX - cell.bounds.midX) <= 0.5)
+                    #expect(cell.bounds.insetBy(dx: SessionMetadataFooterCell.horizontalPadding, dy: 0)
+                        .contains(usageFrame))
                     #expect(usageLabels.allSatisfy { label in
-                        usageFrame.contains(label.convert(label.bounds, to: cell))
+                        label.numberOfLines == 1 && label.lineBreakMode == .byClipping
+                    })
+                    #expect(usageLabels.allSatisfy { label in
+                        let frame = label.convert(label.bounds, to: cell)
+                        let requiredWidth = ceil(
+                            (label.text! as NSString).size(withAttributes: [.font: label.font]).width
+                        )
+                        let textRect = label.textRect(forBounds: label.bounds, limitedToNumberOfLines: 1)
+                        return usageFrame.contains(frame)
+                            && frame.width >= requiredWidth
+                            && ceil(textRect.width) >= requiredWidth
                     })
                 }
             }
@@ -144,18 +156,25 @@ struct T1645FooterUsageTests {
         }
     }
 
-    @Test("T1645 footer height follows accessibility Dynamic Type")
-    func footerHeightFollowsDynamicType() throws {
+    @Test("T1645 footer preserves Dynamic Type participation without shrinking its container")
+    func footerPreservesDynamicTypeParticipation() throws {
         let status = try decodedStatus(usageJSON: freshUsageJSON)
-        let normalHeight = SessionMetadataFooterCell.height(for: status, width: 320)
-        let accessibilityTraits = UITraitCollection(preferredContentSizeCategory: .accessibilityExtraExtraExtraLarge)
-        let accessibilityHeight = SessionMetadataFooterCell.height(
-            for: status,
+        let normalCell = configuredCell(status: status, width: 320, contentSizeCategory: .large)
+        let accessibilityCell = configuredCell(
+            status: status,
             width: 320,
-            compatibleWith: accessibilityTraits
+            contentSizeCategory: .accessibilityExtraExtraExtraLarge
+        )
+        let normalUsage = try #require(
+            descendants(of: normalCell).compactMap { $0 as? UILabel }.first { $0.text == "5h 64%" }
+        )
+        let accessibilityUsage = try #require(
+            descendants(of: accessibilityCell).compactMap { $0 as? UILabel }.first { $0.text == "5h 64%" }
         )
 
-        #expect(accessibilityHeight > normalHeight)
+        #expect(normalUsage.adjustsFontForContentSizeCategory)
+        #expect(accessibilityUsage.adjustsFontForContentSizeCategory)
+        #expect(accessibilityCell.bounds.height >= normalCell.bounds.height)
     }
 
     @Test("T1645 usage accessibility is ordered, static, localized, and has no duplicate cell stop")

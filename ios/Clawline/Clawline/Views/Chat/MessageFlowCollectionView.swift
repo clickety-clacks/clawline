@@ -7540,7 +7540,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                     textColor: ChatFlowUIKitTheme.palette(isDark: isDark).sage,
                     row: .secondary,
                     isStaticLabel: true,
-                    allowsWrapping: true
+                    allowsWrapping: false
                 )
             ] + codexUsageFooterItems(codexUsage)
         case "api_key", "api-key":
@@ -7553,7 +7553,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                     textColor: ChatFlowUIKitTheme.connectionReconnecting(isDark: isDark),
                     row: .secondary,
                     isStaticLabel: true,
-                    allowsWrapping: true
+                    allowsWrapping: false
                 )
             ]
         default:
@@ -7575,7 +7575,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                     row: .secondary,
                     accessibilityLabel: usageAccessibilityLabel(for: window),
                     isStaticLabel: true,
-                    allowsWrapping: true
+                    allowsWrapping: false
                 )
             }
             guard usage.freshness == .stale else { return windows }
@@ -7589,7 +7589,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                     row: .secondary,
                     accessibilityLabel: staleAccessibilityLabel(fetchedAt: usage.fetchedAt),
                     isStaticLabel: true,
-                    allowsWrapping: true
+                    allowsWrapping: false
                 )
             ]
         case .loading:
@@ -7608,7 +7608,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             textColor: nil,
             row: .secondary,
             isStaticLabel: true,
-            allowsWrapping: true
+            allowsWrapping: false
         )
     }
 

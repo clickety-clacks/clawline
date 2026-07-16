@@ -395,9 +395,12 @@ extension InteractiveHTMLBubbleUIKitView: WKNavigationDelegate, WKUIDelegate {
 
     private func measureAndReveal(maxHeight: CGFloat) {
         guard let webView else { return }
+        let nonce = configureNonce
         let js = "Math.ceil(document.body.scrollHeight)"
         webView.evaluateJavaScript(js) { [weak self] value, error in
             guard let self else { return }
+            guard self.configureNonce == nonce, self.webView === webView else { return }
+            guard !self.heightLocked else { return }
             if let error {
                 self.isInitialLoadInProgress = false
                 let id = self.sourceMessageId ?? ""

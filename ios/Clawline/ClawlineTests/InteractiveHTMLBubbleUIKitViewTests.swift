@@ -14,6 +14,23 @@ import WebKit
 @MainActor
 @Suite(.serialized)
 struct InteractiveHTMLBubbleUIKitViewTests {
+    @Test("T1377: didFinish geometry stays bound to its producer lifecycle")
+    func didFinishGeometryStaysBoundToProducerLifecycle() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Clawline/Views/Chat/InteractiveHTMLBubbleUIKitView.swift")
+        let contents = try String(contentsOf: sourceURL, encoding: .utf8)
+        let lines = contents.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let measureStart = try #require(lines.firstIndex(where: { $0.contains("private func measureAndReveal") }))
+        let measureEnd = try #require(lines[measureStart...].firstIndex(where: { $0.contains("func webView(_ webView: WKWebView, decidePolicyFor") }))
+        let measure = lines[measureStart..<measureEnd].joined(separator: "\n")
+
+        #expect(measure.contains("let nonce = configureNonce"))
+        #expect(measure.contains("guard self.configureNonce == nonce, self.webView === webView else { return }"))
+        #expect(measure.contains("guard !self.heightLocked else { return }"))
+    }
+
     @Test("Interactive bubble waits for non-zero width before loading and renders visible content")
     func interactiveBubbleWaitsForWidthAndRenders() async throws {
         guard let windowScene = UIApplication.shared.connectedScenes

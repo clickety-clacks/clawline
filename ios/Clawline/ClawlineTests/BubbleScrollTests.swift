@@ -2713,6 +2713,138 @@ struct BubbleScrollTests {
         #expect(reportedHeights.count <= 2)
     }
 
+    @Test("T1377: cached preview geometry remains provisional for late content")
+    @MainActor
+    func cachedLinkPreviewCommitsLateJavaScriptGeometry() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        )
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let host = UIViewController()
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+
+        let url = try #require(URL(string: "https://example.com/t1377-cached-late-growth-\(UUID().uuidString)"))
+        let firstPreview = LinkPreviewView()
+        firstPreview.frame = CGRect(x: 16, y: 16, width: 320, height: 800)
+        host.view.addSubview(firstPreview)
+        firstPreview.configure(url: url, maxHeight: 800)
+        host.view.layoutIfNeeded()
+
+        let initialWebView = try #require(firstWebView(in: firstPreview))
+        let firstLoadDeadline = ContinuousClock.now + .seconds(8)
+        while (initialWebView.url == nil || initialWebView.isLoading), ContinuousClock.now < firstLoadDeadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        #expect(initialWebView.url != nil && !initialWebView.isLoading)
+
+        let cacheDeadline = ContinuousClock.now + .seconds(3)
+        while firstPreview.reportedHeight <= 190, ContinuousClock.now < cacheDeadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        let cachedHeight = firstPreview.reportedHeight
+        #expect(cachedHeight > 190)
+        firstPreview.prepareForReuse()
+        firstPreview.removeFromSuperview()
+
+        let secondPreview = LinkPreviewView()
+        secondPreview.frame = CGRect(x: 16, y: 16, width: 320, height: 800)
+        host.view.addSubview(secondPreview)
+        secondPreview.configure(url: url, maxHeight: 800)
+        host.view.layoutIfNeeded()
+        #expect(abs(secondPreview.reportedHeight - cachedHeight) <= 1)
+
+        let secondWebView = try #require(firstWebView(in: secondPreview))
+        let secondLoadDeadline = ContinuousClock.now + .seconds(8)
+        while (secondWebView.url == nil || secondWebView.isLoading), ContinuousClock.now < secondLoadDeadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        #expect(secondWebView.url != nil && !secondWebView.isLoading)
+
+        let provisionalHeight = secondPreview.reportedHeight
+        try await evaluateNoResult(
+            webView: secondWebView,
+            script: """
+            var late = document.createElement('div');
+            late.id = 't1377-cached-late-growth';
+            for (var index = 0; index < 16; index += 1) {
+              var paragraph = document.createElement('p');
+              paragraph.textContent = 'Late cached production preview content ' + index;
+              late.appendChild(paragraph);
+            }
+            document.body.appendChild(late);
+            0;
+            """
+        )
+
+        let geometryDeadline = ContinuousClock.now + .seconds(3)
+        while secondPreview.reportedHeight < provisionalHeight + 200, ContinuousClock.now < geometryDeadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+
+        #expect(secondPreview.reportedHeight >= provisionalHeight + 200)
+    }
+
+    @Test("T1377: production preview observer commits late image geometry")
+    @MainActor
+    func linkPreviewCommitsLateImageGeometry() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        )
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let host = UIViewController()
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+
+        let preview = LinkPreviewView()
+        preview.frame = CGRect(x: 16, y: 16, width: 320, height: 800)
+        host.view.addSubview(preview)
+        let url = try #require(URL(string: "https://example.com/t1377-late-image"))
+        preview.configure(url: url, maxHeight: 1_200)
+        host.view.layoutIfNeeded()
+
+        let webView = try #require(firstWebView(in: preview))
+        let loadDeadline = ContinuousClock.now + .seconds(15)
+        while (webView.url == nil || webView.isLoading), ContinuousClock.now < loadDeadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        guard webView.url != nil && !webView.isLoading else {
+            Issue.record("Production preview did not finish loading before the late-image assertion.")
+            return
+        }
+
+        let baselineHeight = preview.reportedHeight
+        let imageTop = Int(baselineHeight.rounded()) + 250
+        try await evaluateNoResult(
+            webView: webView,
+            script: """
+            document.body.style.position = 'relative';
+            document.body.style.height = '100px';
+            var image = document.createElement('img');
+            image.id = 't1377-late-image';
+            image.style.position = 'absolute';
+            image.style.top = '\(imageTop)px';
+            image.style.left = '0';
+            document.body.appendChild(image);
+            setTimeout(function(){
+              image.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="20" height="100"%3E%3Crect width="20" height="100" fill="blue"/%3E%3C/svg%3E';
+            }, 50);
+            0;
+            """
+        )
+
+        let geometryDeadline = ContinuousClock.now + .seconds(3)
+        while preview.reportedHeight < baselineHeight + 300, ContinuousClock.now < geometryDeadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+
+        #expect(preview.reportedHeight >= baselineHeight + 300)
+    }
+
     @Test("T191: Direct video previews use embedded aspect-height sizing")
     @MainActor
     func directVideoPreviewUsesAspectHeightSizing() {

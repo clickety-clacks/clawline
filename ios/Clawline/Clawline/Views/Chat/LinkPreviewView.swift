@@ -430,12 +430,11 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         configuredURLKey = desiredKey
         isDirectMediaPreview = Self.isDirectMediaPreviewURL(url)
         updateScrollBehaviorForPreviewContent()
-        // Flynn directive: keep link preview height stable once determined. Use cached height
-        // on scroll-back; only re-measure after explicit reload.
+        // Seed scroll-back with the last rendered height while the live preview continues
+        // observing late JavaScript and image geometry for this load.
         if let cachedKey = configuredURLKey,
            let cached = Self.heightCache.object(forKey: cachedKey as NSString)
         {
-            isHeightLocked = true
             webViewHeightConstraint.constant = max(self.minHeight, min(self.maxHeight, CGFloat(truncating: cached)))
             invalidateIntrinsicContentSize()
             onHeightChange?()
@@ -1200,16 +1199,22 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
             } catch(e) {}
           }
           function attach(){
+            var obs = null;
+            function imageLoaded(){ postHeight(); }
+            document.addEventListener('load', imageLoaded, true);
             if (typeof ResizeObserver !== 'undefined') {
               var target = document.body || document.documentElement;
               if (!target) { return; }
-              var obs = new ResizeObserver(function(){ postHeight(); });
+              obs = new ResizeObserver(function(){ postHeight(); });
               obs.observe(target);
-              store[handler] = obs;
-              postHeight();
-            } else {
-              postHeight();
             }
+            store[handler] = {
+              disconnect: function(){
+                if (obs) { obs.disconnect(); }
+                document.removeEventListener('load', imageLoaded, true);
+              }
+            };
+            postHeight();
           }
           if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', attach);

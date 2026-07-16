@@ -6775,7 +6775,6 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
     private let primaryControlsStackView = UIStackView()
     private let secondaryControlsStackView = UIStackView()
     private let versionStackView = UIStackView()
-    private let versionMetadataStackView = UIStackView()
     private let searchField = FooterSearchField()
     private var primaryRowHeightConstraint: NSLayoutConstraint?
     private var secondaryRowHeightConstraint: NSLayoutConstraint?
@@ -6935,7 +6934,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         versionStackView.axis = .horizontal
         versionStackView.alignment = .center
         versionStackView.distribution = .fill
-        versionStackView.spacing = 4
+        versionStackView.spacing = Self.footerRowSpacing
         versionStackView.setContentHuggingPriority(.required, for: .horizontal)
         versionStackView.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
@@ -6976,10 +6975,6 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             primaryRowHeightConstraint,
             secondaryRowHeightConstraint,
             versionRowHeightConstraint,
-            versionStackView.widthAnchor.constraint(
-                equalTo: contentView.widthAnchor,
-                constant: -(Self.horizontalPadding * 2)
-            ),
             searchField.heightAnchor.constraint(equalToConstant: Self.searchRowHeight),
             searchField.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
             searchField.widthAnchor.constraint(lessThanOrEqualTo: contentView.widthAnchor, constant: -(Self.horizontalPadding * 2)),
@@ -6999,7 +6994,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
     private func updateFontsForPreferredContentSizeCategory() {
         let font = footerFont
         searchField.font = font
-        for view in [primaryControlsStackView, secondaryControlsStackView, versionMetadataStackView].flatMap(\.arrangedSubviews) {
+        for view in [primaryControlsStackView, secondaryControlsStackView].flatMap(\.arrangedSubviews) {
             if let button = view as? UIButton {
                 button.titleLabel?.font = font
             } else if let label = view as? UILabel {
@@ -7095,41 +7090,21 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             versionStackView.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
-        for view in versionMetadataStackView.arrangedSubviews {
-            versionMetadataStackView.removeArrangedSubview(view)
-            view.removeFromSuperview()
-        }
         let items = Self.footerItems(for: status, isUnavailable: statusUnavailable, isDark: isDark)
         currentFooterItems = items
-        let movesSecondaryMetadataToVersionRow = Self.requiresTwoControlRows(
-            items: items,
-            availableWidth: bounds.width,
-            font: footerFont
-        )
         for item in items {
             let itemColor = isSpatial ? textColor : (item.textColor ?? textColor)
-            if movesSecondaryMetadataToVersionRow && item.row == .secondary {
-                versionMetadataStackView.addArrangedSubview(
-                    footerView(for: item, status: status, color: itemColor, onSelect: onSelect)
-                )
-            } else {
-                primaryControlsStackView.addArrangedSubview(
-                    footerView(for: item, status: status, color: itemColor, onSelect: onSelect)
-                )
-            }
+            let row = item.row == .secondary ? secondaryControlsStackView : primaryControlsStackView
+            row.addArrangedSubview(
+                footerView(for: item, status: status, color: itemColor, onSelect: onSelect)
+            )
         }
-        secondaryControlsStackView.isHidden = true
-        secondaryRowHeightConstraint?.constant = Self.controlRowHeight(compatibleWith: traitCollection)
+        let hasSecondaryMetadata = items.contains { $0.row == .secondary }
+        secondaryControlsStackView.isHidden = !hasSecondaryMetadata
+        secondaryRowHeightConstraint?.constant = hasSecondaryMetadata
+            ? Self.secondaryControlRowHeight(items: items, availableWidth: bounds.width, font: footerFont)
+            : Self.controlRowHeight(compatibleWith: traitCollection)
         versionStackView.addArrangedSubview(versionLabel(color: textColor))
-        if movesSecondaryMetadataToVersionRow {
-            versionMetadataStackView.axis = .horizontal
-            versionMetadataStackView.alignment = .center
-            versionMetadataStackView.distribution = .fill
-            versionMetadataStackView.spacing = 2
-            versionMetadataStackView.setContentHuggingPriority(.required, for: .horizontal)
-            versionMetadataStackView.setContentCompressionResistancePriority(.required, for: .horizontal)
-            versionStackView.addArrangedSubview(versionMetadataStackView)
-        }
         versionStackView.addArrangedSubview(testMenuButton(color: textColor, onSelect: onTestMenuSelect))
         configureSearchField(query: searchQuery, textColor: textColor, isDark: isDark, isSpatial: isSpatial)
         isAccessibilityElement = false
@@ -7141,8 +7116,13 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         width: CGFloat = .greatestFiniteMagnitude,
         compatibleWith traitCollection: UITraitCollection? = nil
     ) -> CGFloat {
+        let items = footerItems(for: status)
+        let font = UIFont.clawline(.timestamp, compatibleWith: traitCollection)
         let primaryHeight = controlRowHeight(compatibleWith: traitCollection)
-        return ceil(searchRowHeight + footerRowSpacing + primaryHeight + footerRowSpacing
+        let secondaryHeight = items.contains { $0.row == .secondary }
+            ? secondaryControlRowHeight(items: items, availableWidth: width, font: font)
+            : 0
+        return ceil(searchRowHeight + footerRowSpacing + primaryHeight + secondaryHeight + footerRowSpacing
             + versionRowHeight(compatibleWith: traitCollection) + topPadding + bottomPadding)
     }
 
@@ -7152,17 +7132,6 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
 
     private static func versionRowHeight(compatibleWith traitCollection: UITraitCollection?) -> CGFloat {
         max(versionRowHeight, ceil(UIFont.clawline(.timestamp, compatibleWith: traitCollection).lineHeight + 4))
-    }
-
-    private static func requiresTwoControlRows(items: [FooterItem], availableWidth: CGFloat, font: UIFont) -> Bool {
-        guard items.contains(where: { $0.row == .secondary }) else { return false }
-        let contentWidth = max(0, availableWidth - (horizontalPadding * 2))
-        let itemWidth = items.reduce(CGFloat.zero) { partial, item in
-            let titleWidth = ceil((item.text as NSString).size(withAttributes: [.font: font]).width)
-            return partial + max(44, titleWidth + 8)
-        }
-        let spacing = CGFloat(max(0, items.count - 1)) * 2
-        return itemWidth + spacing > contentWidth
     }
 
     private static func secondaryControlRowHeight(
@@ -7403,8 +7372,8 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         label.isAccessibilityElement = true
         label.accessibilityLabel = label.text
         label.accessibilityTraits = .staticText
-        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        label.setContentHuggingPriority(.required, for: .horizontal)
+        label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         return label
     }
 

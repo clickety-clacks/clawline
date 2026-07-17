@@ -7545,6 +7545,12 @@ struct ChatViewModelTests {
         let secondarySessionKey = "agent:main:clawline:user:s_logout_secondary"
         viewModel.debugUpsertMessage(makeTestMessage(id: "s_primary", content: "primary", sessionKey: personalSessionKey), isServer: true)
         viewModel.debugUpsertMessage(makeTestMessage(id: "s_secondary", content: "secondary", sessionKey: secondarySessionKey), isServer: true)
+        let cachedProjection = try #require(viewModel.messageProjection(
+            for: secondarySessionKey,
+            showOnlyUserMessages: false,
+            searchQuery: ""
+        ))
+        #expect(cachedProjection.count == 1)
         viewModel.logout()
 
         #expect(viewModel.messages.isEmpty)
@@ -7555,6 +7561,12 @@ struct ChatViewModelTests {
         #expect(viewModel.streamDotStateBySession.isEmpty)
         #expect(viewModel.debugSessionMessageEntryExists(personalSessionKey) == false)
         #expect(viewModel.debugSessionMessageEntryExists(secondarySessionKey) == false)
+        let clearedProjection = try #require(viewModel.messageProjection(
+            for: secondarySessionKey,
+            showOnlyUserMessages: false,
+            searchQuery: ""
+        ))
+        #expect(clearedProjection.count == 0)
         #expect(chatService.replayCursorSnapshot().isEmpty)
     }
 }

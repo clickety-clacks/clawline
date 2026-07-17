@@ -73,7 +73,7 @@ Nothing to keep beyond what's in scroll-to-bottom-invariants.md.
 Kept: shared "at bottom" threshold across three sites, `wasAtBottomBeforeUpdate` capture timing, initial load/backfill must not generate unread, `firstUnreadMessageId` set once and held stable, crossing viewport center triggers flash AND clear simultaneously, indicator anchored to input bar (not screen), typing indicator exclusion. Stripped: state machine table (code-evident), definition section.
 
 ## staged-stream-materialization
-Kept: why N=50 (measurement-derived), new messages during expansion are queued (not dropped), unread marker outside tail window never auto-clears, anchor compensation mechanism, `advanceMaterialization` as single write seam, staged path gates (first activation + messageCount > 50 only). Stripped: problem statement, non-goal list, UX behavior description.
+Superseded by permanent bounded materialization: N=50 normal/N=100 user-only, no tail-to-full promotion, mutation-seam projection indexes, half-window settled-edge shifts, logical unread truth, bounded auxiliary items, and the existing anchor-compensation/diffable serialization seams.
 
 ## stream-switch-coordinator
 Kept: why two keys (measured regression rationale), epoch counter atomicity requirement, pager vs programmatic different debounce, epoch-based cancellation semantics, target validation at commit time, toast must remain until engine activation completes, ChatView.onChange key binding classification. Stripped: reader classification table, acceptance criteria, file listing.

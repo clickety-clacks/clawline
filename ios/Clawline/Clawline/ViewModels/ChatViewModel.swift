@@ -838,6 +838,10 @@ final class ChatViewModel {
     private var lifecycleStartupGateDebugSubscription: AsyncStream<StartupGateDebugEvent>?
     private var sessionMessages: [String: [Message]] = [:]
     private var messageListRevisionBySession: [String: Int] = [:]
+    private var messageProjectionIndexBySession: [String: MessageProjectionIndex] = [:]
+    private var messageSearchProjectionByKey: [MessageSearchProjectionKey: MessageSearchProjection] = [:]
+    private var messageSearchProjectionTaskByKey: [MessageSearchProjectionKey: Task<Void, Never>] = [:]
+    private(set) var messageProjectionPublicationSequence: Int = 0
     private var forceReReadGenerationBySession: [String: Int] = [:]
     private var pendingLocalMessages: [PendingLocalMessage] = []
     private var ackedPendingLocalMessageIDs: Set<String> = []
@@ -915,6 +919,81 @@ final class ChatViewModel {
 
     func messageListRevision(for sessionKey: String) -> Int {
         messageListRevisionBySession[sessionKey] ?? 0
+    }
+
+    func messageProjection(
+        for sessionKey: String,
+        showOnlyUserMessages: Bool,
+        searchQuery: String
+    ) -> MessageProjectionSnapshot? {
+        let base: MessageProjectionBase = showOnlyUserMessages ? .userOnly : .transcript
+        let index: MessageProjectionIndex
+        if let existing = messageProjectionIndexBySession[sessionKey] {
+            index = existing
+        } else {
+            let created = MessageProjectionIndex(
+                messages: sessionMessages[sessionKey] ?? [],
+                revision: messageListRevision(for: sessionKey)
+            )
+            messageProjectionIndexBySession[sessionKey] = created
+            index = created
+        }
+        let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else { return index.snapshot(base: base) }
+
+        let key = MessageSearchProjectionKey(
+            sessionKey: sessionKey,
+            base: base,
+            query: trimmedQuery
+        )
+        if let cached = messageSearchProjectionByKey[key], cached.revision == index.revision {
+            return MessageProjectionSnapshot(
+                revision: cached.revision,
+                base: base,
+                transcript: index.transcript,
+                transcriptIndices: cached.transcriptIndices,
+                transcriptIndexByMessageId: index.transcriptIndexByMessageId
+            )
+        }
+
+        if messageSearchProjectionTaskByKey[key] == nil {
+            let input = index.searchInput(base: base)
+            messageSearchProjectionTaskByKey[key] = Task.detached(priority: .userInitiated) { [weak self] in
+                let matches = input.matchingTranscriptIndices(query: trimmedQuery)
+                guard !Task.isCancelled else { return }
+                await self?.publishMessageSearchProjection(
+                    key: key,
+                    revision: input.revision,
+                    transcriptIndices: matches
+                )
+            }
+        }
+        return nil
+    }
+
+    private func publishMessageSearchProjection(
+        key: MessageSearchProjectionKey,
+        revision: Int,
+        transcriptIndices: [Int]
+    ) {
+        messageSearchProjectionTaskByKey.removeValue(forKey: key)
+        guard messageProjectionIndexBySession[key.sessionKey]?.revision == revision else { return }
+        messageSearchProjectionByKey[key] = MessageSearchProjection(
+            revision: revision,
+            transcriptIndices: transcriptIndices
+        )
+        messageProjectionPublicationSequence &+= 1
+    }
+
+    private struct MessageSearchProjectionKey: Hashable, Sendable {
+        let sessionKey: String
+        let base: MessageProjectionBase
+        let query: String
+    }
+
+    private struct MessageSearchProjection: Sendable {
+        let revision: Int
+        let transcriptIndices: [Int]
     }
 
     private func armForceReRead(for sessionKey: String) {
@@ -3184,6 +3263,7 @@ final class ChatViewModel {
     private func upsert(sessionKey: String, message: Message, sourceFlags: MessageSourceFlags) -> Bool {
         var messageList = sessionMessages[sessionKey] ?? []
         let didAppendNewMessage: Bool
+        let projectionMutation: MessageProjectionMutation
         if let existingIndex = messageList.firstIndex(where: { $0.id == message.id }) {
             if sourceFlags.isCache {
                 return false
@@ -3195,13 +3275,15 @@ final class ChatViewModel {
             }
             messageList[existingIndex] = message
             didAppendNewMessage = false
+            projectionMutation = .replace(index: existingIndex, message: message)
         } else {
             let insertionIndex = TranscriptReplyAdjacencyOrdering.insertionIndex(for: message, in: messageList)
                 ?? messageList.endIndex
             messageList.insert(message, at: insertionIndex)
             didAppendNewMessage = true
+            projectionMutation = .insert(index: insertionIndex, message: message)
         }
-        applyMessagesWrite(messageList, for: sessionKey)
+        applyMessagesWrite(messageList, for: sessionKey, projectionMutation: projectionMutation)
         return didAppendNewMessage
     }
 
@@ -3212,7 +3294,7 @@ final class ChatViewModel {
             return
         }
         messageList.remove(at: index)
-        applyMessagesWrite(messageList, for: sessionKey)
+        applyMessagesWrite(messageList, for: sessionKey, projectionMutation: .remove(index: index))
     }
 
     private func removePendingLocalMessage(id: String, reason: String) {
@@ -3228,12 +3310,19 @@ final class ChatViewModel {
 
     private func clearSessionMessages(sessionKey: String, reason: String) {
         _ = reason
-        applyMessagesWrite([], for: sessionKey)
+        applyMessagesWrite([], for: sessionKey, projectionMutation: .replaceAll)
     }
 
     private func removeSession(sessionKey: String, reason: String) {
         _ = reason
         sessionMessages.removeValue(forKey: sessionKey)
+        messageProjectionIndexBySession.removeValue(forKey: sessionKey)
+        let removedSearchKeys = messageSearchProjectionByKey.keys.filter { $0.sessionKey == sessionKey }
+        removedSearchKeys.forEach { messageSearchProjectionByKey.removeValue(forKey: $0) }
+        let removedSearchTaskKeys = messageSearchProjectionTaskByKey.keys.filter { $0.sessionKey == sessionKey }
+        removedSearchTaskKeys.forEach {
+            messageSearchProjectionTaskByKey.removeValue(forKey: $0)?.cancel()
+        }
         persistMessages([], for: sessionKey)
         lastReadMessageIdBySession.removeValue(forKey: sessionKey)
         streamTailStateBySession.removeValue(forKey: sessionKey)
@@ -3277,6 +3366,11 @@ final class ChatViewModel {
             persistMessages([], for: key)
         }
         sessionMessages.removeAll()
+        messageProjectionIndexBySession.removeAll()
+        messageSearchProjectionByKey.removeAll()
+        messageSearchProjectionTaskByKey.values.forEach { $0.cancel() }
+        messageSearchProjectionTaskByKey.removeAll()
+        messageProjectionPublicationSequence &+= 1
         streamsBySessionKey.removeAll()
         orderedSessionKeys = []
         syntheticSessionKeys.removeAll()
@@ -3297,10 +3391,30 @@ final class ChatViewModel {
         bumpSendIndicatorRevision()
     }
 
-    private func applyMessagesWrite(_ newMessages: [Message], for sessionKey: String) {
+    private func applyMessagesWrite(
+        _ newMessages: [Message],
+        for sessionKey: String,
+        projectionMutation: MessageProjectionMutation
+    ) {
         let oldCount = sessionMessages[sessionKey]?.count ?? 0
         sessionMessages[sessionKey] = newMessages
         messageListRevisionBySession[sessionKey, default: 0] &+= 1
+        let revision = messageListRevisionBySession[sessionKey] ?? 0
+        var projectionIndex = messageProjectionIndexBySession[sessionKey]
+            ?? MessageProjectionIndex()
+        projectionIndex.update(
+            messages: newMessages,
+            revision: revision,
+            mutation: projectionMutation
+        )
+        messageProjectionIndexBySession[sessionKey] = projectionIndex
+        let staleSearchKeys = messageSearchProjectionByKey.keys.filter { $0.sessionKey == sessionKey }
+        staleSearchKeys.forEach { messageSearchProjectionByKey.removeValue(forKey: $0) }
+        let staleTaskKeys = messageSearchProjectionTaskByKey.keys.filter { $0.sessionKey == sessionKey }
+        staleTaskKeys.forEach {
+            messageSearchProjectionTaskByKey.removeValue(forKey: $0)?.cancel()
+        }
+        messageProjectionPublicationSequence &+= 1
         let newCount = newMessages.count
         if oldCount > 0, newCount == 0 {
             StreamSwitchTiming.log("stream_messages_unloaded oldCount=\(oldCount) newCount=0", sessionKey: sessionKey)

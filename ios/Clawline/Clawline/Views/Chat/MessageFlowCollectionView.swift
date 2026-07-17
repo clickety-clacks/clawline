@@ -188,6 +188,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     var sessionStatus: SessionStatus?
     var sessionStatusUnavailable: Bool = false
     var streamSearchQuery: String = ""
+    var messageProjectionPublicationSequence: Int = 0
     var forceReReadGeneration: Int = 0
     var sendIndicatorRevision: Int = 0
     var fontScaleChangeSequence: Int = 0
@@ -263,6 +264,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: MessageFlowCollectionViewController, context _: Context) {
+        _ = messageProjectionPublicationSequence
         let isDark = colorScheme == .dark
         uiViewController.update(
             viewModel: viewModel,
@@ -542,6 +544,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let messageCount: Int
         let lastMessageId: String?
         let messageListRevision: Int
+        let messageProjectionPublicationSequence: Int
         let isShowingOnlyUserMessages: Bool
         let streamSearchQuery: String
         let firstUnreadMessageId: String?
@@ -600,11 +603,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var onKeyboardDismissModeChanged: (@MainActor (String) -> Void)?
     private let webBubbleCoordinator = WebBubbleCoordinator()
     private var lastMessages: [Message] = []
+    private var activeWindowReachesProjectionTail = true
     private var streamSearchQuery = ""
     private var lastEffectiveStream: ChatStream?
     private var showOnlyUserMessagesTransitionSessionKeys: Set<String> = []
     private var pendingShowOnlyUserMessagesRevealTargetBySessionKey: [String: String] = [:]
-    // Staged stream materialization (approved spec: tail window -> full history).
+    // Bounded stream materialization. The view model owns complete transcript truth;
+    // this controller owns only a fixed projection window.
     // WHY N=50: device measurements showed 500-item first apply taking 1.4-2.7s.
     // A 50-item first paint targets ~10% of that cost while still showing meaningful recent context.
     static let stagedMaterializationTailWindowCount = 50
@@ -616,16 +621,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         )
     }
 
-    private enum MaterializationStage: String {
-        // WHY only two stages: spec intentionally limits complexity to one fast first paint
-        // followed by one full-history expansion. No intermediate windows.
-        case tail
-        case full
+    static func maximumBoundedSnapshotItemCount(messageWindowCount: Int) -> Int {
+        (messageWindowCount * 3) + 2
     }
 
-    private enum ExpansionState: String {
-        case idle
-        case pendingFull
+    private enum MaterializationStage: String {
+        case tail
+        case full
     }
 
     private struct WindowBounds {
@@ -638,18 +640,16 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private struct MaterializationState {
         var stage: MaterializationStage
         var windowBounds: WindowBounds
-        var expansionState: ExpansionState
         var unreadOutsideTailWindow: Bool
+        var logicalTotalCount: Int
+        var revision: Int
     }
 
     private enum MaterializationEvent {
         case messagesUpdated(totalCount: Int,
-                             firstUnreadMessageId: String?,
-                             fullMessageIds: [String],
-                             allowTailStage: Bool)
-        case tailRendered(totalCount: Int,
-                          firstUnreadMessageId: String?,
-                          fullMessageIds: [String])
+                             firstUnreadProjectedIndex: Int?,
+                             followsProjectionTail: Bool)
+        case shifted(windowBounds: WindowBounds, totalCount: Int)
     }
 
     private struct MaterializationEventEnvelope {
@@ -661,11 +661,21 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         var stage: MaterializationStage
         var windowBounds: WindowBounds
         var unreadOutsideTailWindow: Bool
-        var scheduleTailToFullPromotion: Bool
-        var isTailToFullExpansionApply: Bool
+        var revision: Int
+    }
+
+    private struct MaterializationProjectionKey: Hashable {
+        let base: MessageProjectionBase
+        let searchQuery: String
     }
 
     private var materializationStateBySessionKey: [String: MaterializationState] = [:]
+    private var materializationStateByProjectionBySessionKey: [String: [MaterializationProjectionKey: MaterializationState]] = [:]
+    private var activeMaterializationProjectionKeyBySessionKey: [String: MaterializationProjectionKey] = [:]
+    private var lastAppliedMaterializationRevisionBySessionKey: [String: Int] = [:]
+    private var pendingMaterializationViewportAnchor: BubbleSizingV2ViewportAnchor?
+    private var pendingMaterializationRefreshSuppressesActivationCompletion = false
+    private var pendingMaterializationPostApplyAction: (@MainActor () -> Void)?
     private var materializationEventQueue: [MaterializationEventEnvelope] = []
     private var isMaterializationQueueProcessing = false
     private var lastMaterializationPlanBySessionKey: [String: MaterializationPlan] = [:]
@@ -680,6 +690,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         var atBottom: Bool
         var distanceFromBottom: Double
         var savedAtEpochSeconds: Double
+        var projectionBase: String?
+        var searchQuery: String?
+        var projectionLowerBound: Int?
     }
 
     private static let scrollStateWriteDebounceSeconds: TimeInterval = 0.35
@@ -1476,6 +1489,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             guard let sessionKey = callbackSessionKey() else { return }
             emit(.transcriptScrollActiveChanged(sessionKey: sessionKey, isActive: false))
             handleUserScrollSettled(sessionKey: sessionKey)
+            shiftMaterializationWindowIfNeeded(sessionKey: sessionKey)
             checkFirstUnreadCrossingIfNeeded(sessionKey: sessionKey)
             performPendingFlashIfPossible()
             performPendingDeferredScrollToBottomIfNeeded(sessionKey: sessionKey)
@@ -1492,6 +1506,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         guard let sessionKey = callbackSessionKey() else { return }
         emit(.transcriptScrollActiveChanged(sessionKey: sessionKey, isActive: false))
         handleUserScrollSettled(sessionKey: sessionKey)
+        shiftMaterializationWindowIfNeeded(sessionKey: sessionKey)
         checkFirstUnreadCrossingIfNeeded(sessionKey: sessionKey)
         performPendingFlashIfPossible()
         performPendingDeferredScrollToBottomIfNeeded(sessionKey: sessionKey)
@@ -1507,6 +1522,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         guard let sessionKey = callbackSessionKey() else { return }
         emit(.transcriptScrollActiveChanged(sessionKey: sessionKey, isActive: false))
         handleProgrammaticScrollEnded(sessionKey: sessionKey)
+        shiftMaterializationWindowIfNeeded(sessionKey: sessionKey)
         checkFirstUnreadCrossingIfNeeded(sessionKey: sessionKey)
         performPendingFlashIfPossible()
         performPendingDeferredScrollToBottomIfNeeded(sessionKey: sessionKey)
@@ -1594,20 +1610,20 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     private func describePersistedScrollState(_ state: PersistedScrollState?) -> String {
         guard let state else { return "nil" }
-        return "atBottom=\(state.atBottom) distanceFromBottom=\(formatScrollRestore(CGFloat(state.distanceFromBottom))) savedAt=\(String(format: "%.3f", state.savedAtEpochSeconds))"
+        return "atBottom=\(state.atBottom) distanceFromBottom=\(formatScrollRestore(CGFloat(state.distanceFromBottom))) projection=\(state.projectionBase ?? "legacy") query=\(state.searchQuery ?? "") lower=\(state.projectionLowerBound.map(String.init) ?? "nil") savedAt=\(String(format: "%.3f", state.savedAtEpochSeconds))"
     }
 
     private func describeMaterializationState(_ state: MaterializationState?) -> String {
         guard let state else { return "nil" }
-        return "stage=\(state.stage.rawValue) bounds=\(state.windowBounds.lowerBound)..<\(state.windowBounds.upperBound) expansion=\(state.expansionState.rawValue) unreadOutsideTail=\(state.unreadOutsideTailWindow)"
+        return "stage=\(state.stage.rawValue) bounds=\(state.windowBounds.lowerBound)..<\(state.windowBounds.upperBound) total=\(state.logicalTotalCount) revision=\(state.revision) unreadOutsideTail=\(state.unreadOutsideTailWindow)"
     }
 
     private func describeMaterializationEvent(_ event: MaterializationEvent) -> String {
         switch event {
-        case let .messagesUpdated(totalCount, firstUnreadMessageId, fullMessageIds, allowTailStage):
-            return "messagesUpdated total=\(totalCount) firstUnread=\(firstUnreadMessageId ?? "nil") ids=\(fullMessageIds.count) allowTailStage=\(allowTailStage)"
-        case let .tailRendered(totalCount, firstUnreadMessageId, fullMessageIds):
-            return "tailRendered total=\(totalCount) firstUnread=\(firstUnreadMessageId ?? "nil") ids=\(fullMessageIds.count)"
+        case let .messagesUpdated(totalCount, firstUnreadProjectedIndex, followsProjectionTail):
+            return "messagesUpdated total=\(totalCount) firstUnreadIndex=\(firstUnreadProjectedIndex.map(String.init) ?? "nil") followsTail=\(followsProjectionTail)"
+        case let .shifted(windowBounds, totalCount):
+            return "shifted total=\(totalCount) bounds=\(windowBounds.lowerBound)..<\(windowBounds.upperBound)"
         }
     }
 
@@ -1882,11 +1898,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 stage: .full,
                 windowBounds: .empty,
                 unreadOutsideTailWindow: false,
-                scheduleTailToFullPromotion: false,
-                isTailToFullExpansionApply: false
+                revision: 0
             )
         logScrollRestore(
-            "materializationEvent.plan sessionKey=\(sessionKey) stage=\(plan.stage.rawValue) bounds=\(plan.windowBounds.lowerBound)..<\(plan.windowBounds.upperBound) unreadOutsideTail=\(plan.unreadOutsideTailWindow) scheduleTailToFullPromotion=\(plan.scheduleTailToFullPromotion) isTailToFullExpansionApply=\(plan.isTailToFullExpansionApply)"
+            "materializationEvent.plan sessionKey=\(sessionKey) stage=\(plan.stage.rawValue) bounds=\(plan.windowBounds.lowerBound)..<\(plan.windowBounds.upperBound) unreadOutsideTail=\(plan.unreadOutsideTailWindow)"
         )
         return plan
     }
@@ -1901,6 +1916,35 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             lastMaterializationPlanBySessionKey.removeValue(forKey: key)
         }
         materializationEventQueue.removeAll { !validSessionKeys.contains($0.sessionKey) }
+        materializationStateByProjectionBySessionKey = materializationStateByProjectionBySessionKey.filter {
+            validSessionKeys.contains($0.key)
+        }
+        activeMaterializationProjectionKeyBySessionKey = activeMaterializationProjectionKeyBySessionKey.filter {
+            validSessionKeys.contains($0.key)
+        }
+        lastAppliedMaterializationRevisionBySessionKey = lastAppliedMaterializationRevisionBySessionKey.filter {
+            validSessionKeys.contains($0.key)
+        }
+    }
+
+    private func activateMaterializationProjection(
+        sessionKey: String,
+        key: MaterializationProjectionKey
+    ) {
+        guard activeMaterializationProjectionKeyBySessionKey[sessionKey] != key else { return }
+        if let previousKey = activeMaterializationProjectionKeyBySessionKey[sessionKey],
+           let currentState = materializationStateBySessionKey[sessionKey]
+        {
+            materializationStateByProjectionBySessionKey[sessionKey, default: [:]][previousKey] = currentState
+        }
+        activeMaterializationProjectionKeyBySessionKey[sessionKey] = key
+        materializationStateBySessionKey[sessionKey] = materializationStateByProjectionBySessionKey[sessionKey]?[key]
+    }
+
+    private func storeMaterializationState(_ state: MaterializationState, sessionKey: String) {
+        materializationStateBySessionKey[sessionKey] = state
+        guard let key = activeMaterializationProjectionKeyBySessionKey[sessionKey] else { return }
+        materializationStateByProjectionBySessionKey[sessionKey, default: [:]][key] = state
     }
 
     private func cancelDeferredWork(for sessionKey: String, cancelAll: Bool) {
@@ -2082,12 +2126,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         showOnlyUserMessagesTransitionSessionKeys.insert(sessionKey)
         if let revealMessageId {
             pendingShowOnlyUserMessagesRevealTargetBySessionKey[sessionKey] = revealMessageId
-            materializationStateBySessionKey[sessionKey] = MaterializationState(
-                stage: .full,
-                windowBounds: WindowBounds(lowerBound: 0, upperBound: lastMessages.count),
-                expansionState: .idle,
-                unreadOutsideTailWindow: false
-            )
         }
         forceReconfigureAll = true
         update(
@@ -2130,33 +2168,46 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                                         event: MaterializationEvent) -> MaterializationPlan
     {
         let previousMaterializationState = materializationStateBySessionKey[sessionKey]
-        let tailWindowCount = Self.stagedMaterializationTailWindowCount(
+        let windowCount = Self.stagedMaterializationTailWindowCount(
             isShowingOnlyUserMessages: readState(for: sessionKey).isShowingOnlyUserMessages
         )
         let totalCount: Int
-        let firstUnreadId: String?
-        let fullMessageIds: [String]
-        let allowTailStage: Bool
+        let nextBounds: WindowBounds
+        let firstUnreadProjectedIndex: Int?
         switch event {
-        case let .messagesUpdated(count, unreadId, ids, allowTail):
+        case let .messagesUpdated(count, unreadIndex, followsProjectionTail):
             totalCount = count
-            firstUnreadId = unreadId
-            fullMessageIds = ids
-            allowTailStage = allowTail
-        case let .tailRendered(count, unreadId, ids):
+            firstUnreadProjectedIndex = unreadIndex
+            let previousWindow = previousMaterializationState.map {
+                BoundedMessageWindow(
+                    lowerBound: $0.windowBounds.lowerBound,
+                    upperBound: $0.windowBounds.upperBound,
+                    totalCount: $0.logicalTotalCount
+                )
+            }
+            let window = BoundedMessageWindow.updating(
+                previous: previousWindow,
+                totalCount: count,
+                limit: windowCount,
+                followsTail: followsProjectionTail
+            )
+            nextBounds = WindowBounds(lowerBound: window.lowerBound, upperBound: window.upperBound)
+        case let .shifted(bounds, count):
             totalCount = count
-            firstUnreadId = unreadId
-            fullMessageIds = ids
-            allowTailStage = false
+            firstUnreadProjectedIndex = nil
+            let lower = max(0, min(bounds.lowerBound, max(0, count - 1)))
+            nextBounds = WindowBounds(lowerBound: lower, upperBound: min(count, lower + windowCount))
         }
 
         if totalCount <= 0 {
-            materializationStateBySessionKey[sessionKey] = MaterializationState(
+            let emptyState = MaterializationState(
                 stage: .full,
                 windowBounds: .empty,
-                expansionState: .idle,
-                unreadOutsideTailWindow: false
+                unreadOutsideTailWindow: false,
+                logicalTotalCount: 0,
+                revision: (previousMaterializationState?.revision ?? 0) + 1
             )
+            storeMaterializationState(emptyState, sessionKey: sessionKey)
             logMaterializationStateChange(
                 sessionKey: sessionKey,
                 from: previousMaterializationState,
@@ -2167,168 +2218,34 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 stage: .full,
                 windowBounds: .empty,
                 unreadOutsideTailWindow: false,
-                scheduleTailToFullPromotion: false,
-                isTailToFullExpansionApply: false
+                revision: materializationStateBySessionKey[sessionKey]?.revision ?? 0
             )
         }
 
-        if totalCount <= tailWindowCount {
-            // WHY bypass staging for small streams: adding tail->full churn would be overhead
-            // without meaningful latency reduction when full history is already short.
-            let fullBounds = WindowBounds(lowerBound: 0, upperBound: totalCount)
-            materializationStateBySessionKey[sessionKey] = MaterializationState(
-                stage: .full,
-                windowBounds: fullBounds,
-                expansionState: .idle,
-                unreadOutsideTailWindow: false
-            )
-            logMaterializationStateChange(
-                sessionKey: sessionKey,
-                from: previousMaterializationState,
-                to: materializationStateBySessionKey[sessionKey],
-                reason: "advanceMaterialization smallStreamFull event=\(describeMaterializationEvent(event))"
-            )
-            return MaterializationPlan(
-                stage: .full,
-                windowBounds: fullBounds,
-                unreadOutsideTailWindow: false,
-                scheduleTailToFullPromotion: false,
-                isTailToFullExpansionApply: false
-            )
-        }
-
-        var state = materializationStateBySessionKey[sessionKey]
-        if state == nil {
-            if allowTailStage {
-                let tailBounds = tailWindowBounds(totalCount: totalCount, count: tailWindowCount)
-                state = MaterializationState(
-                    stage: .tail,
-                    windowBounds: tailBounds,
-                    expansionState: .pendingFull,
-                    unreadOutsideTailWindow: isUnreadOutsideTailWindow(
-                        firstUnreadMessageId: firstUnreadId,
-                        bounds: tailBounds,
-                        fullMessageIds: fullMessageIds
-                    )
-                )
-            } else {
-                let fullBounds = WindowBounds(lowerBound: 0, upperBound: totalCount)
-                state = MaterializationState(
-                    stage: .full,
-                    windowBounds: fullBounds,
-                    expansionState: .idle,
-                    unreadOutsideTailWindow: false
-                )
-            }
-        }
-        guard var state else {
-            // Defensive fallback to satisfy control-flow analysis.
-            // In practice, state is always initialized by the branch above.
-            let fullBounds = WindowBounds(lowerBound: 0, upperBound: totalCount)
-            return MaterializationPlan(
-                stage: .full,
-                windowBounds: fullBounds,
-                unreadOutsideTailWindow: false,
-                scheduleTailToFullPromotion: false,
-                isTailToFullExpansionApply: false
-            )
-        }
-
-        switch event {
-        case .messagesUpdated:
-            if state.stage == .tail {
-                let tailBounds = tailWindowBounds(totalCount: totalCount, count: tailWindowCount)
-                state.windowBounds = tailBounds
-                state.unreadOutsideTailWindow = isUnreadOutsideTailWindow(
-                    firstUnreadMessageId: firstUnreadId,
-                    bounds: tailBounds,
-                    fullMessageIds: fullMessageIds
-                )
-                let shouldSchedule = state.expansionState == .pendingFull
-                if shouldSchedule {
-                    // WHY only one promotion trigger: tail->full is a single transition.
-                    // Reissuing promotions would queue redundant expansion work and add jitter.
-                    state.expansionState = .idle
-                }
-                materializationStateBySessionKey[sessionKey] = state
-                logMaterializationStateChange(
-                    sessionKey: sessionKey,
-                    from: previousMaterializationState,
-                    to: state,
-                    reason: "advanceMaterialization messagesUpdated.tail event=\(describeMaterializationEvent(event))"
-                )
-                return MaterializationPlan(
-                    stage: .tail,
-                    windowBounds: tailBounds,
-                    unreadOutsideTailWindow: state.unreadOutsideTailWindow,
-                    scheduleTailToFullPromotion: shouldSchedule,
-                    isTailToFullExpansionApply: false
-                )
-            }
-
-            let fullBounds = WindowBounds(lowerBound: 0, upperBound: totalCount)
-            state.stage = .full
-            state.windowBounds = fullBounds
-            state.expansionState = .idle
-            state.unreadOutsideTailWindow = false
-            materializationStateBySessionKey[sessionKey] = state
-            logMaterializationStateChange(
-                sessionKey: sessionKey,
-                from: previousMaterializationState,
-                to: state,
-                reason: "advanceMaterialization messagesUpdated.full event=\(describeMaterializationEvent(event))"
-            )
-            return MaterializationPlan(
-                stage: .full,
-                windowBounds: fullBounds,
-                unreadOutsideTailWindow: false,
-                scheduleTailToFullPromotion: false,
-                isTailToFullExpansionApply: false
-            )
-
-        case .tailRendered:
-            if state.stage == .tail {
-                let fullBounds = WindowBounds(lowerBound: 0, upperBound: totalCount)
-                state.stage = .full
-                state.windowBounds = fullBounds
-                state.expansionState = .idle
-                state.unreadOutsideTailWindow = false
-                materializationStateBySessionKey[sessionKey] = state
-                logMaterializationStateChange(
-                    sessionKey: sessionKey,
-                    from: previousMaterializationState,
-                    to: state,
-                    reason: "advanceMaterialization tailRendered.promote event=\(describeMaterializationEvent(event))"
-                )
-                return MaterializationPlan(
-                    stage: .full,
-                    windowBounds: fullBounds,
-                    unreadOutsideTailWindow: false,
-                    scheduleTailToFullPromotion: false,
-                    isTailToFullExpansionApply: true
-                )
-            }
-
-            let fullBounds = WindowBounds(lowerBound: 0, upperBound: totalCount)
-            state.stage = .full
-            state.windowBounds = fullBounds
-            state.expansionState = .idle
-            state.unreadOutsideTailWindow = false
-            materializationStateBySessionKey[sessionKey] = state
-            logMaterializationStateChange(
-                sessionKey: sessionKey,
-                from: previousMaterializationState,
-                to: state,
-                reason: "advanceMaterialization tailRendered.full event=\(describeMaterializationEvent(event))"
-            )
-            return MaterializationPlan(
-                stage: .full,
-                windowBounds: fullBounds,
-                unreadOutsideTailWindow: false,
-                scheduleTailToFullPromotion: false,
-                isTailToFullExpansionApply: false
-            )
-        }
+        let stage: MaterializationStage = totalCount <= windowCount ? .full : .tail
+        let unreadOutsideWindow = firstUnreadProjectedIndex.map {
+            $0 < nextBounds.lowerBound || $0 >= nextBounds.upperBound
+        } ?? false
+        let state = MaterializationState(
+            stage: stage,
+            windowBounds: nextBounds,
+            unreadOutsideTailWindow: unreadOutsideWindow,
+            logicalTotalCount: totalCount,
+            revision: (previousMaterializationState?.revision ?? 0) + 1
+        )
+        storeMaterializationState(state, sessionKey: sessionKey)
+        logMaterializationStateChange(
+            sessionKey: sessionKey,
+            from: previousMaterializationState,
+            to: state,
+            reason: "advanceMaterialization bounded event=\(describeMaterializationEvent(event))"
+        )
+        return MaterializationPlan(
+            stage: stage,
+            windowBounds: nextBounds,
+            unreadOutsideTailWindow: unreadOutsideWindow,
+            revision: state.revision
+        )
     }
 
     private func tailWindowBounds(totalCount: Int, count: Int) -> WindowBounds {
@@ -2336,51 +2253,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         return WindowBounds(lowerBound: lower, upperBound: totalCount)
     }
 
-    private func isUnreadOutsideTailWindow(firstUnreadMessageId: String?,
-                                           bounds: WindowBounds,
-                                           fullMessageIds: [String]) -> Bool
-    {
-        guard let firstUnreadMessageId else { return false }
-        guard let index = fullMessageIds.firstIndex(of: firstUnreadMessageId) else {
-            return true
-        }
-        return index < bounds.lowerBound || index >= bounds.upperBound
+    private func centeredWindowBounds(targetIndex: Int, totalCount: Int, count: Int) -> WindowBounds {
+        let window = BoundedMessageWindow.containing(
+            targetIndex: targetIndex,
+            totalCount: totalCount,
+            limit: count
+        )
+        return WindowBounds(lowerBound: window.lowerBound, upperBound: window.upperBound)
     }
 
-    private func stagedMessageIDs(messages: [Message], bounds: WindowBounds) -> [String] {
-        guard !messages.isEmpty else { return [] }
-        let lower = max(0, min(bounds.lowerBound, messages.count))
-        let upper = max(lower, min(bounds.upperBound, messages.count))
-        guard lower < upper else { return [] }
-        return messages[lower ..< upper].map(\.id)
-    }
-
-    private func scheduleTailToFullPromotionIfNeeded(sessionKey: String) {
-        // Promotion is queued on next runloop turn so tail stage can render first.
-        logScrollRestore("materializationPromotion.schedule sessionKey=\(sessionKey)")
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            let sessionMatches = (self.channelOverride ?? self.viewModel?.engineActiveSessionKey) == sessionKey
-            guard self.isActiveSession, sessionMatches else { return }
-            self.logScrollRestore("materializationPromotion.execute sessionKey=\(sessionKey)")
-            let fullMessages = self.viewModel?.messages(for: sessionKey) ?? []
-            let fullMessageIds = fullMessages.map(\.id)
-
-            let plan = self.enqueueMaterializationEvent(
-                sessionKey: sessionKey,
-                event: .tailRendered(
-                    totalCount: fullMessages.count,
-                    firstUnreadMessageId: self.firstUnreadMessageId,
-                    fullMessageIds: fullMessageIds
-                )
-            )
-            guard plan.isTailToFullExpansionApply else { return }
-            self.logScrollRestore(
-                "materializationPromotion.apply sessionKey=\(sessionKey) stage=\(plan.stage.rawValue) bounds=\(plan.windowBounds.lowerBound)..<\(plan.windowBounds.upperBound)"
-            )
-            self.runMaterializationRefreshPass()
-        }
-    }
 
     private func runMaterializationRefreshPass() {
         guard let viewModel else { return }
@@ -2417,6 +2298,158 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             isDark: currentIsDark,
             allowsTransparentWindowBackground: allowsTransparentWindowBackground
         )
+    }
+
+    private enum MaterializationShiftDirection: Equatable {
+        case older
+        case newer
+    }
+
+    @discardableResult
+    private func shiftMaterializationWindowIfNeeded(sessionKey: String) -> Bool {
+        guard !collectionView.isDragging,
+              !collectionView.isTracking,
+              !collectionView.isDecelerating,
+              let state = materializationStateBySessionKey[sessionKey],
+              state.logicalTotalCount > 0,
+              state.stage == .tail
+        else { return false }
+
+        collectionView.layoutIfNeeded()
+        let minY = -collectionView.contentInset.top
+        let maxY = max(
+            minY,
+            collectionView.contentSize.height - collectionView.bounds.height + collectionView.contentInset.bottom
+        )
+        let direction: MaterializationShiftDirection?
+        if collectionView.contentOffset.y <= minY + 1, state.windowBounds.lowerBound > 0 {
+            direction = .older
+        } else if collectionView.contentOffset.y >= maxY - 1,
+                  state.windowBounds.upperBound < state.logicalTotalCount
+        {
+            direction = .newer
+        } else {
+            direction = nil
+        }
+        guard let direction else { return false }
+
+        let windowCount = Self.stagedMaterializationTailWindowCount(
+            isShowingOnlyUserMessages: readState(for: sessionKey).isShowingOnlyUserMessages
+        )
+        let overlapShift = max(1, windowCount / 2)
+        let lower: Int
+        switch direction {
+        case .older:
+            lower = max(0, state.windowBounds.lowerBound - overlapShift)
+        case .newer:
+            lower = min(
+                max(0, state.logicalTotalCount - windowCount),
+                state.windowBounds.lowerBound + overlapShift
+            )
+        }
+        let bounds = WindowBounds(
+            lowerBound: lower,
+            upperBound: min(state.logicalTotalCount, lower + windowCount)
+        )
+        guard bounds.lowerBound != state.windowBounds.lowerBound else { return false }
+
+        pendingMaterializationViewportAnchor = captureBubbleSizingV2ViewportAnchor()
+        pendingMaterializationRefreshSuppressesActivationCompletion = true
+        _ = enqueueMaterializationEvent(
+            sessionKey: sessionKey,
+            event: .shifted(windowBounds: bounds, totalCount: state.logicalTotalCount)
+        )
+        StreamSwitchTiming.log(
+            "materialization_window_shift direction=\(direction == .older ? "older" : "newer") bounds=\(bounds.lowerBound)..<\(bounds.upperBound)",
+            sessionKey: sessionKey
+        )
+        runMaterializationRefreshPass()
+        return true
+    }
+
+    @discardableResult
+    private func materializeWindowContainingMessage(sessionKey: String, messageId: String) -> Bool {
+        guard let viewModel,
+              let key = activeMaterializationProjectionKeyBySessionKey[sessionKey],
+              let transcriptProjection = viewModel.messageProjection(
+                  for: sessionKey,
+                  showOnlyUserMessages: false,
+                  searchQuery: ""
+              ),
+              transcriptProjection.containsTranscriptMessage(id: messageId)
+        else { return false }
+
+        guard let projection = viewModel.messageProjection(
+            for: sessionKey,
+            showOnlyUserMessages: key.base == .userOnly,
+            searchQuery: key.searchQuery
+        ) else {
+            return true
+        }
+        guard let targetIndex = projection.projectedIndex(of: messageId) else {
+            if !key.searchQuery.isEmpty {
+                onStreamSearchQueryChanged?(sessionKey, "")
+                pendingShowOnlyUserMessagesRevealTargetBySessionKey[sessionKey] = messageId
+                if key.base == .userOnly,
+                   let transcriptIndex = transcriptProjection.projectedIndex(of: messageId),
+                   let message = transcriptProjection.message(at: transcriptIndex),
+                   message.role != .user
+                {
+                    setShowOnlyUserMessagesMode(false, revealMessageId: message.id)
+                }
+                return true
+            }
+            if key.base == .userOnly,
+               let message = transcriptProjection.message(
+                   at: transcriptProjection.projectedIndex(of: messageId) ?? -1
+               )
+            {
+                setShowOnlyUserMessagesMode(false, revealMessageId: message.id)
+                return true
+            }
+            return false
+        }
+        guard let state = materializationStateBySessionKey[sessionKey],
+              !(state.windowBounds.lowerBound ..< state.windowBounds.upperBound).contains(targetIndex)
+        else { return false }
+
+        let windowCount = Self.stagedMaterializationTailWindowCount(
+            isShowingOnlyUserMessages: key.base == .userOnly
+        )
+        let bounds = centeredWindowBounds(
+            targetIndex: targetIndex,
+            totalCount: projection.count,
+            count: windowCount
+        )
+        pendingMaterializationViewportAnchor = captureBubbleSizingV2ViewportAnchor()
+        pendingMaterializationRefreshSuppressesActivationCompletion = true
+        _ = enqueueMaterializationEvent(
+            sessionKey: sessionKey,
+            event: .shifted(windowBounds: bounds, totalCount: projection.count)
+        )
+        runMaterializationRefreshPass()
+        return true
+    }
+
+    @discardableResult
+    private func materializeProjectionEdge(sessionKey: String, tail: Bool) -> Bool {
+        guard let state = materializationStateBySessionKey[sessionKey], state.logicalTotalCount > 0 else {
+            return false
+        }
+        let windowCount = Self.stagedMaterializationTailWindowCount(
+            isShowingOnlyUserMessages: readState(for: sessionKey).isShowingOnlyUserMessages
+        )
+        let bounds = tail
+            ? tailWindowBounds(totalCount: state.logicalTotalCount, count: windowCount)
+            : WindowBounds(lowerBound: 0, upperBound: min(windowCount, state.logicalTotalCount))
+        guard bounds.lowerBound != state.windowBounds.lowerBound else { return false }
+        pendingMaterializationRefreshSuppressesActivationCompletion = true
+        _ = enqueueMaterializationEvent(
+            sessionKey: sessionKey,
+            event: .shifted(windowBounds: bounds, totalCount: state.logicalTotalCount)
+        )
+        runMaterializationRefreshPass()
+        return true
     }
 
     private func drainQueuedUpdateIfPossible() {
@@ -2765,14 +2798,18 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             ? captureStreamSearchViewportAnchor()
             : nil
 
-        // Use session override if provided, otherwise use active session messages.
-        let messages = sessionKey.map { viewModel.messages(for: $0) } ?? viewModel.messages
         let isShowingOnlyUserMessages = readState(for: effectiveSessionKey).isShowingOnlyUserMessages
+        guard let transcriptProjection = viewModel.messageProjection(
+            for: effectiveSessionKey,
+            showOnlyUserMessages: false,
+            searchQuery: ""
+        ) else { return }
         let messageSetIdentity = MessageSetIdentity(
             sessionKey: effectiveSessionKey,
-            messageCount: messages.count,
-            lastMessageId: messages.last?.id,
+            messageCount: transcriptProjection.count,
+            lastMessageId: transcriptProjection.lastMessageId,
             messageListRevision: viewModel.messageListRevision(for: effectiveSessionKey),
+            messageProjectionPublicationSequence: viewModel.messageProjectionPublicationSequence,
             isShowingOnlyUserMessages: isShowingOnlyUserMessages,
             streamSearchQuery: streamSearchQuery,
             firstUnreadMessageId: firstUnreadMessageId,
@@ -2789,7 +2826,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             allowsTransparentWindowBackground: allowsTransparentWindowBackground,
             isDark: isDark
         )
-        if !needsFullLayout, lastAppliedMessageSetIdentity == messageSetIdentity {
+        if !needsFullLayout,
+           lastAppliedMessageSetIdentity == messageSetIdentity,
+           lastAppliedMaterializationRevisionBySessionKey[effectiveSessionKey]
+               == materializationStateBySessionKey[effectiveSessionKey]?.revision
+        {
             StreamSwitchTiming.log("messageFlow_update_fast_path", sessionKey: effectiveSessionKey)
             if isActiveSession {
                 viewModel.markEngineActivationRenderedIfNeeded(for: effectiveSessionKey)
@@ -2797,57 +2838,85 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             return
         }
 
-        let fullMessageIds = messages.map(\.id)
-        let appendedMessageIDs = Self.appendedMessageIDs(previousLastMessageId: previousLastMessageId, messageIDs: fullMessageIds)
-        let messageCount = messages.count
-        if Set(fullMessageIds).count != messageCount {
-            logger.info("diffing duplicate ids in viewModel.messages count=\(messageCount, privacy: .public)")
+        guard let projection = viewModel.messageProjection(
+            for: effectiveSessionKey,
+            showOnlyUserMessages: isShowingOnlyUserMessages,
+            searchQuery: streamSearchQuery
+        ) else {
+            StreamSwitchTiming.log("materialization_projection_pending", sessionKey: effectiveSessionKey)
+            return
         }
-        messagesById = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
-        let newFingerprints = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, fingerprint(for: $0)) })
-        let removedIds = Set(fingerprints.keys).subtracting(newFingerprints.keys)
-        let removedPlan = invalidateFor(reason: .messagesRemoved(Array(removedIds)))
-        executeInvalidationPlan(removedPlan)
-        expireRegisteredMessageLoadCallbacks(for: effectiveSessionKey, messageIds: removedIds)
+
+        let appendedMessageIDs = previousEffectiveSessionKey == effectiveSessionKey
+            ? transcriptProjection.messageIds(after: previousLastMessageId)
+            : []
+        let messageCount = transcriptProjection.count
 
         StreamSwitchTiming.log("snapshot_build_start", sessionKey: effectiveSessionKey)
-        // WHY revisits skip tail stage: first-visit latency is the bottleneck.
-        // Returning to a visited stream should avoid staged complexity and show full history directly.
-        let isFirstActivationForSession = materializationStateBySessionKey[effectiveSessionKey] == nil
-        withBoundSessionKey(effectiveSessionKey) {
-            if restorePhase == .pendingTail, !isFirstActivationForSession {
-                restorePhase = .pendingFullConfirmation
-            }
+        let projectionKey = MaterializationProjectionKey(
+            base: isShowingOnlyUserMessages ? .userOnly : .transcript,
+            searchQuery: streamSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        activateMaterializationProjection(sessionKey: effectiveSessionKey, key: projectionKey)
+        let previousMaterializationState = materializationStateBySessionKey[effectiveSessionKey]
+        let followsProjectionTail = previousMaterializationState == nil
+            || previousMaterializationState?.windowBounds.upperBound == previousMaterializationState?.logicalTotalCount
+        let pendingRevealTargetIndex = pendingShowOnlyUserMessagesRevealTargetBySessionKey[effectiveSessionKey]
+            .flatMap { projection.projectedIndex(of: $0) }
+        let persistedLocation = readState(for: effectiveSessionKey).pendingScrollRestoreState
+        let persistedBase = projectionKey.base == .userOnly ? "userOnly" : "transcript"
+        let persistedLocationMatchesProjection = persistedLocation?.projectionBase == persistedBase
+            && (persistedLocation?.searchQuery ?? "") == projectionKey.searchQuery
+        let materializationEvent: MaterializationEvent
+        if let pendingRevealTargetIndex {
+            pendingMaterializationRefreshSuppressesActivationCompletion = true
+            let windowCount = Self.stagedMaterializationTailWindowCount(
+                isShowingOnlyUserMessages: isShowingOnlyUserMessages
+            )
+            materializationEvent = .shifted(
+                windowBounds: centeredWindowBounds(
+                    targetIndex: pendingRevealTargetIndex,
+                    totalCount: projection.count,
+                    count: windowCount
+                ),
+                totalCount: projection.count
+            )
+        } else if previousMaterializationState == nil,
+                  persistedLocationMatchesProjection,
+                  let persistedLowerBound = persistedLocation?.projectionLowerBound
+        {
+            let windowCount = Self.stagedMaterializationTailWindowCount(
+                isShowingOnlyUserMessages: isShowingOnlyUserMessages
+            )
+            materializationEvent = .shifted(
+                windowBounds: WindowBounds(
+                    lowerBound: persistedLowerBound,
+                    upperBound: min(projection.count, persistedLowerBound + windowCount)
+                ),
+                totalCount: projection.count
+            )
+        } else {
+            materializationEvent = .messagesUpdated(
+                totalCount: projection.count,
+                firstUnreadProjectedIndex: firstUnreadMessageId.flatMap { projection.projectedIndex(of: $0) },
+                followsProjectionTail: followsProjectionTail
+            )
         }
         let materializationPlan = enqueueMaterializationEvent(
             sessionKey: effectiveSessionKey,
-            event: .messagesUpdated(
-                totalCount: messageCount,
-                firstUnreadMessageId: firstUnreadMessageId,
-                fullMessageIds: fullMessageIds,
-                allowTailStage: isFirstActivationForSession
-            )
+            event: materializationEvent
         )
-        let hasSearchQuery = !streamSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let materializedMessages: [Message]
-        if hasSearchQuery {
-            materializedMessages = messages
-        } else {
-            switch materializationPlan.stage {
-            case .tail:
-                let lower = max(0, min(materializationPlan.windowBounds.lowerBound, messages.count))
-                let upper = max(lower, min(materializationPlan.windowBounds.upperBound, messages.count))
-                materializedMessages = Array(messages[lower ..< upper])
-            case .full:
-                materializedMessages = messages
-            }
-        }
-        let collapsedVisibleMessages = ShowOnlyUserMessagesChatCollapse.visibleMessages(
-            from: materializedMessages,
-            isCollapsed: isShowingOnlyUserMessages
+        let materializedMessages = projection.messages(
+            in: materializationPlan.windowBounds.lowerBound ..< materializationPlan.windowBounds.upperBound
         )
-        let snapshotMessages = StreamMessageSearch.filteredMessages(from: collapsedVisibleMessages, query: streamSearchQuery)
-        lastMessages = messages
+        messagesById = Dictionary(uniqueKeysWithValues: materializedMessages.map { ($0.id, $0) })
+        let newFingerprints = Dictionary(
+            uniqueKeysWithValues: materializedMessages.map { ($0.id, fingerprint(for: $0)) }
+        )
+        let isFirstActivationForSession = previousMaterializationState == nil
+        let snapshotMessages = materializedMessages
+        lastMessages = materializedMessages
+        activeWindowReachesProjectionTail = materializationPlan.windowBounds.upperBound == projection.count
         let effectiveStream = viewModel.streamType(for: effectiveSessionKey)
         lastEffectiveStream = effectiveStream
         webBubbleCoordinator.currentStream = effectiveStream
@@ -2889,14 +2958,23 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         } else {
             snapshot.appendItems(snapshotItemIds)
         }
-        if SessionMetadataFooterCell.shouldAppendFooter(after: fullMessageIds, status: sessionStatus) {
+        if materializationPlan.windowBounds.upperBound == projection.count,
+           SessionMetadataFooterCell.shouldAppendFooter(after: snapshotMessageIds, status: sessionStatus)
+        {
             snapshot.appendItems([SessionMetadataFooterCell.itemId])
         }
         StreamSwitchTiming.log("snapshot_build_end", sessionKey: effectiveSessionKey)
+        assert(
+            snapshot.numberOfItems <= Self.maximumBoundedSnapshotItemCount(
+                messageWindowCount: Self.stagedMaterializationTailWindowCount(
+                    isShowingOnlyUserMessages: isShowingOnlyUserMessages
+                )
+            )
+        )
 
         let newItemIds = Set(snapshot.itemIdentifiers)
         let insertedIds = newItemIds.subtracting(oldItemIds)
-        let newestMessageId = messages.last?.id
+        let newestMessageId = transcriptProjection.lastMessageId
         let morphTargetMessageId = viewModel.typingIndicatorMorphTargetMessageId(in: effectiveSessionKey)
         let shouldMorph = TypingIndicatorMorph.shouldMorph(
             wasShowingTypingIndicator: wasShowingTypingIndicatorBeforeUpdate,
@@ -2908,7 +2986,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             : ShowOnlyUserMessagesChatCollapse.animationDuration
         let shouldApplyTypingMorph = shouldMorph && showOnlyUserMessagesAnimationDuration == nil
         if let morphTargetMessageId,
-           messages.contains(where: { $0.id == morphTargetMessageId }) {
+           transcriptProjection.containsTranscriptMessage(id: morphTargetMessageId) {
             viewModel.consumeTypingIndicatorMorphTargetMessageId(morphTargetMessageId, in: effectiveSessionKey)
         }
 
@@ -2925,7 +3003,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
         let materializedIdSet = Set(snapshotMessageIds)
         let changedIds = (needsFullLayout
-            ? fullMessageIds
+            ? snapshotMessageIds
             : newFingerprints.compactMap { id, fingerprint in
                 fingerprints[id] == fingerprint ? nil : id
             }).filter { materializedIdSet.contains($0) }
@@ -2961,6 +3039,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             && !shouldApplyTypingMorph
 
         let revealTargetMessageId = pendingShowOnlyUserMessagesRevealTargetBySessionKey.removeValue(forKey: effectiveSessionKey)
+        let materializationViewportAnchor = pendingMaterializationViewportAnchor
+        pendingMaterializationViewportAnchor = nil
+        let suppressesActivationCompletion = pendingMaterializationRefreshSuppressesActivationCompletion
+        pendingMaterializationRefreshSuppressesActivationCompletion = false
+        let materializationPostApplyAction = pendingMaterializationPostApplyAction
+        pendingMaterializationPostApplyAction = nil
         let afterSnapshotApplied: (() -> Void) = { [weak self] in
             guard let self else { return }
             guard self.callbackSessionKey() == effectiveSessionKey else { return }
@@ -2981,10 +3065,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 stage: materializationPlan.stage,
                 snapshotMessageIds: snapshotMessageIds
             )
-            if materializationPlan.scheduleTailToFullPromotion {
-                self.logScrollRestore("afterSnapshotApplied.tailToFullPromotion sessionKey=\(effectiveSessionKey)")
-                self.scheduleTailToFullPromotionIfNeeded(sessionKey: effectiveSessionKey)
-            }
             if shouldAutoScrollToBottomAfterApply,
                Self.shouldScheduleAutomatedBottomScroll(hasAuthoritativeRestoreTarget: hasAuthoritativeRestoreTarget)
             {
@@ -3002,7 +3082,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             // Stream-switch engine activation completion is defined as:
             // first active-page snapshot materialization after engineActiveSessionKey commit.
             // This is the point where ChatView can safely clear the spinner gate.
-            if self.isActiveSession {
+            if self.isActiveSession, !suppressesActivationCompletion {
                 viewModel.markEngineActivationRenderedIfNeeded(for: effectiveSessionKey)
             }
             self.updateVisibleFooterAlpha()
@@ -3011,13 +3091,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 self.scrollToMessageCentered(messageId: revealTargetMessageId, animated: true)
                 self.requestFlashMessage(messageId: revealTargetMessageId, isUnreadTap: false)
             }
+            materializationPostApplyAction?()
         }
-        // Spec requires explicit contentOffset compensation for tail->full prepend.
-        // This anchor path captures (messageId, oldFrameMinY, oldContentOffsetY), then applies:
-        // contentOffset.y += (newFrameMinY - oldFrameMinY), clamped to bounds, with no animated scroll.
-        let expansionAnchor = materializationPlan.isTailToFullExpansionApply
-            ? captureBubbleSizingV2ViewportAnchor()
-            : nil
+        let expansionAnchor = materializationViewportAnchor
 
         if shouldApplyTypingMorph {
             applySnapshotWithTypingMorphIfPossible(
@@ -3053,8 +3129,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         logger.info(
             "diffing apply snapshot count=\(messageCount, privacy: .public) changed=\(changedIds.count, privacy: .public) needsLayout=\(needsFullLayout, privacy: .public) morph=\(shouldMorph, privacy: .public)"
         )
-        fingerprints = newFingerprints
+        fingerprints.merge(newFingerprints) { _, current in current }
         lastAppliedMessageSetIdentity = messageSetIdentity
+        lastAppliedMaterializationRevisionBySessionKey[effectiveSessionKey] = materializationPlan.revision
 
         if lastMessageId != newestMessageId {
             lastMessageId = newestMessageId
@@ -3599,6 +3676,16 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if didCrossAndClearFirstUnreadId == messageId { return }
         guard let indexPath = dataSource.indexPath(for: messageId) else {
             guard let sessionKey = callbackSessionKey() else { return }
+            if viewModel?.messageProjection(
+                for: sessionKey,
+                showOnlyUserMessages: false,
+                searchQuery: ""
+            )?.containsTranscriptMessage(id: messageId) == true {
+                registerOnMessageLoad(sessionKey: sessionKey, messageId: messageId) { [weak self] in
+                    self?.checkFirstUnreadCrossingIfNeeded(sessionKey: sessionKey)
+                }
+                return
+            }
             let materializationState = materializationStateBySessionKey[sessionKey]
             if materializationState?.stage == .tail,
                materializationState?.unreadOutsideTailWindow == true
@@ -3713,8 +3800,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             return
         }
 
-        let allowTailStage = materializationStateBySessionKey[incomingSessionKey] == nil
-        prepareIncomingStateOnSwitch(sessionKey: incomingSessionKey, allowTailStage: allowTailStage)
+        prepareIncomingStateOnSwitch(sessionKey: incomingSessionKey, allowTailStage: true)
         mutateState(for: incomingSessionKey) { state in
             state.restoreGeneration &+= 1
             state.restoreConfirmationRetries = 0
@@ -3730,10 +3816,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     private func persistScrollSnapshot(_ snapshot: ScrollSnapshot, for persistenceKey: String) {
+        let projectionKey = activeMaterializationProjectionKeyBySessionKey[persistenceKey]
+        let materializationState = materializationStateBySessionKey[persistenceKey]
         let state = PersistedScrollState(
             atBottom: snapshot.atBottom,
             distanceFromBottom: Double(snapshot.distanceFromBottom),
-            savedAtEpochSeconds: snapshot.timestamp
+            savedAtEpochSeconds: snapshot.timestamp,
+            projectionBase: projectionKey.map { $0.base == .userOnly ? "userOnly" : "transcript" },
+            searchQuery: projectionKey?.searchQuery,
+            projectionLowerBound: materializationState?.windowBounds.lowerBound
         )
         do {
             let data = try JSONEncoder().encode(state)
@@ -3986,24 +4077,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             return abs(actualDistance - desiredDistance) <= Self.atBottomThreshold
         }()
 
-        if restoreConfirmed, token.stage == .tail {
-            let previousRestorePhase = readState(for: token.sessionKey).restorePhase
-            mutateState(for: token.sessionKey) { state in
-                state.restorePhase = .pendingFullConfirmation
-                state.restoreConfirmationRetries = 0
-            }
-            let newRestorePhase = readState(for: token.sessionKey).restorePhase
-            if previousRestorePhase != newRestorePhase {
-                logRestorePhaseChange(
-                    sessionKey: token.sessionKey,
-                    from: previousRestorePhase,
-                    to: newRestorePhase,
-                    reason: "attemptRestoreScrollIfNeeded tailConfirmedAwaitFull"
-                )
-            }
-            return
-        }
-
         if restoreConfirmed {
             let unread = runtimeState.unreadCount
             let previousRestorePhase = runtimeState.restorePhase
@@ -4041,28 +4114,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             return
         }
 
-        if token.stage == .tail {
-            let previousRestorePhase = readState(for: token.sessionKey).restorePhase
-            mutateState(for: token.sessionKey) { state in
-                state.restorePhase = .pendingFullConfirmation
-            }
-            let newRestorePhase = readState(for: token.sessionKey).restorePhase
-            if previousRestorePhase != newRestorePhase {
-                logRestorePhaseChange(
-                    sessionKey: token.sessionKey,
-                    from: previousRestorePhase,
-                    to: newRestorePhase,
-                    reason: "attemptRestoreScrollIfNeeded tailNotConfirmedAwaitFull"
-                )
-            }
-            return
-        }
-
         var shouldFallbackToBottom = false
         let previousRestorePhase = readState(for: token.sessionKey).restorePhase
         let previousPendingState = readState(for: token.sessionKey).pendingScrollRestoreState
         mutateState(for: token.sessionKey) { state in
-            state.restorePhase = .pendingFullConfirmation
+            state.restorePhase = token.stage == .tail ? .pendingTail : .pendingFullConfirmation
             state.restoreConfirmationRetries += 1
             shouldFallbackToBottom = state.restoreConfirmationRetries >= Self.restoreMaxConfirmationRetries
             if shouldFallbackToBottom {
@@ -5664,6 +5720,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     func scrollToBottom(animated: Bool) {
+        if let sessionKey = callbackSessionKey() {
+            pendingMaterializationPostApplyAction = { [weak self] in
+                self?.scrollToBottom(animated: animated)
+            }
+            if materializeProjectionEdge(sessionKey: sessionKey, tail: true) {
+                return
+            }
+            pendingMaterializationPostApplyAction = nil
+        }
         let lastMessageAnchorExists = lastMessageId.flatMap { dataSource.indexPath(for: $0) } != nil
         collectionView.layoutIfNeeded()
         let contentInset = collectionView.contentInset
@@ -5695,6 +5760,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     func scrollToTop(animated: Bool) {
+        if let sessionKey = callbackSessionKey() {
+            pendingMaterializationPostApplyAction = { [weak self] in
+                self?.scrollToTop(animated: animated)
+            }
+            if materializeProjectionEdge(sessionKey: sessionKey, tail: false) {
+                return
+            }
+            pendingMaterializationPostApplyAction = nil
+        }
         collectionView.layoutIfNeeded()
         let minY = -collectionView.contentInset.top
         if abs(collectionView.contentOffset.y - minY) <= 0.5 {
@@ -5718,7 +5792,18 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let delta = direction == .down ? pageIncrement : -pageIncrement
         let targetY = collectionView.contentOffset.y + delta
         let clampedY = max(minY, min(targetY, maxY))
-        guard abs(collectionView.contentOffset.y - clampedY) > 0.5 else { return }
+        guard abs(collectionView.contentOffset.y - clampedY) > 0.5 else {
+            if let sessionKey = callbackSessionKey() {
+                pendingMaterializationPostApplyAction = { [weak self] in
+                    self?.scrollByPage(direction: direction, animated: animated)
+                }
+                if shiftMaterializationWindowIfNeeded(sessionKey: sessionKey) {
+                    return
+                }
+                pendingMaterializationPostApplyAction = nil
+            }
+            return
+        }
 
         logScrollCall(
             "scrollByPage",
@@ -5744,7 +5829,18 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
         let targetY = collectionView.contentOffset.y - deltaY
         let clampedY = max(minY, min(targetY, maxY))
-        guard abs(collectionView.contentOffset.y - clampedY) > 0.5 else { return }
+        guard abs(collectionView.contentOffset.y - clampedY) > 0.5 else {
+            if let sessionKey = callbackSessionKey() {
+                pendingMaterializationPostApplyAction = { [weak self] in
+                    self?.scrollByGestureDelta(deltaY)
+                }
+                if shiftMaterializationWindowIfNeeded(sessionKey: sessionKey) {
+                    return
+                }
+                pendingMaterializationPostApplyAction = nil
+            }
+            return
+        }
 
         logScrollCall(
             "scrollByGestureDelta",
@@ -5781,6 +5877,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     func scrollToMessageCentered(messageId: String, animated: Bool) {
         guard let sessionKey = callbackSessionKey() else { return }
         guard let indexPath = dataSource.indexPath(for: messageId) else {
+            _ = materializeWindowContainingMessage(sessionKey: sessionKey, messageId: messageId)
             registerOnMessageLoad(sessionKey: sessionKey, messageId: messageId) { [weak self] in
                 self?.scrollToMessageCentered(messageId: messageId, animated: animated)
             }
@@ -5810,10 +5907,17 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     func scrollToMessageCenteredIfMaterialized(messageId: String, animated: Bool) -> Bool {
-        guard let sessionKey = callbackSessionKey(),
-              let indexPath = dataSource.indexPath(for: messageId)
-        else {
+        guard let sessionKey = callbackSessionKey() else {
             return false
+        }
+        guard let indexPath = dataSource.indexPath(for: messageId) else {
+            guard materializeWindowContainingMessage(sessionKey: sessionKey, messageId: messageId) else {
+                return false
+            }
+            registerOnMessageLoad(sessionKey: sessionKey, messageId: messageId) { [weak self] in
+                self?.scrollToMessageCentered(messageId: messageId, animated: animated)
+            }
+            return true
         }
         collectionView.layoutIfNeeded()
 
@@ -6431,7 +6535,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 hasAuthoritativeRestoreTarget: self.hasAuthoritativePersistedRestoreTarget(sessionKey: token.sessionKey)
             ) {
                 self.logScrollRestore(
-                    "tailToFullViewportCompensation.disqualified sessionKey=\(token.sessionKey) reason=savedRestoreTargetIsAuthoritative"
+                    "boundedWindowViewportCompensation.disqualified sessionKey=\(token.sessionKey) reason=savedRestoreTargetIsAuthoritative"
                 )
                 return
             }
@@ -6449,7 +6553,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             let targetY = max(minY, min(anchor.contentOffsetY + delta, maxY))
             guard targetY.isFinite else { return }
             self.logScrollCall(
-                "tailToFullViewportCompensation",
+                "boundedWindowViewportCompensation",
                 sessionKey: token.sessionKey,
                 currentY: self.collectionView.contentOffset.y,
                 targetY: targetY,
@@ -6532,7 +6636,17 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     private func snapshotItemsWithWebBubbles(from itemIds: [String], stream: ChatStream) -> [String] {
         var merged = itemIds
-        for item in webBubbleCoordinator.items(for: stream) {
+        let parentIds = Set(lastMessages.map(\.id))
+        let limit = Self.stagedMaterializationTailWindowCount(
+            isShowingOnlyUserMessages: callbackSessionKey().map {
+                readState(for: $0).isShowingOnlyUserMessages
+            } ?? false
+        )
+        let eligibleItems = webBubbleCoordinator.items(for: stream).filter {
+            guard let parentItemId = $0.parentItemId else { return true }
+            return parentIds.contains(parentItemId)
+        }.suffix(limit)
+        for item in eligibleItems {
             if let parentItemId = item.parentItemId,
                let parentIndex = merged.lastIndex(of: parentItemId)
             {
@@ -6565,18 +6679,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         guard !readState(for: effectiveSessionKey).isShowingOnlyUserMessages else {
             snapshot.deleteAllItems()
             snapshot.appendSections([0])
-            let collapsedVisibleMessages = ShowOnlyUserMessagesChatCollapse.visibleMessages(
-                from: materializeMessagesForActiveStage(
-                    allMessages: lastMessages,
-                    sessionKey: effectiveSessionKey
-                ),
-                isCollapsed: true
-            )
-            snapshot.appendItems(StreamMessageSearch.filteredMessages(
-                from: collapsedVisibleMessages,
-                query: streamSearchQuery
-            ).map(\.id))
-            if SessionMetadataFooterCell.shouldAppendFooter(after: lastMessages.map(\.id), status: sessionStatus) {
+            snapshot.appendItems(lastMessages.map(\.id))
+            if activeWindowReachesProjectionTail,
+               SessionMetadataFooterCell.shouldAppendFooter(after: lastMessages.map(\.id), status: sessionStatus)
+            {
                 snapshot.appendItems([SessionMetadataFooterCell.itemId])
             }
             applyDiffableSnapshot(snapshot, animatingDifferences: false) { [weak self] in
@@ -6590,13 +6696,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             }
             return
         }
-        let snapshotMessages = StreamMessageSearch.filteredMessages(
-            from: materializeMessagesForActiveStage(
-                allMessages: lastMessages,
-                sessionKey: effectiveSessionKey
-            ),
-            query: streamSearchQuery
-        )
+        let snapshotMessages = lastMessages
         let desiredItemIds = snapshotItemsWithWebBubbles(
             from: snapshotItemsWithDateSeparators(from: snapshotMessages),
             stream: stream
@@ -6613,7 +6713,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         } else {
             snapshot.appendItems(desiredItemIds)
         }
-        if SessionMetadataFooterCell.shouldAppendFooter(after: lastMessages.map(\.id), status: sessionStatus) {
+        if activeWindowReachesProjectionTail,
+           SessionMetadataFooterCell.shouldAppendFooter(after: lastMessages.map(\.id), status: sessionStatus)
+        {
             snapshot.appendItems([SessionMetadataFooterCell.itemId])
         }
         applyDiffableSnapshot(snapshot, animatingDifferences: false) { [weak self] in
@@ -6624,20 +6726,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             } else if isSearchActive {
                 self?.scheduleStreamSearchViewportAnchorRestoration(searchScrollAnchor)
             }
-        }
-    }
-
-    private func materializeMessagesForActiveStage(allMessages: [Message], sessionKey: String) -> [Message] {
-        guard let materializationState = materializationStateBySessionKey[sessionKey] else {
-            return allMessages
-        }
-        switch materializationState.stage {
-        case .tail:
-            let lower = max(0, min(materializationState.windowBounds.lowerBound, allMessages.count))
-            let upper = max(lower, min(materializationState.windowBounds.upperBound, allMessages.count))
-            return Array(allMessages[lower ..< upper])
-        case .full:
-            return allMessages
         }
     }
 

@@ -377,6 +377,7 @@ private final class InteractiveHTMLWebKit: NSObject {
 
 extension InteractiveHTMLBubbleUIKitView: WKNavigationDelegate, WKUIDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard self.webView === webView else { return }
         placeholder.stopAnimating()
 
         guard let descriptor else { return }
@@ -463,6 +464,7 @@ extension InteractiveHTMLBubbleUIKitView: WKNavigationDelegate, WKUIDelegate {
 
         webContentProcessReloadedAfterTermination = true
         isInitialLoadInProgress = true
+        heightLocked = false
         placeholder.startAnimating()
         webView.alpha = 0
         documentGeneration = UUID()

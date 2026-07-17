@@ -32,6 +32,7 @@ struct InteractiveHTMLBubbleUIKitViewTests {
         #expect(measure.contains("guard self.documentGeneration == generation else { return }"))
         #expect(measure.contains("guard !self.heightLocked else { return }"))
 
+        #expect(contents.contains("func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {\n        guard self.webView === webView else { return }"))
         #expect(contents.contains("guard activeUserContentController === userContentController else { return }"))
         #expect(contents.contains("activeUserContentController = nil"))
         #expect(contents.contains("self.attach(webView: replacement)"))
@@ -219,10 +220,13 @@ struct InteractiveHTMLBubbleUIKitViewTests {
 
         try await waitFor(timeout: .seconds(3), poll: .milliseconds(25)) {
             guard let replacement = firstWebView(in: bubble) else { return false }
-            return replacement !== webView && replacement.alpha >= 0.99
+            return replacement !== webView
+                && replacement.alpha >= 0.99
+                && heightConstraintConstant(for: replacement) > 100
         }
         let replacement = try #require(firstWebView(in: bubble))
         try await Task.sleep(forDuration: .milliseconds(150))
+        #expect(heightConstraintConstant(for: replacement) > 100)
         #expect(abs(heightConstraintConstant(for: replacement) - 320) > 0.5)
         let reloadedText = try await evaluateString(webView: replacement, js: "document.body.innerText || ''")
         #expect(reloadedText.contains("Visible Content"))

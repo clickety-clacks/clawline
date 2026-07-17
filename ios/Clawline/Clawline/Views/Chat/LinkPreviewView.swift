@@ -1199,18 +1199,28 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
             } catch(e) {}
           }
           function attach(){
-            var obs = null;
+            var resizeObserver = null;
+            var mutationObserver = null;
+            var target = document.body || document.documentElement;
+            if (!target) { return; }
             function imageLoaded(){ postHeight(); }
             document.addEventListener('load', imageLoaded, true);
             if (typeof ResizeObserver !== 'undefined') {
-              var target = document.body || document.documentElement;
-              if (!target) { return; }
-              obs = new ResizeObserver(function(){ postHeight(); });
-              obs.observe(target);
+              resizeObserver = new ResizeObserver(function(){ postHeight(); });
+              resizeObserver.observe(target);
             }
+            mutationObserver = new MutationObserver(function(){ postHeight(); });
+            mutationObserver.observe(target, {
+              subtree: true,
+              childList: true,
+              characterData: true,
+              attributes: true,
+              attributeFilter: ['src', 'srcset', 'style', 'class']
+            });
             store[handler] = {
               disconnect: function(){
-                if (obs) { obs.disconnect(); }
+                if (resizeObserver) { resizeObserver.disconnect(); }
+                mutationObserver.disconnect();
                 document.removeEventListener('load', imageLoaded, true);
               }
             };

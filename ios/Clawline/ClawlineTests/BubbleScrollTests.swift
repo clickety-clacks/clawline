@@ -2676,16 +2676,19 @@ struct BubbleScrollTests {
         host.view.addSubview(preview)
         var reportedHeights: [CGFloat] = []
         preview.onHeightChange = { reportedHeights.append(preview.reportedHeight) }
-        let url = try #require(URL(string: "https://example.com/t1377-late-growth"))
+        let url = try #require(URL(string: "https://example.com/t1377-late-growth-\(UUID().uuidString)"))
         preview.configure(url: url, maxHeight: 800)
         host.view.layoutIfNeeded()
 
         let webView = try #require(firstWebView(in: preview))
-        let loadDeadline = ContinuousClock.now + .seconds(8)
+        let loadDeadline = ContinuousClock.now + .seconds(15)
         while (webView.url == nil || webView.isLoading), ContinuousClock.now < loadDeadline {
             try await Task.sleep(for: .milliseconds(25))
         }
-        #expect(webView.url != nil && !webView.isLoading)
+        guard webView.url != nil && !webView.isLoading else {
+            Issue.record("Production preview did not finish loading before the late-JavaScript assertion.")
+            return
+        }
 
         let baselineHeight = preview.reportedHeight
         try await evaluateNoResult(
@@ -2693,22 +2696,21 @@ struct BubbleScrollTests {
             script: """
             var late = document.createElement('div');
             late.id = 't1377-late-growth';
-            for (var index = 0; index < 16; index += 1) {
-              var paragraph = document.createElement('p');
-              paragraph.textContent = 'Late production preview content ' + index;
-              late.appendChild(paragraph);
-            }
+            late.style.display = 'block';
+            late.style.height = '350px';
+            late.style.paddingTop = '350px';
+            late.textContent = 'Late production preview content';
             document.body.appendChild(late);
             0;
             """
         )
 
         let geometryDeadline = ContinuousClock.now + .seconds(3)
-        while preview.reportedHeight < baselineHeight + 200, ContinuousClock.now < geometryDeadline {
+        while preview.reportedHeight < baselineHeight + 300, ContinuousClock.now < geometryDeadline {
             try await Task.sleep(for: .milliseconds(25))
         }
 
-        #expect(preview.reportedHeight >= baselineHeight + 200)
+        #expect(preview.reportedHeight >= baselineHeight + 300)
         #expect(reportedHeights.last == preview.reportedHeight)
         #expect(reportedHeights.count <= 2)
     }

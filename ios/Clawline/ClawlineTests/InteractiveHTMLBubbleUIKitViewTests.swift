@@ -27,8 +27,14 @@ struct InteractiveHTMLBubbleUIKitViewTests {
         let measure = lines[measureStart..<measureEnd].joined(separator: "\n")
 
         #expect(measure.contains("let nonce = configureNonce"))
+        #expect(measure.contains("let generation = documentGeneration"))
         #expect(measure.contains("guard self.configureNonce == nonce, self.webView === webView else { return }"))
+        #expect(measure.contains("guard self.documentGeneration == generation else { return }"))
         #expect(measure.contains("guard !self.heightLocked else { return }"))
+
+        #expect(contents.contains("guard activeUserContentController === userContentController else { return }"))
+        #expect(contents.contains("activeUserContentController = nil"))
+        #expect(contents.contains("self.attach(webView: replacement)"))
     }
 
     @Test("Interactive bubble waits for non-zero width before loading and renders visible content")
@@ -201,21 +207,35 @@ struct InteractiveHTMLBubbleUIKitViewTests {
             Issue.record("Expected WKWebView before process termination")
             return
         }
-        let lockedHeight = heightConstraintConstant(for: webView)
-        #expect(lockedHeight > 100)
+        #expect(heightConstraintConstant(for: webView) > 100)
+
+        try await evaluateNoResult(
+            webView: webView,
+            js: "setTimeout(function(){ window.webkit.messageHandlers.clawline.postMessage({action:'_resize',height:320}); }, 100); 0"
+        )
 
         bubble.webViewWebContentProcessDidTerminate(webView)
-        #expect(firstWebView(in: bubble) === webView)
         #expect(visibleLabelText(in: bubble)?.contains("Content crashed") != true)
 
         try await waitFor(timeout: .seconds(3), poll: .milliseconds(25)) {
-            webView.alpha >= 0.99
+            guard let replacement = firstWebView(in: bubble) else { return false }
+            return replacement !== webView && replacement.alpha >= 0.99
         }
-        #expect(abs(heightConstraintConstant(for: webView) - lockedHeight) <= 0.5)
-        let reloadedText = try await evaluateString(webView: webView, js: "document.body.innerText || ''")
+        let replacement = try #require(firstWebView(in: bubble))
+        try await Task.sleep(forDuration: .milliseconds(150))
+        #expect(abs(heightConstraintConstant(for: replacement) - 320) > 0.5)
+        let reloadedText = try await evaluateString(webView: replacement, js: "document.body.innerText || ''")
         #expect(reloadedText.contains("Visible Content"))
 
-        bubble.webViewWebContentProcessDidTerminate(webView)
+        try await evaluateNoResult(
+            webView: replacement,
+            js: "window.webkit.messageHandlers.clawline.postMessage({action:'_resize',height:260}); 0"
+        )
+        try await waitFor(timeout: .seconds(1), poll: .milliseconds(25)) {
+            abs(heightConstraintConstant(for: replacement) - 260) <= 0.5
+        }
+
+        bubble.webViewWebContentProcessDidTerminate(replacement)
         #expect(firstWebView(in: bubble) == nil)
         #expect(visibleLabelText(in: bubble)?.contains("Content crashed") == true)
     }

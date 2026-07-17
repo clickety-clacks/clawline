@@ -6235,7 +6235,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private func scheduleBubbleSizingV2DeferredFlushAfterRest() {
         guard bubbleSizingV2Enabled else { return }
         guard bubbleSizingV2RemeasureDeferredUntilNearBottom else { return }
-        guard isNearBottom(extraMargin: 240) else { return }
         guard bubbleSizingV2DeferredFlushTimer == nil else { return }
         guard let token = activeSessionGenerationToken() else { return }
 

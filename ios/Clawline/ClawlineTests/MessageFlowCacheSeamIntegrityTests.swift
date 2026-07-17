@@ -212,6 +212,8 @@ struct MessageFlowCacheSeamIntegrityTests {
               let queueEnd = lines[queueStart...].firstIndex(where: { $0.contains("static func shouldQueueBubbleSizingV2AsyncRemeasure") }),
               let previewStart = lines.firstIndex(where: { $0.contains("private func handleBubbleSizingV2LinkPreviewLayout") }),
               let previewEnd = lines[previewStart...].firstIndex(where: { $0.contains("private struct BubbleSizingV2AcceptedRemeasureKey") }),
+              let retryStart = lines.firstIndex(where: { $0.contains("private func scheduleBubbleSizingV2DeferredFlushAfterRest") }),
+              let retryEnd = lines[retryStart...].firstIndex(where: { $0.contains("private func flushDeferredBubbleSizingV2RemeasureIfNeeded") }),
               let flushStart = lines.firstIndex(where: { $0.contains("private func flushBubbleSizingV2RemeasureIfPossible") }),
               let flushEnd = lines[flushStart...].firstIndex(where: { $0.contains("private func invalidateBubbleSizingV2Cache") }) else {
             Issue.record("Unable to locate the T1377 async sizing production seams.")
@@ -222,6 +224,7 @@ struct MessageFlowCacheSeamIntegrityTests {
         let deferred = lines[deferredStart..<deferredEnd].joined(separator: "\n")
         let queue = lines[queueStart..<queueEnd].joined(separator: "\n")
         let preview = lines[previewStart..<previewEnd].joined(separator: "\n")
+        let retry = lines[retryStart..<retryEnd].joined(separator: "\n")
         let flush = lines[flushStart..<flushEnd].joined(separator: "\n")
 
         #expect(handler.contains("? isBubbleSizingV2ScrollAtRest()"))
@@ -239,6 +242,10 @@ struct MessageFlowCacheSeamIntegrityTests {
         #expect(preview.contains("bubbleSizingV2AsyncPreviewHeightChanged"))
         #expect(preview.contains("previewView.currentLoadToken.uuidString):\\(Int(newHeight.rounded()))"))
         #expect(!preview.contains("isContentSettled: previewView.hasSettledHeight"))
+        #expect(!retry.contains("isNearBottom"))
+        #expect(retry.contains("Self.bubbleSizingV2RestSettleDelaySeconds - elapsedSinceLastScroll"))
+        #expect(retry.contains("self.flushDeferredBubbleSizingV2RemeasureIfNeeded()"))
+        #expect(retry.contains("self.scheduleBubbleSizingV2DeferredFlushAfterRest()"))
         #expect(contents.contains("previewHeight: preview?.reportedHeight"))
         #expect(flush.contains("liveMeasurementIds.contains(id)"))
         #expect(flush.contains("applyRequestedLayoutNow(messageId: id)"))

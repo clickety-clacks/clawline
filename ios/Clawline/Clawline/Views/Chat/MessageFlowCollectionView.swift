@@ -2867,12 +2867,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             searchQuery: streamSearchQuery
         ) else {
             StreamSwitchTiming.log("materialization_projection_pending", sessionKey: effectiveSessionKey)
-            // A changed snapshot may arrive while the render policy is frozen or the
-            // projection is still being published. Consume the activation pulse here so
-            // an offscreen/pending return cannot strand the channel-name toast.
-            if isActiveSession {
-                viewModel.markEngineActivationRenderedIfNeeded(for: effectiveSessionKey)
-            }
             return
         }
 
@@ -6525,16 +6519,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             let frame = cell.frame
             return (id, frame)
         }
-        // Prefer a fully visible anchor.  Oversized bubbles can occupy the whole
-        // viewport, so retain the most-visible intersecting message as an
-        // equivalent compensation anchor instead of deadlocking a settled shift.
+        // Settled shifts require a fully visible anchor so asynchronous preview
+        // measurement keeps its established compensation contract.
         let fullyVisible = candidates.filter {
             $0.1.minY >= visibleRect.minY + epsilon && $0.1.maxY <= visibleRect.maxY - epsilon
         }
         let anchor = fullyVisible.min(by: { $0.1.minY < $1.1.minY })
-            ?? candidates.max { lhs, rhs in
-                visibleRect.intersection(lhs.1).height < visibleRect.intersection(rhs.1).height
-            }
         guard let anchor else {
             return nil
         }

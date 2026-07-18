@@ -40,10 +40,13 @@ struct T1752HostFooterTests {
         #expect(SessionMetadataFooterCell.footerText(for: withHost, isTightbeam: false)?
             .contains("eezo") == false)
 
-        // Gate on + host absent -> nothing (no placeholder, no "unknown").
+        // Gate on + host absent -> the host contributes nothing at all: the
+        // footer is byte-identical to the with-host footer minus the host
+        // segment, so no placeholder of any kind can sneak in.
+        let gatedWithHost = try #require(SessionMetadataFooterCell.footerText(for: withHost, isTightbeam: true))
         let gatedNoHost = try #require(SessionMetadataFooterCell.footerText(for: withoutHost, isTightbeam: true))
         #expect(gatedNoHost.contains("eezo") == false)
-        #expect(gatedNoHost.lowercased().contains("unknown") == false)
+        #expect(gatedWithHost.replacingOccurrences(of: "  ·  eezo", with: "") == gatedNoHost)
     }
 
     @Test("T1752 gated host renders as a labeled footer chip in the cell")

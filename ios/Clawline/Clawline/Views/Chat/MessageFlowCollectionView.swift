@@ -3920,7 +3920,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             : scrollStateDefaultsKey(for: persistenceKey)
         guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
         do {
-            return try JSONDecoder().decode(PersistedScrollState.self, from: data)
+            let state = try JSONDecoder().decode(PersistedScrollState.self, from: data)
+            if key != preferredKey {
+                let expectedBase = projectionBase ?? "transcript"
+                let expectedQuery = (searchQuery ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard state.projectionBase == expectedBase,
+                      (state.searchQuery ?? "") == expectedQuery else { return nil }
+            }
+            return state
         } catch {
             logger.error("failed decoding scrollState key=\(key, privacy: .public) error=\(String(describing: error), privacy: .public)")
             return nil

@@ -42,6 +42,7 @@ final class WebBubbleCoordinator: WebBubbleCoordinating {
     private var itemsById: [String: WebBubbleItem] = [:]
     private var itemsInOrder: [String] = []
     private var itemIdsInOrderByStream: [ChatStream: [String]] = [:]
+    private var itemIdsByParentByStream: [ChatStream: [String: [String]]] = [:]
     private var webViewsById: [String: WKWebView] = [:]
     private var delegatesById: [String: WebBubbleWebViewDelegate] = [:]
 
@@ -63,14 +64,8 @@ final class WebBubbleCoordinator: WebBubbleCoordinating {
 
     func items(for stream: ChatStream, parentIds: Set<String>, limit: Int) -> [WebBubbleItem] {
         guard limit > 0 else { return [] }
-        // Lookup is intentionally bounded to a small active-window neighborhood;
-        // never walk an entire transcript to construct switch-time web items.
-        let scanLimit = min(itemIdsInOrderByStream[stream, default: []].count, max(limit * 4, limit))
-        return itemIdsInOrderByStream[stream, default: []].suffix(scanLimit).reversed().lazy.compactMap { [self] id in
-            guard let item = self.itemsById[id] else { return nil }
-            if let parentItemId = item.parentItemId, !parentIds.contains(parentItemId) { return nil }
-            return item
-        }.prefix(limit).reversed()
+        let ids = parentIds.flatMap { itemIdsByParentByStream[stream]?[$0] ?? [] }
+        return ids.suffix(limit).compactMap { itemsById[$0] }
     }
 
     func webBubbleItem(for id: String) -> WebBubbleItem? {
@@ -134,6 +129,9 @@ final class WebBubbleCoordinator: WebBubbleCoordinating {
         itemsById[bubbleId] = item
         itemsInOrder.append(bubbleId)
         itemIdsInOrderByStream[item.stream, default: []].append(bubbleId)
+        if let parent = item.parentItemId {
+            itemIdsByParentByStream[item.stream, default: [:]][parent, default: []].append(bubbleId)
+        }
         webViewsById[bubbleId] = popupWebView
         delegatesById[bubbleId] = delegate
 
@@ -152,8 +150,12 @@ final class WebBubbleCoordinator: WebBubbleCoordinating {
 
     func dismissWebBubble(id: String) {
         guard let webView = webViewsById[id] else {
-            let stream = itemsById[id]?.stream
+            let item = itemsById[id]
+            let stream = item?.stream
             itemsById.removeValue(forKey: id)
+            if let item, let parent = item.parentItemId {
+                itemIdsByParentByStream[stream]?[parent]?.removeAll { $0 == id }
+            }
             itemsInOrder.removeAll(where: { $0 == id })
             if let stream { itemIdsInOrderByStream[stream]?.removeAll(where: { $0 == id }) }
             onItemsChanged?()
@@ -165,9 +167,11 @@ final class WebBubbleCoordinator: WebBubbleCoordinating {
         webView.uiDelegate = nil
 
         let stream = itemsById[id]?.stream
+        let parent = itemsById[id]?.parentItemId
         webViewsById.removeValue(forKey: id)
         delegatesById.removeValue(forKey: id)
         itemsById.removeValue(forKey: id)
+        if let stream, let parent { itemIdsByParentByStream[stream]?[parent]?.removeAll { $0 == id } }
         itemsInOrder.removeAll(where: { $0 == id })
         if let stream { itemIdsInOrderByStream[stream]?.removeAll(where: { $0 == id }) }
 

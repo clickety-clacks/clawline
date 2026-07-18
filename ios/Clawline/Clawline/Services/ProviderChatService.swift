@@ -335,6 +335,24 @@ final class ProviderChatService: ChatServicing {
     }
 
     func createStream(displayName: String, idempotencyKey: String) async throws -> StreamSession {
+        try await createStream(
+            displayName: displayName,
+            idempotencyKey: idempotencyKey,
+            harness: nil,
+            model: nil,
+            host: nil,
+            archetype: nil
+        )
+    }
+
+    func createStream(
+        displayName: String,
+        idempotencyKey: String,
+        harness: String?,
+        model: String?,
+        host: String?,
+        archetype: String?
+    ) async throws -> StreamSession {
         guard let token = await resolveControlPlaneToken() else {
             throw Error.notConnected
         }
@@ -342,6 +360,10 @@ final class ProviderChatService: ChatServicing {
             return try await streamAPIClient.createStream(
                 displayName: displayName,
                 idempotencyKey: idempotencyKey,
+                harness: harness,
+                model: model,
+                host: host,
+                archetype: archetype,
                 token: token
             )
         } catch {

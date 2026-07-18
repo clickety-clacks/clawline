@@ -49,6 +49,14 @@ final class StreamAPIClient {
     private struct CreateStreamRequest: Encodable {
         let idempotencyKey: String
         let displayName: String
+        // T-B placement provisioning: optional harness/model/host/archetype ride
+        // alongside displayName/idempotencyKey. Synthesized Encodable uses
+        // encodeIfPresent for optionals, so a nil field is omitted from the body
+        // and a plain name-only create stays byte-for-byte as before.
+        let harness: String?
+        let model: String?
+        let host: String?
+        let archetype: String?
     }
 
     private struct AdoptStreamRequest: Encodable {
@@ -215,12 +223,27 @@ final class StreamAPIClient {
         )
     }
 
-    func createStream(displayName: String, idempotencyKey: String, token: String?) async throws -> StreamSession {
+    func createStream(
+        displayName: String,
+        idempotencyKey: String,
+        harness: String? = nil,
+        model: String? = nil,
+        host: String? = nil,
+        archetype: String? = nil,
+        token: String?
+    ) async throws -> StreamSession {
         let response: MutateStreamResponse = try await sendRequest(
             method: "POST",
             path: "/api/streams",
             token: token,
-            body: CreateStreamRequest(idempotencyKey: idempotencyKey, displayName: displayName)
+            body: CreateStreamRequest(
+                idempotencyKey: idempotencyKey,
+                displayName: displayName,
+                harness: harness,
+                model: model,
+                host: host,
+                archetype: archetype
+            )
         )
         return response.stream
     }

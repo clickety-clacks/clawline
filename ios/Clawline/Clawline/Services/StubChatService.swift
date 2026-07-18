@@ -200,6 +200,27 @@ final class StubChatService: ChatServicing {
     }
 
     func createStream(displayName: String, idempotencyKey: String) async throws -> StreamSession {
+        try await createStream(
+            displayName: displayName,
+            idempotencyKey: idempotencyKey,
+            harness: nil,
+            model: nil,
+            host: nil,
+            archetype: nil
+        )
+    }
+
+    func createStream(
+        displayName: String,
+        idempotencyKey: String,
+        harness: String?,
+        model: String?,
+        host: String?,
+        archetype: String?
+    ) async throws -> StreamSession {
+        // The offline stub has no gateway to place the agent on; the placement
+        // params are accepted and ignored so a name-only preview create still
+        // yields a local stream.
         let now = Date()
         let stream = StreamSession(
             sessionKey: "agent:main:clawline:preview:s_\(UUID().uuidString.prefix(8).lowercased())",

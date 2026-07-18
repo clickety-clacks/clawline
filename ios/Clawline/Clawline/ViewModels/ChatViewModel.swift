@@ -2541,36 +2541,119 @@ final class ChatViewModel {
         refreshTrackableSessions(reason: "manualRefresh")
     }
 
+    /// Outcome of a placement-aware create (T-B creation sheet). On failure the
+    /// message is the server's refusal text verbatim so the sheet can surface it
+    /// unchanged; a nil message means there was nothing to surface (empty name).
+    enum StreamCreateOutcome: Equatable {
+        case created
+        case failed(message: String?)
+    }
+
+    private enum StreamCreateResult {
+        case success
+        case emptyName
+        case failure(Swift.Error)
+    }
+
     func createStream(displayName: String) async -> Bool {
+        switch await performStreamCreate(
+            displayName: displayName,
+            harness: nil,
+            model: nil,
+            host: nil,
+            archetype: nil
+        ) {
+        case .success:
+            return true
+        case .emptyName:
+            return false
+        case .failure(let error):
+            toastManager.show(error.localizedDescription)
+            return false
+        }
+    }
+
+    /// T-B: create with optional placement provisioning. Unlike the name-only
+    /// path this returns the refusal message instead of toasting, so the
+    /// creation sheet owns presentation and shows the server's rule verbatim.
+    func createStream(
+        displayName: String,
+        harness: String?,
+        model: String?,
+        host: String?,
+        archetype: String?
+    ) async -> StreamCreateOutcome {
+        switch await performStreamCreate(
+            displayName: displayName,
+            harness: harness,
+            model: model,
+            host: host,
+            archetype: archetype
+        ) {
+        case .success:
+            return .created
+        case .emptyName:
+            return .failed(message: nil)
+        case .failure(let error):
+            return .failed(message: error.localizedDescription)
+        }
+    }
+
+    private func performStreamCreate(
+        displayName: String,
+        harness: String?,
+        model: String?,
+        host: String?,
+        archetype: String?
+    ) async -> StreamCreateResult {
         let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
+        guard !trimmed.isEmpty else { return .emptyName }
         let idempotencyKey = Self.makeIdempotencyKey()
         do {
-            let stream = try await chatService.createStream(
+            let stream = try await createStreamRequestingRetry(
                 displayName: trimmed,
-                idempotencyKey: idempotencyKey
+                idempotencyKey: idempotencyKey,
+                harness: harness,
+                model: model,
+                host: host,
+                archetype: archetype
             )
             applyStreamUpsert(stream)
             setEngineActiveSessionKey(stream.sessionKey)
-            return true
+            return .success
         } catch {
-            if shouldRetryCreateOnActiveConnection(after: error) {
-                do {
-                    try await reconnectActiveTransportForControlPlane()
-                    let stream = try await chatService.createStream(
-                        displayName: trimmed,
-                        idempotencyKey: idempotencyKey
-                    )
-                    applyStreamUpsert(stream)
-                    setEngineActiveSessionKey(stream.sessionKey)
-                    return true
-                } catch {
-                    toastManager.show(error.localizedDescription)
-                    return false
-                }
-            }
-            toastManager.show(error.localizedDescription)
-            return false
+            return .failure(error)
+        }
+    }
+
+    private func createStreamRequestingRetry(
+        displayName: String,
+        idempotencyKey: String,
+        harness: String?,
+        model: String?,
+        host: String?,
+        archetype: String?
+    ) async throws -> StreamSession {
+        do {
+            return try await chatService.createStream(
+                displayName: displayName,
+                idempotencyKey: idempotencyKey,
+                harness: harness,
+                model: model,
+                host: host,
+                archetype: archetype
+            )
+        } catch {
+            guard shouldRetryCreateOnActiveConnection(after: error) else { throw error }
+            try await reconnectActiveTransportForControlPlane()
+            return try await chatService.createStream(
+                displayName: displayName,
+                idempotencyKey: idempotencyKey,
+                harness: harness,
+                model: model,
+                host: host,
+                archetype: archetype
+            )
         }
     }
 

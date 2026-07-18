@@ -1403,6 +1403,7 @@ struct ProviderServiceTests {
             let data = #"""
             {
               "sessionKey": "agent:main:clawline:user:s_status",
+              "metadataContextGeneration": "generation-status-a",
               "display": {
                 "model": "gpt-5.6",
                 "fallbackModels": null,
@@ -1491,6 +1492,7 @@ struct ProviderServiceTests {
         let status = try await service.fetchSessionStatus(sessionKey: sessionKey)
 
         #expect(status.sessionKey == sessionKey)
+        #expect(status.metadataContextGeneration == "generation-status-a")
         #expect(status.display.provider == "openai")
         #expect(status.display.model == "gpt-5.6")
         #expect(status.display.authMode == "oauth")

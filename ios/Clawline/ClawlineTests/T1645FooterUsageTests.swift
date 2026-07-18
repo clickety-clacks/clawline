@@ -16,10 +16,11 @@ struct T1645FooterUsageTests {
         #expect(usage.windows.map(\.remainingPercent) == [64, 28])
         #expect(usage.windows.map(\.resetAt) == [1_784_003_600_000, 1_784_604_800_000])
         #expect(usage.unavailableReason == nil)
+        #expect(status.metadataContextGeneration == "generation-a")
 
-        let missingUsageStatus = try decodedStatus(usageJSON: nil)
-        #expect(missingUsageStatus.display.codexUsage?.freshness == .unavailable)
-        #expect(missingUsageStatus.display.codexUsage?.unavailableReason == .providerUnavailable)
+        let missingUsageStatus = try decodedStatus(metadataContextGeneration: nil, usageJSON: nil)
+        #expect(missingUsageStatus.display.codexUsage == nil)
+        #expect(missingUsageStatus.metadataContextGeneration == nil)
     }
 
     @Test("T1645 renders exact fresh, stale, loading, and unavailable suffixes")
@@ -40,7 +41,7 @@ struct T1645FooterUsageTests {
         #expect(SessionMetadataFooterCell.footerText(for: unavailable)?.hasSuffix("OAUTH  ·  Usage unavailable") == true)
     }
 
-    @Test("T1645 omits usage outside OAuth and makes a missing OAuth Codex contract explicit")
+    @Test("T1645 omits usage outside OAuth and against an older provider")
     func omitsUsageOutsideOAuthContract() throws {
         let apiKey = try decodedStatus(authMode: "api_key", usageJSON: freshUsageJSON)
         #expect(SessionMetadataFooterCell.footerText(for: apiKey) ==
@@ -52,7 +53,7 @@ struct T1645FooterUsageTests {
 
         let oauthWithoutUsage = try decodedStatus(usageJSON: nil)
         #expect(SessionMetadataFooterCell.footerText(for: oauthWithoutUsage) ==
-            "gpt-5.6  ·  Thinking medium  ·  Fast on  ·  OAUTH  ·  Usage unavailable")
+            "gpt-5.6  ·  Thinking medium  ·  Fast on  ·  OAUTH")
     }
 
     @Test("T1645 V7 keeps OAuth usage in its own centered row at every supported width and Dynamic Type size")
@@ -87,7 +88,7 @@ struct T1645FooterUsageTests {
                         labels.first { $0.text == SessionMetadataFooterCell.versionBuildText() }
                     )
                     let settingsButton = try #require(
-                        buttons.first { $0.accessibilityLabel == "Test menu" }
+                        buttons.first { $0.accessibilityLabel == "Settings" }
                     )
                     let primaryRow = try #require(primaryViews.first?.superview)
                     let usageRow = try #require(usageLabels.first?.superview)
@@ -107,19 +108,18 @@ struct T1645FooterUsageTests {
                     #expect(abs(usageFrame.midX - cell.bounds.midX) <= 0.5)
                     #expect(cell.bounds.insetBy(dx: SessionMetadataFooterCell.horizontalPadding, dy: 0)
                         .contains(usageFrame))
-                    #expect(usageLabels.allSatisfy { label in
-                        label.numberOfLines == 1 && label.lineBreakMode == .byClipping
+                    let usageValueLabels = expectedTexts.compactMap { text in
+                        labels.first { $0.text == text }
+                    }
+                    #expect(usageValueLabels.count == expectedTexts.count)
+                    #expect(usageValueLabels.allSatisfy { label in
+                        label.numberOfLines == 0 && label.lineBreakMode == .byWordWrapping
                     })
                     #expect(usageLabels.allSatisfy { label in
                         let frame = label.convert(label.bounds, to: cell)
-                        let requiredWidth = ceil(
-                            (label.text! as NSString).size(withAttributes: [.font: label.font]).width
-                        )
-                        let textRect = label.textRect(forBounds: label.bounds, limitedToNumberOfLines: 1)
-                        return usageFrame.contains(frame)
-                            && frame.width >= requiredWidth
-                            && ceil(textRect.width) >= requiredWidth
+                        return usageFrame.insetBy(dx: -0.5, dy: -0.5).contains(frame)
                     })
+                    #expect(usageFrame.height >= SessionMetadataFooterCell.actionRegionHeight)
                 }
             }
         }
@@ -138,7 +138,7 @@ struct T1645FooterUsageTests {
                 )
                 let settingsButton = try #require(
                     descendants(of: cell).compactMap { $0 as? UIButton }
-                        .first { $0.accessibilityLabel == "Test menu" }
+                        .first { $0.accessibilityLabel == "Settings" }
                 )
                 let versionRow = try #require(versionLabel.superview as? UIStackView)
                 let versionFrame = versionLabel.convert(versionLabel.bounds, to: cell)
@@ -152,8 +152,78 @@ struct T1645FooterUsageTests {
                 #expect(abs(groupFrame.minX - versionFrame.minX) <= 0.5)
                 #expect(abs(groupFrame.maxX - settingsFrame.maxX) <= 0.5)
                 #expect(groupFrame.width < cell.bounds.width - (SessionMetadataFooterCell.horizontalPadding * 2))
+                #expect(groupFrame.height >= SessionMetadataFooterCell.actionRegionHeight)
             }
         }
+    }
+
+    @Test("T1645 retains scoped refresh states only for the exact metadata generation")
+    func metadataAuthorityRetainsOnlyExactGeneration() throws {
+        let cached = try #require(decodedStatus(usageJSON: freshUsageJSON).display.codexUsage)
+        let loading = try #require(
+            decodedStatus(usageJSON: stateUsageJSON(freshness: "loading", reason: "null"))
+                .display.codexUsage
+        )
+        for reason in [
+            SessionStatus.Display.CodexUsage.UnavailableReason.staleExpired,
+            .resetElapsed,
+        ] {
+            let incoming = SessionStatus.Display.CodexUsage(
+                freshness: .unavailable,
+                fetchedAt: cached.fetchedAt,
+                windows: [],
+                unavailableReason: reason
+            )
+            let retained = try #require(ChatViewModel.resolvedCodexUsageForMetadataAuthority(
+                incoming: incoming,
+                incomingGeneration: "generation-a",
+                cached: cached,
+                cachedGeneration: "generation-a"
+            ))
+            #expect(retained.freshness == .stale)
+            #expect(retained.windows == cached.windows)
+            #expect(retained.unavailableReason == nil)
+        }
+
+        let retainedLoading = try #require(ChatViewModel.resolvedCodexUsageForMetadataAuthority(
+            incoming: loading,
+            incomingGeneration: "generation-a",
+            cached: cached,
+            cachedGeneration: "generation-a"
+        ))
+        #expect(retainedLoading.freshness == .stale)
+        #expect(retainedLoading.windows == cached.windows)
+    }
+
+    @Test("T1645 rejects retained usage on changed, absent, or failed binding authority")
+    func metadataAuthorityFailsClosed() throws {
+        let cached = try #require(decodedStatus(usageJSON: freshUsageJSON).display.codexUsage)
+        let bindingFailure = SessionStatus.Display.CodexUsage(
+            freshness: .unavailable,
+            fetchedAt: nil,
+            windows: [],
+            unavailableReason: .accountBindingUnavailable
+        )
+        let changed = try #require(ChatViewModel.resolvedCodexUsageForMetadataAuthority(
+            incoming: bindingFailure,
+            incomingGeneration: "generation-b",
+            cached: cached,
+            cachedGeneration: "generation-a"
+        ))
+        #expect(changed == bindingFailure)
+        let sameGenerationFailure = try #require(ChatViewModel.resolvedCodexUsageForMetadataAuthority(
+            incoming: bindingFailure,
+            incomingGeneration: "generation-a",
+            cached: cached,
+            cachedGeneration: "generation-a"
+        ))
+        #expect(sameGenerationFailure == bindingFailure)
+        #expect(ChatViewModel.resolvedCodexUsageForMetadataAuthority(
+            incoming: nil,
+            incomingGeneration: nil,
+            cached: cached,
+            cachedGeneration: "generation-a"
+        ) == nil)
     }
 
     @Test("T1645 footer preserves Dynamic Type participation without shrinking its container")
@@ -245,6 +315,7 @@ struct T1645FooterUsageTests {
     }
 
     private func decodedStatus(
+        metadataContextGeneration: String? = "generation-a",
         authMode: String = "oauth",
         model: String = "gpt-5.6",
         thinkingLevel: String = "medium",
@@ -252,9 +323,13 @@ struct T1645FooterUsageTests {
         usageJSON: String?
     ) throws -> SessionStatus {
         let usageField = usageJSON.map { ", \"codexUsage\": \($0)" } ?? ""
+        let generationField = metadataContextGeneration.map {
+            "\"metadataContextGeneration\": \"\($0)\","
+        } ?? ""
         let json = """
         {
           "sessionKey": "agent:main:clawline:user:s_t1645",
+          \(generationField)
           "display": {
             "model": "\(model)",
             "provider": "openai-codex",

@@ -175,10 +175,18 @@ nonisolated struct MessageProjectionIndex: Sendable {
             }
             self.revision = revision
         case let .replace(index, message)
-            where transcript.indices.contains(index)
-                && transcript[index].id == message.id
-                && transcript[index].role == message.role:
+            where transcript.indices.contains(index) && transcript[index].id == message.id:
+            let wasUser = transcript[index].role == .user
             transcript[index] = message
+            let isUser = message.role == .user
+            if wasUser != isUser {
+                if wasUser {
+                    userTranscriptIndices.removeAll { $0 == index }
+                } else {
+                    let insertion = userTranscriptIndices.firstIndex { $0 > index } ?? userTranscriptIndices.endIndex
+                    userTranscriptIndices.insert(index, at: insertion)
+                }
+            }
             self.revision = revision
         case let .remove(index) where messages.count == transcript.count - 1 && transcript.indices.contains(index):
             let removed = transcript[index]
@@ -187,14 +195,21 @@ nonisolated struct MessageProjectionIndex: Sendable {
             for offset in index..<transcript.count {
                 transcriptIndexByMessageId[transcript[offset].id] = offset
             }
-            userTranscriptIndices = transcript.indices.filter { transcript[$0].role == .user }
+            userTranscriptIndices = userTranscriptIndices.compactMap { value in
+                if value == index { return nil }
+                return value > index ? value - 1 : value
+            }
             self.revision = revision
         case let .insert(index, message) where messages.count == transcript.count + 1 && index <= transcript.endIndex:
             transcript.insert(message, at: index)
             for offset in index..<transcript.count {
                 transcriptIndexByMessageId[transcript[offset].id] = offset
             }
-            userTranscriptIndices = transcript.indices.filter { transcript[$0].role == .user }
+            userTranscriptIndices = userTranscriptIndices.map { $0 >= index ? $0 + 1 : $0 }
+            if message.role == .user {
+                let insertion = userTranscriptIndices.firstIndex { $0 > index } ?? userTranscriptIndices.endIndex
+                userTranscriptIndices.insert(index, at: insertion)
+            }
             self.revision = revision
         case .insert, .replace, .remove, .replaceAll:
             self = MessageProjectionIndex(messages: messages, revision: revision)

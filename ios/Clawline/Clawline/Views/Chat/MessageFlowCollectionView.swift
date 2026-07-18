@@ -6763,7 +6763,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
     static let bottomPadding: CGFloat = 4
     static let horizontalPadding: CGFloat = 12
     static let actionRegionHeight: CGFloat = 44
-    static let versionRowHeight: CGFloat = 22
+    static let versionRowHeight: CGFloat = 44
     static let searchRowHeight: CGFloat = 30
     static let footerRowSpacing: CGFloat = 4
     static let fadeRevealRange: CGFloat = topPadding + searchRowHeight + footerRowSpacing + actionRegionHeight + footerRowSpacing + versionRowHeight
@@ -7392,7 +7392,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         configuration.background.strokeWidth = 0
         button.configuration = configuration
         button.tintColor = color
-        button.accessibilityLabel = "Test menu"
+        button.accessibilityLabel = "Settings"
         button.showsMenuAsPrimaryAction = true
         button.menu = UIMenu(children: [
             UIAction(title: "Settings", image: UIImage(systemName: "gearshape")) { _ in
@@ -7667,7 +7667,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                     row: .secondary,
                     accessibilityLabel: usageAccessibilityLabel(for: window),
                     isStaticLabel: true,
-                    allowsWrapping: false
+                    allowsWrapping: true
                 )
             }
             guard usage.freshness == .stale else { return windows }
@@ -7681,7 +7681,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                     row: .secondary,
                     accessibilityLabel: staleAccessibilityLabel(fetchedAt: usage.fetchedAt),
                     isStaticLabel: true,
-                    allowsWrapping: false
+                    allowsWrapping: true
                 )
             ]
         case .loading:
@@ -7700,7 +7700,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             textColor: nil,
             row: .secondary,
             isStaticLabel: true,
-            allowsWrapping: false
+            allowsWrapping: true
         )
     }
 

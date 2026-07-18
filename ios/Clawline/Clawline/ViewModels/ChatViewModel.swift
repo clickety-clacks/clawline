@@ -4681,6 +4681,16 @@ final class ChatViewModel {
             resolvedThinkingLevel = cached.display.thinkingLevel
             resolvedReasoningLevel = cached.display.reasoningLevel
         }
+        if incoming.metadataContextGeneration != cached.metadataContextGeneration {
+            usageFollowUpFreshnessBySessionKey.removeValue(forKey: requestedSessionKey)
+            usageFollowUpCountBySessionKey.removeValue(forKey: requestedSessionKey)
+        }
+        let resolvedCodexUsage = Self.resolvedCodexUsageForMetadataAuthority(
+            incoming: incoming.display.codexUsage,
+            incomingGeneration: incoming.metadataContextGeneration,
+            cached: cached.display.codexUsage,
+            cachedGeneration: cached.metadataContextGeneration
+        )
 
         return SessionStatus(
             sessionKey: incoming.sessionKey,
@@ -4695,13 +4705,45 @@ final class ChatViewModel {
                 fastMode: incoming.display.fastMode ?? cached.display.fastMode,
                 mode: incoming.display.mode,
                 verbosity: incoming.display.verbosity,
-                codexUsage: incoming.display.codexUsage
+                codexUsage: resolvedCodexUsage
             ),
             run: incoming.run,
             context: incoming.context,
             approval: incoming.approval,
             capabilities: incoming.capabilities,
-            modelCatalog: incoming.modelCatalog ?? cached.modelCatalog
+            modelCatalog: incoming.modelCatalog ?? cached.modelCatalog,
+            metadataContextGeneration: incoming.metadataContextGeneration
+        )
+    }
+
+    static func resolvedCodexUsageForMetadataAuthority(
+        incoming: SessionStatus.Display.CodexUsage?,
+        incomingGeneration: String?,
+        cached: SessionStatus.Display.CodexUsage?,
+        cachedGeneration: String?
+    ) -> SessionStatus.Display.CodexUsage? {
+        guard let incomingGeneration,
+              !incomingGeneration.isEmpty,
+              incomingGeneration == cachedGeneration,
+              let cached,
+              cached.freshness == .fresh || cached.freshness == .stale,
+              !cached.windows.isEmpty else {
+            return incoming
+        }
+        let retainsLastKnownUsage: Bool = switch incoming?.freshness {
+        case .loading:
+            true
+        case .unavailable:
+            incoming?.unavailableReason == .staleExpired || incoming?.unavailableReason == .resetElapsed
+        case .fresh, .stale, nil:
+            false
+        }
+        guard retainsLastKnownUsage else { return incoming }
+        return .init(
+            freshness: .stale,
+            fetchedAt: cached.fetchedAt,
+            windows: cached.windows,
+            unavailableReason: nil
         )
     }
 

@@ -43,8 +43,8 @@ struct SessionMetadataFooterHitTestingTests {
         let searchFrame = searchField.convert(searchField.bounds, to: cell)
 
         #expect(SessionMetadataFooterCell.topPadding == 12)
-        #expect(SessionMetadataFooterCell.height(for: makeStatus()) == 120)
-        #expect(SessionMetadataFooterCell.fadeRevealRange == 116)
+        #expect(SessionMetadataFooterCell.height(for: makeStatus()) == 142)
+        #expect(SessionMetadataFooterCell.fadeRevealRange == 138)
         #expect(frames.allSatisfy {
             let centeredY = searchFrame.maxY
                 + SessionMetadataFooterCell.footerRowSpacing
@@ -198,7 +198,7 @@ struct SessionMetadataFooterHitTestingTests {
         let foreground = try #require(configuration.baseForegroundColor)
 
         #expect(foreground.cgColor.alpha == SessionMetadataFooterCell.textAlpha(isDark: false))
-        #expect(SessionMetadataFooterCell.fadeRevealRange == 116)
+        #expect(SessionMetadataFooterCell.fadeRevealRange == 138)
     }
 
     @Test("T1184 Spatial footer text stays white across theme states")
@@ -237,7 +237,7 @@ struct SessionMetadataFooterHitTestingTests {
         )
         let testMenuButton = try #require(
             allSubviews(in: cell).compactMap { $0 as? UIButton }
-                .first { $0.accessibilityLabel == "Test menu" }
+                .first { $0.accessibilityLabel == "Settings" }
         )
         let actions = try #require(testMenuButton.menu?.children.compactMap { $0 as? UIAction })
 
@@ -383,7 +383,7 @@ struct SessionMetadataFooterHitTestingTests {
         _ = try testMenuButton(in: cell)
 
         let disabledButtons = footerActionButtons(in: cell)
-        #expect(SessionMetadataFooterCell.height(for: nil) == 120)
+        #expect(SessionMetadataFooterCell.height(for: nil) == 142)
         #expect(SessionMetadataFooterCell.footerText(for: nil) == "Model loading  ·  Thinking loading  ·  Fast loading")
         #expect(disabledButtons.map(\.accessibilityLabel) == ["Model loading", "Thinking loading", "Fast loading"])
         #expect(disabledButtons.allSatisfy { !$0.isEnabled })
@@ -584,7 +584,7 @@ private func versionLabel(in cell: SessionMetadataFooterCell) throws -> UILabel 
 private func testMenuButton(in cell: SessionMetadataFooterCell) throws -> UIButton {
     try #require(
         allSubviews(in: cell).compactMap { $0 as? UIButton }
-            .first { $0.accessibilityLabel == "Test menu" }
+            .first { $0.accessibilityLabel == "Settings" }
     )
 }
 
@@ -681,7 +681,7 @@ private func footerButtons(in cell: SessionMetadataFooterCell) throws -> [UIButt
 private func footerActionButtons(in cell: SessionMetadataFooterCell) -> [UIButton] {
     allSubviews(in: cell)
         .compactMap { $0 as? UIButton }
-        .filter { $0.accessibilityLabel != "Test menu" }
+        .filter { $0.accessibilityLabel != "Settings" }
         .sorted {
             $0.convert($0.bounds, to: cell).minX < $1.convert($1.bounds, to: cell).minX
         }

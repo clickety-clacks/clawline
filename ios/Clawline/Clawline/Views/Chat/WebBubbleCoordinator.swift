@@ -63,7 +63,10 @@ final class WebBubbleCoordinator: WebBubbleCoordinating {
 
     func items(for stream: ChatStream, parentIds: Set<String>, limit: Int) -> [WebBubbleItem] {
         guard limit > 0 else { return [] }
-        return itemIdsInOrderByStream[stream, default: []].reversed().lazy.compactMap { [self] id in
+        // Lookup is intentionally bounded to a small active-window neighborhood;
+        // never walk an entire transcript to construct switch-time web items.
+        let scanLimit = min(itemIdsInOrderByStream[stream, default: []].count, max(limit * 4, limit))
+        return itemIdsInOrderByStream[stream, default: []].suffix(scanLimit).reversed().lazy.compactMap { [self] id in
             guard let item = self.itemsById[id] else { return nil }
             if let parentItemId = item.parentItemId, !parentIds.contains(parentItemId) { return nil }
             return item

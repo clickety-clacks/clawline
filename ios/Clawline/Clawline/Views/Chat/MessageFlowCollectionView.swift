@@ -6512,14 +6512,19 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 return nil
             }
             let frame = cell.frame
-            guard frame.minY >= visibleRect.minY + epsilon,
-                  frame.maxY <= visibleRect.maxY - epsilon
-            else {
-                return nil
-            }
             return (id, frame)
         }
-        guard let anchor = candidates.min(by: { $0.1.minY < $1.1.minY }) else {
+        // Prefer a fully visible anchor.  Oversized bubbles can occupy the whole
+        // viewport, so retain the most-visible intersecting message as an
+        // equivalent compensation anchor instead of deadlocking a settled shift.
+        let fullyVisible = candidates.filter {
+            $0.1.minY >= visibleRect.minY + epsilon && $0.1.maxY <= visibleRect.maxY - epsilon
+        }
+        let anchor = fullyVisible.min(by: { $0.1.minY < $1.1.minY })
+            ?? candidates.max { lhs, rhs in
+                visibleRect.intersection(lhs.1).height < visibleRect.intersection(rhs.1).height
+            }
+        guard let anchor else {
             return nil
         }
         return BubbleSizingV2ViewportAnchor(

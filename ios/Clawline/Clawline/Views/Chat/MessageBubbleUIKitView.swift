@@ -587,6 +587,7 @@ final class MessageBubbleUIKitContainerView: UIView {
                    truncationHeightOverride: CGFloat? = nil,
                    bubbleSizingV2: BubbleSizingV2.LayoutState? = nil,
                    showsHeader: Bool = true,
+                   showsProvenanceChrome: Bool = false,
                    paddingScale: CGFloat = 1,
                    minWidthOverride: CGFloat? = nil,
                    maxWidthOverride: CGFloat? = nil,
@@ -620,6 +621,7 @@ final class MessageBubbleUIKitContainerView: UIView {
             truncationHeightOverride: truncationHeightOverride,
             bubbleSizingV2: bubbleSizingV2,
             showsHeader: showsHeader,
+            showsProvenanceChrome: showsProvenanceChrome,
             paddingScale: paddingScale,
             minWidthOverride: minWidthOverride,
             maxWidthOverride: maxWidthOverride,
@@ -710,6 +712,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private let dynamicContentStack = UIStackView()  // Holds text + code blocks
     private let avatarView = AvatarCircleView()
     private let senderLabel = UILabel()
+    private let provenanceChipView = ProvenanceChipView()
     private let senderTimestampSpacer = UIView()
     private let timestampLabel = UILabel()
     private let replyIndicatorContainer = UIView()
@@ -764,6 +767,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private var currentSalientHighlights: SalientHighlights?
     private var currentMetrics = ChatFlowTheme.Metrics(isCompact: true)
     private var currentMessageRole: Message.Role = .assistant
+    private var provenanceChipVisible = false
     private var currentMessageDeliveryState: Message.DeliveryState = .normal
     private var currentStream: ChatStream = .personal
     private var currentSizeClass: MessageSizeClass = .short
@@ -965,8 +969,11 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         timestampLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         timestampLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
+        provenanceChipView.isHidden = true
+
         headerStack.addArrangedSubview(avatarView)
         headerStack.addArrangedSubview(senderLabel)
+        headerStack.addArrangedSubview(provenanceChipView)
         headerStack.addArrangedSubview(senderTimestampSpacer)
         headerStack.addArrangedSubview(timestampLabel)
         senderLabel.firstBaselineAnchor.constraint(equalTo: timestampLabel.firstBaselineAnchor).isActive = true
@@ -1287,6 +1294,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
                    truncationHeightOverride: CGFloat? = nil,
                    bubbleSizingV2: BubbleSizingV2.LayoutState? = nil,
                    showsHeader: Bool = true,
+                   showsProvenanceChrome: Bool = false,
                    paddingScale: CGFloat = 1,
                    minWidthOverride: CGFloat? = nil,
                    maxWidthOverride: CGFloat? = nil,
@@ -1326,6 +1334,15 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         contentPaddingScale = paddingScale
         self.useContinuousCorners = useContinuousCorners
 
+        // Provenance (spec §T-D): a `role=user` message delivered by a wake carries a
+        // recognized `sender`. When the tightbeam chrome is on, render its origin chip
+        // and strip the first-line `[from <sender>]` stamp from the body; otherwise the
+        // message renders exactly as a device-typed one.
+        let provenanceOrigin = showsProvenanceChrome ? message.provenanceOrigin : nil
+        let bodyRenderContent = provenanceOrigin != nil
+            ? MessageProvenance.strippingProvenanceStamp(from: message.content, sender: message.sender ?? "")
+            : message.content
+
         let hasLinkPreview = Self.presentationHasLinkPreview(presentation)
         let isSingleLinkPreview = Self.presentationIsSingleLinkPreview(presentation)
         let rawMaxWidth = maxWidthOverride ?? maxWidth
@@ -1343,6 +1360,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         let effectiveIsDark = isDark ?? (traitCollection.userInterfaceStyle == .dark)
         let nextDynamicContentReuseKey = dynamicContentReuseKeyForTextualBubble(
             message: message,
+            bodyRenderContent: bodyRenderContent,
             presentation: presentation,
             metrics: metrics,
             sizeClass: sizeClass,
@@ -1397,6 +1415,12 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             ? ChatFlowUIKitTheme.canceledText(isDark: effectiveIsDark).withAlphaComponent(0.78)
             : senderColor.withAlphaComponent(stream == .admin ? 1.0 : 0.7)
         senderLabel.text = message.displayName
+        applyProvenanceChip(
+            origin: provenanceOrigin,
+            senderColor: senderColor,
+            isCanceled: isCanceled,
+            isDark: effectiveIsDark
+        )
         timestampLabel.font = UIFont.clawline(.timestamp)
         timestampLabel.adjustsFontForContentSizeCategory = true
         timestampLabel.textColor = isCanceled
@@ -1458,7 +1482,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
 
         let markdownStyle = Self.markdownStyle(for: sizeClass, metrics: metrics)
         let markdownContent = UnifiedMarkdownRenderer.makeContent(
-            messageText: message.content,
+            messageText: bodyRenderContent,
             context: MarkdownMessageRenderContext(
                 role: message.role,
                 messageID: message.id,
@@ -1942,6 +1966,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
 
     private func dynamicContentReuseKeyForTextualBubble(
         message: Message,
+        bodyRenderContent: String,
         presentation: MessagePresentation,
         metrics: ChatFlowTheme.Metrics,
         sizeClass: MessageSizeClass,
@@ -1962,7 +1987,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         return DynamicContentReuseKey(
             sessionKey: message.sessionKey,
             messageId: message.id,
-            content: message.content,
+            content: bodyRenderContent,
             role: message.role,
             deliveryState: message.deliveryState,
             displayName: message.displayName,
@@ -2423,7 +2448,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
 
     func preferredWidth(maxWidth: CGFloat, minWidth: CGFloat = 120) -> CGFloat {
         let headerWidth: CGFloat = showsHeader
-            ? (32 + headerStack.spacing + senderLabel.intrinsicContentSize.width)
+            ? (32 + headerStack.spacing + headerLeadingContentWidth(fittingWidth: maxWidth))
             : 0
         let replyWidth: CGFloat = replyIndicatorContainer.isHidden
             ? 0
@@ -2831,9 +2856,49 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private func metadataNeededWidth() -> CGFloat {
         avatarView.bounds.width
             + headerStack.spacing
-            + senderLabel.intrinsicContentSize.width
+            + headerLeadingContentWidth()
             + 8
             + timestampLabel.intrinsicContentSize.width
+    }
+
+    /// Width of the leading header content — the provenance chip when it is shown,
+    /// otherwise the sender label. Used by header sizing so the chip participates in
+    /// preferred-width and timestamp-visibility math the same way the label does.
+    private func headerLeadingContentWidth(fittingWidth: CGFloat = .greatestFiniteMagnitude) -> CGFloat {
+        guard provenanceChipVisible else {
+            return senderLabel.intrinsicContentSize.width
+        }
+        return provenanceChipView.systemLayoutSizeFitting(
+            CGSize(width: fittingWidth, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .fittingSizeLevel,
+            verticalFittingPriority: .fittingSizeLevel
+        ).width
+    }
+
+    /// Show the provenance chip in place of the "You" sender label for a wake-delivered
+    /// message, or restore the plain label when there is no recognized origin.
+    private func applyProvenanceChip(
+        origin: MessageProvenanceOrigin?,
+        senderColor: UIColor,
+        isCanceled: Bool,
+        isDark: Bool
+    ) {
+        guard let origin else {
+            provenanceChipVisible = false
+            provenanceChipView.isHidden = true
+            senderLabel.isHidden = false
+            return
+        }
+        let chipText = origin.chipGlyph.map { "\($0) \(origin.chipLabel)" } ?? origin.chipLabel
+        let baseColor = isCanceled ? ChatFlowUIKitTheme.canceledText(isDark: isDark) : senderColor
+        provenanceChipView.configure(
+            text: chipText,
+            textColor: baseColor,
+            fillColor: baseColor.withAlphaComponent(0.14)
+        )
+        provenanceChipView.isHidden = false
+        provenanceChipVisible = true
+        senderLabel.isHidden = true
     }
 
     private func updateReplyIndicator() {
@@ -3880,6 +3945,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
                    truncationHeightOverride: CGFloat? = nil,
                    bubbleSizingV2: BubbleSizingV2.LayoutState? = nil,
                    showsHeader: Bool = true,
+                   showsProvenanceChrome: Bool = false,
                    isDark: Bool? = nil,
                    terminalConnectionPool: TerminalSessionConnectionPool? = nil,
                    webBubbleCoordinator: (any WebBubbleCoordinating)? = nil,
@@ -3915,6 +3981,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
             truncationHeightOverride: truncationHeightOverride,
             bubbleSizingV2: bubbleSizingV2,
             showsHeader: showsHeader,
+            showsProvenanceChrome: showsProvenanceChrome,
             isDark: isDark,
             terminalConnectionPool: terminalConnectionPool,
             webBubbleCoordinator: webBubbleCoordinator,

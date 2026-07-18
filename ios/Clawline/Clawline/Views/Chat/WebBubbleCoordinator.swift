@@ -153,7 +153,7 @@ final class WebBubbleCoordinator: WebBubbleCoordinating {
             let item = itemsById[id]
             let stream = item?.stream
             itemsById.removeValue(forKey: id)
-            if let item, let parent = item.parentItemId {
+            if let stream, let item, let parent = item.parentItemId {
                 itemIdsByParentByStream[stream]?[parent]?.removeAll { $0 == id }
             }
             itemsInOrder.removeAll(where: { $0 == id })

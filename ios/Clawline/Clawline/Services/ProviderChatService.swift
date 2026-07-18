@@ -904,6 +904,7 @@ final class ProviderChatService: ChatServicing {
             updateState(.connected)
             let supportsSessionProvisioning = result.features?.contains("session_info") ?? false
             emitServiceEvent(.sessionProvisioningAvailable(supportsSessionProvisioning))
+            emitServiceEvent(.serverFeatures(result.features ?? []))
             if let info = sessionInfo(from: result) {
                 knownSessionKeys = Set(info.sessionKeys)
                 emitServiceEvent(.sessionInfo(info))

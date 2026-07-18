@@ -886,6 +886,9 @@ final class ChatViewModel {
     private var restoredSessionKeys: Set<String> = []
     private var restoredStreamMetadataForUserId: String?
     private var supportsSessionProvisioning = false
+    /// Feature flags from `auth_result.features`; tightbeam-only affordances gate on this.
+    private(set) var serverFeatures: Set<String> = []
+    var isTightbeamServer: Bool { serverFeatures.contains("tightbeam") }
     private var hasResolvedProvisioningCapability = true
     private var hasReceivedSessionProvisioning = false
     private var hasReceivedExplicitSessionInfo = false
@@ -4042,6 +4045,8 @@ final class ChatViewModel {
             hasResolvedProvisioningCapability = true
             supportsSessionProvisioning = supported
             attemptPendingProvisionedSendIfPossible()
+        case .serverFeatures(let features):
+            serverFeatures = Set(features)
         case .sessionInfo(let info):
             hasResolvedProvisioningCapability = true
             supportsSessionProvisioning = true
@@ -4438,6 +4443,7 @@ final class ChatViewModel {
 
     private func resetSessionProvisioningState(clearPendingSend: Bool) {
         supportsSessionProvisioning = false
+        serverFeatures.removeAll()
         hasResolvedProvisioningCapability = false
         hasReceivedSessionProvisioning = false
         hasReceivedExplicitSessionInfo = false

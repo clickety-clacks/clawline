@@ -46,6 +46,9 @@ enum ChatServiceEvent: Equatable {
     case streamTailStateSnapshot([String: StreamTailState])
     case streamTailStateUpdated(sessionKey: String, tailState: StreamTailState)
     case sessionProvisioningAvailable(Bool)
+    /// Feature flags advertised by the server in `auth_result.features`
+    /// (e.g. "tightbeam"). Tightbeam-only affordances gate on this set.
+    case serverFeatures([String])
     /// Server-authoritative session provisioning manifest.
     /// Session keys are the only routing identifiers on the wire (Clawline invariants N3/N7).
     case sessionInfo(SessionInfo)

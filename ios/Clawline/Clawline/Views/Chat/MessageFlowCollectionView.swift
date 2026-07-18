@@ -1987,7 +1987,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     private func prepareIncomingStateOnSwitch(sessionKey: String, allowTailStage: Bool) {
-        let persistedState = loadPersistedScrollState(for: sessionKey)
+        let persistedState = loadPersistedScrollState(
+            for: sessionKey,
+            projectionBase: readState(for: sessionKey).isShowingOnlyUserMessages ? "userOnly" : "transcript",
+            searchQuery: streamSearchQuery
+        )
         if let persistedState {
             logScrollRestore(
                 "prepareIncomingStateOnSwitch sessionKey=\(sessionKey) persistedAtBottom=\(persistedState.atBottom) persistedDistanceFromBottom=\(formatScrollRestore(CGFloat(persistedState.distanceFromBottom)))"
@@ -2040,7 +2044,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             state.scrollStateWriteDebounceTimer?.invalidate()
             state.scrollStateWriteDebounceTimer = nil
             state.restoreGeneration += 1
-            let persistedState = loadPersistedScrollState(for: sessionKey)
+            let persistedState = loadPersistedScrollState(
+                for: sessionKey,
+                projectionBase: readState(for: sessionKey).isShowingOnlyUserMessages ? "userOnly" : "transcript",
+                searchQuery: streamSearchQuery
+            )
             state.pendingScrollRestoreState = persistedState
             state.restoreConfirmationRetries = 0
             if let persistedState {
@@ -2353,7 +2361,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         )
         guard bounds.lowerBound != state.windowBounds.lowerBound else { return false }
 
-        pendingMaterializationViewportAnchor = captureBubbleSizingV2ViewportAnchor()
+        guard let viewportAnchor = captureBubbleSizingV2ViewportAnchor() else {
+            // Settled edge shifts require a fully visible message anchor; without one,
+            // defer the shift until a stable anchor can be captured.
+            return false
+        }
+        pendingMaterializationViewportAnchor = viewportAnchor
         pendingMaterializationRefreshSuppressesActivationCompletion = true
         _ = enqueueMaterializationEvent(
             sessionKey: sessionKey,
@@ -2421,7 +2434,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             totalCount: projection.count,
             count: windowCount
         )
-        pendingMaterializationViewportAnchor = captureBubbleSizingV2ViewportAnchor()
+        guard let viewportAnchor = captureBubbleSizingV2ViewportAnchor() else { return false }
+        pendingMaterializationViewportAnchor = viewportAnchor
         pendingMaterializationRefreshSuppressesActivationCompletion = true
         _ = enqueueMaterializationEvent(
             sessionKey: sessionKey,
@@ -2771,6 +2785,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             // We suppress starting new snapshot/apply/layout work during pager animation.
             // Any apply already in flight is allowed to finish normally.
             StreamSwitchTiming.log("messageFlow_update_skipped_frozen", sessionKey: effectiveSessionKey)
+            // A refresh suppressed by the frozen policy never reaches snapshot completion;
+            // leave the next real changed snapshot eligible to emit the activation pulse.
+            pendingMaterializationRefreshSuppressesActivationCompletion = false
             return
         }
         let needsFullLayout = forceReconfigureAll
@@ -2784,6 +2801,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         self.trailingContentInset = nextTrailingContentInset
 
         if isOffscreenSession {
+            pendingMaterializationRefreshSuppressesActivationCompletion = false
             return
         }
 
@@ -2848,7 +2866,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
 
         let appendedMessageIDs = previousEffectiveSessionKey == effectiveSessionKey
-            ? transcriptProjection.messageIds(after: previousLastMessageId)
+            ? transcriptProjection.messageIds(after: previousLastMessageId, limit: Self.maxIncrementalArrivalIDs)
             : []
         let messageCount = transcriptProjection.count
 
@@ -3031,7 +3049,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         forceReconfigureAll = false
 
         let didLastMessageChange = (previousLastMessageId != newestMessageId)
-        let isIncrementalAppend = (previousLastMessageId != nil) && !appendedMessageIDs.isEmpty
+        let isIncrementalAppend = (previousLastMessageId != nil)
+            && !appendedMessageIDs.isEmpty
+            && appendedMessageIDs.count < Self.maxIncrementalArrivalIDs
         let shouldAutoScrollToBottomAfterApply = didLastMessageChange
             && isIncrementalAppend
             && wasPinnedToBottomIntent
@@ -3208,6 +3228,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         guard next < messageIDs.endIndex else { return [] }
         return Array(messageIDs[next...])
     }
+
+    /// Hard ceiling for switch-time arrival bookkeeping. Larger tails are
+    /// treated as a normal refresh so no transcript-sized ID mapping occurs
+    /// on the main thread.
+    static let maxIncrementalArrivalIDs = 128
 
     static func enforcedLiveMeasuredWidth(
         sizeClass: MessageSizeClass,
@@ -3815,6 +3840,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         "clawline.scrollState.v1.\(persistenceKey)"
     }
 
+    private func scrollStateDefaultsKey(for persistenceKey: String,
+                                        projectionBase: String?,
+                                        searchQuery: String?) -> String {
+        let base = projectionBase ?? "transcript"
+        let query = (searchQuery ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let suffix = query.isEmpty ? base : "\(base).search.\(query)"
+        return "\(scrollStateDefaultsKey(for: persistenceKey)).\(suffix)"
+    }
+
     private func persistScrollSnapshot(_ snapshot: ScrollSnapshot, for persistenceKey: String) {
         let projectionKey = activeMaterializationProjectionKeyBySessionKey[persistenceKey]
         let materializationState = materializationStateBySessionKey[persistenceKey]
@@ -3828,8 +3862,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         )
         do {
             let data = try JSONEncoder().encode(state)
-            let key = scrollStateDefaultsKey(for: persistenceKey)
-            UserDefaults.standard.set(data, forKey: key)
+            // Keep independent transcript, user-only, and search locations.
+            let projectionKey = scrollStateDefaultsKey(
+                for: persistenceKey,
+                projectionBase: state.projectionBase,
+                searchQuery: state.searchQuery
+            )
+            UserDefaults.standard.set(data, forKey: projectionKey)
+            // Legacy unsuffixed key remains as a migration fallback only.
+            UserDefaults.standard.set(data, forKey: scrollStateDefaultsKey(for: persistenceKey))
         } catch {
             logger.error("failed encoding scrollState key=\(persistenceKey, privacy: .public) error=\(String(describing: error), privacy: .public)")
         }
@@ -3858,8 +3899,17 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         mutateState(for: sessionKey) { $0.lastKnownScrollSnapshot = snapshot }
     }
 
-    private func loadPersistedScrollState(for persistenceKey: String) -> PersistedScrollState? {
-        let key = scrollStateDefaultsKey(for: persistenceKey)
+    private func loadPersistedScrollState(for persistenceKey: String,
+                                          projectionBase: String? = nil,
+                                          searchQuery: String? = nil) -> PersistedScrollState? {
+        let preferredKey = scrollStateDefaultsKey(
+            for: persistenceKey,
+            projectionBase: projectionBase,
+            searchQuery: searchQuery
+        )
+        let key = UserDefaults.standard.data(forKey: preferredKey) != nil
+            ? preferredKey
+            : scrollStateDefaultsKey(for: persistenceKey)
         guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
         do {
             return try JSONDecoder().decode(PersistedScrollState.self, from: data)
@@ -5721,6 +5771,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     func scrollToBottom(animated: Bool) {
         if let sessionKey = callbackSessionKey() {
+            // Bottom is transcript truth, never the tail of a filtered projection.
+            // Clear transient projections before materializing the transcript edge.
+            if !streamSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                onStreamSearchQueryChanged?(sessionKey, "")
+            }
+            if readState(for: sessionKey).isShowingOnlyUserMessages {
+                setShowOnlyUserMessagesMode(false)
+            }
             pendingMaterializationPostApplyAction = { [weak self] in
                 self?.scrollToBottom(animated: animated)
             }
@@ -5786,7 +5844,17 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let minY = -contentInset.top
         let maxY = max(minY, collectionView.contentSize.height - collectionView.bounds.height + contentInset.bottom)
         let visibleHeight = collectionView.bounds.height - contentInset.top - contentInset.bottom
-        guard visibleHeight > 0, maxY > minY else { return }
+        guard visibleHeight > 0 else { return }
+        if maxY <= minY {
+            if let sessionKey = callbackSessionKey() {
+                pendingMaterializationPostApplyAction = { [weak self] in
+                    self?.scrollByPage(direction: direction, animated: animated)
+                }
+                if shiftMaterializationWindowIfNeeded(sessionKey: sessionKey) { return }
+                pendingMaterializationPostApplyAction = nil
+            }
+            return
+        }
 
         let pageIncrement = max(120, visibleHeight * 0.82)
         let delta = direction == .down ? pageIncrement : -pageIncrement
@@ -5825,7 +5893,16 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let contentInset = collectionView.contentInset
         let minY = -contentInset.top
         let maxY = max(minY, collectionView.contentSize.height - collectionView.bounds.height + contentInset.bottom)
-        guard maxY > minY else { return }
+        if maxY <= minY {
+            if let sessionKey = callbackSessionKey() {
+                pendingMaterializationPostApplyAction = { [weak self] in
+                    self?.scrollByGestureDelta(deltaY)
+                }
+                if shiftMaterializationWindowIfNeeded(sessionKey: sessionKey) { return }
+                pendingMaterializationPostApplyAction = nil
+            }
+            return
+        }
 
         let targetY = collectionView.contentOffset.y - deltaY
         let clampedY = max(minY, min(targetY, maxY))
@@ -6642,10 +6719,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 readState(for: $0).isShowingOnlyUserMessages
             } ?? false
         )
-        let eligibleItems = webBubbleCoordinator.items(for: stream).filter {
-            guard let parentItemId = $0.parentItemId else { return true }
-            return parentIds.contains(parentItemId)
-        }.suffix(limit)
+        let eligibleItems = webBubbleCoordinator.items(
+            for: stream,
+            parentIds: parentIds,
+            limit: limit
+        )
         for item in eligibleItems {
             if let parentItemId = item.parentItemId,
                let parentIndex = merged.lastIndex(of: parentItemId)

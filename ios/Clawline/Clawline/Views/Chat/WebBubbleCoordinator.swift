@@ -41,6 +41,7 @@ struct WebBubbleItem: Hashable {
 final class WebBubbleCoordinator: WebBubbleCoordinating {
     private var itemsById: [String: WebBubbleItem] = [:]
     private var itemsInOrder: [String] = []
+    private var itemIdsInOrderByStream: [ChatStream: [String]] = [:]
     private var webViewsById: [String: WKWebView] = [:]
     private var delegatesById: [String: WebBubbleWebViewDelegate] = [:]
 
@@ -54,10 +55,19 @@ final class WebBubbleCoordinator: WebBubbleCoordinating {
     var currentStream: ChatStream = .personal
 
     func items(for stream: ChatStream) -> [WebBubbleItem] {
-        itemsInOrder.compactMap { id in
+        itemIdsInOrderByStream[stream, default: []].compactMap { id in
             guard let item = itemsById[id], item.stream == stream else { return nil }
             return item
         }
+    }
+
+    func items(for stream: ChatStream, parentIds: Set<String>, limit: Int) -> [WebBubbleItem] {
+        guard limit > 0 else { return [] }
+        return itemIdsInOrderByStream[stream, default: []].reversed().lazy.compactMap { [self] id in
+            guard let item = self.itemsById[id] else { return nil }
+            if let parentItemId = item.parentItemId, !parentIds.contains(parentItemId) { return nil }
+            return item
+        }.prefix(limit).reversed()
     }
 
     func webBubbleItem(for id: String) -> WebBubbleItem? {
@@ -120,6 +130,7 @@ final class WebBubbleCoordinator: WebBubbleCoordinating {
 
         itemsById[bubbleId] = item
         itemsInOrder.append(bubbleId)
+        itemIdsInOrderByStream[item.stream, default: []].append(bubbleId)
         webViewsById[bubbleId] = popupWebView
         delegatesById[bubbleId] = delegate
 
@@ -138,8 +149,10 @@ final class WebBubbleCoordinator: WebBubbleCoordinating {
 
     func dismissWebBubble(id: String) {
         guard let webView = webViewsById[id] else {
+            let stream = itemsById[id]?.stream
             itemsById.removeValue(forKey: id)
             itemsInOrder.removeAll(where: { $0 == id })
+            if let stream { itemIdsInOrderByStream[stream]?.removeAll(where: { $0 == id }) }
             onItemsChanged?()
             return
         }
@@ -148,10 +161,12 @@ final class WebBubbleCoordinator: WebBubbleCoordinating {
         webView.navigationDelegate = nil
         webView.uiDelegate = nil
 
+        let stream = itemsById[id]?.stream
         webViewsById.removeValue(forKey: id)
         delegatesById.removeValue(forKey: id)
         itemsById.removeValue(forKey: id)
         itemsInOrder.removeAll(where: { $0 == id })
+        if let stream { itemIdsInOrderByStream[stream]?.removeAll(where: { $0 == id }) }
 
         bubbleIdByWebViewId.removeValue(forKey: ObjectIdentifier(webView))
         ownerItemIdByWebViewId.removeValue(forKey: ObjectIdentifier(webView))

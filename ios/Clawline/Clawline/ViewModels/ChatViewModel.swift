@@ -993,7 +993,7 @@ final class ChatViewModel {
 
     private struct MessageSearchProjection: Sendable {
         let revision: Int
-        let transcriptIndices: [Int]
+        var transcriptIndices: [Int]
     }
 
     private func armForceReRead(for sessionKey: String) {
@@ -3408,7 +3408,26 @@ final class ChatViewModel {
             mutation: projectionMutation
         )
         messageProjectionIndexBySession[sessionKey] = projectionIndex
-        let staleSearchKeys = messageSearchProjectionByKey.keys.filter { $0.sessionKey == sessionKey }
+        let appendIndex: Int? = {
+            guard case let .insert(index, message) = projectionMutation,
+                  index == newMessages.count - 1,
+                  message.id == newMessages.last?.id else { return nil }
+            return index
+        }()
+        if let appendIndex, let appendedMessage = newMessages.last {
+            for key in messageSearchProjectionByKey.keys where key.sessionKey == sessionKey {
+                guard var cached = messageSearchProjectionByKey[key], cached.revision == revision - 1 else { continue }
+                let matchesBase = key.base == .transcript || appendedMessage.role == .user
+                if matchesBase, appendedMessage.content.localizedStandardContains(key.query) {
+                    cached.transcriptIndices.append(appendIndex)
+                }
+                cached = MessageSearchProjection(revision: revision, transcriptIndices: cached.transcriptIndices)
+                messageSearchProjectionByKey[key] = cached
+            }
+        }
+        let staleSearchKeys = messageSearchProjectionByKey.keys.filter { key in
+            key.sessionKey == sessionKey && messageSearchProjectionByKey[key]?.revision != revision
+        }
         staleSearchKeys.forEach { messageSearchProjectionByKey.removeValue(forKey: $0) }
         let staleTaskKeys = messageSearchProjectionTaskByKey.keys.filter { $0.sessionKey == sessionKey }
         staleTaskKeys.forEach {

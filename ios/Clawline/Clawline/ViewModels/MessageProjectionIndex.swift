@@ -133,11 +133,15 @@ nonisolated struct MessageProjectionSnapshot: Sendable {
         return Array(transcript[lower ..< upper])
     }
 
-    func messageIds(after messageId: String?) -> [String] {
+    /// Returns a bounded suffix for incremental arrival notifications. The
+    /// caller uses these IDs only for unread/event bookkeeping; switch-time
+    /// work must never scan an unbounded transcript tail.
+    func messageIds(after messageId: String?, limit: Int = 128) -> [String] {
         guard let messageId, let index = projectedIndex(of: messageId) else { return [] }
         let next = index + 1
         guard next < count else { return [] }
-        return (next ..< count).compactMap { message(at: $0)?.id }
+        let upper = min(count, next + max(0, limit))
+        return (next ..< upper).compactMap { message(at: $0)?.id }
     }
 }
 

@@ -113,6 +113,7 @@ struct T1738BoundedMessageProjectionTests {
         #expect(transcript.projectedIndex(of: "m-0") == 0)
         #expect(transcript.projectedIndex(of: "m-501") == 501)
         #expect(transcript.messageIds(after: "m-499") == ["m-500", "m-501"])
+        #expect(transcript.messageIds(after: "m-499", limit: 1) == ["m-500"])
         #expect(users.count == 251)
     }
 

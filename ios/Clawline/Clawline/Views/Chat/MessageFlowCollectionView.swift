@@ -3240,7 +3240,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     /// Hard ceiling for switch-time arrival bookkeeping. Larger tails are
     /// treated as a normal refresh so no transcript-sized ID mapping occurs
     /// on the main thread.
-    static let maxIncrementalArrivalIDs = 100
+    static let maxIncrementalArrivalIDs = 99
 
     static func enforcedLiveMeasuredWidth(
         sizeClass: MessageSizeClass,

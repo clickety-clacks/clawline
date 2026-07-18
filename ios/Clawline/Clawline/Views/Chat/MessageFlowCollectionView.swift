@@ -2862,6 +2862,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             searchQuery: streamSearchQuery
         ) else {
             StreamSwitchTiming.log("materialization_projection_pending", sessionKey: effectiveSessionKey)
+            // A changed snapshot may arrive while the render policy is frozen or the
+            // projection is still being published. Consume the activation pulse here so
+            // an offscreen/pending return cannot strand the channel-name toast.
+            if isActiveSession {
+                viewModel.markEngineActivationRenderedIfNeeded(for: effectiveSessionKey)
+            }
             return
         }
 

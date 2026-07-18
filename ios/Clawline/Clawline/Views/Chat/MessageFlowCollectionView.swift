@@ -3365,7 +3365,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             footerHeight: SessionMetadataFooterCell.height(
                 for: sessionStatus,
                 width: availableContentWidth(),
-                compatibleWith: traitCollection
+                compatibleWith: traitCollection,
+                isTightbeam: viewModel?.isTightbeamServer ?? false
             ),
             hasFooter: dataSource.indexPath(for: SessionMetadataFooterCell.itemId) != nil
         )
@@ -4334,6 +4335,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                     status: self.sessionStatus,
                     statusUnavailable: self.sessionStatusUnavailable,
                     isDark: self.currentIsDark,
+                    isTightbeam: viewModel.isTightbeamServer,
                     onSelect: self.onSessionControlSelected,
                     onTestMenuSelect: self.onFooterTestMenuSelected,
                     searchQuery: self.streamSearchQuery,
@@ -4924,7 +4926,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             let height = SessionMetadataFooterCell.height(
                 for: sessionStatus,
                 width: rowWidth,
-                compatibleWith: traitCollection
+                compatibleWith: traitCollection,
+                isTightbeam: viewModel.isTightbeamServer
             )
             return CGSize(width: rowWidth, height: height)
         }
@@ -6790,6 +6793,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         let statusUnavailable: Bool
         let isDark: Bool
         let isSpatial: Bool
+        let isTightbeam: Bool
         let onSelect: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
         let onTestMenuSelect: (@MainActor (FooterTestMenuAction) -> Void)?
         let searchQuery: String
@@ -7048,6 +7052,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             statusUnavailable: configuration.statusUnavailable,
             isDark: configuration.isDark,
             isSpatial: configuration.isSpatial,
+            isTightbeam: configuration.isTightbeam,
             onSelect: configuration.onSelect,
             onTestMenuSelect: configuration.onTestMenuSelect,
             searchQuery: configuration.searchQuery,
@@ -7061,6 +7066,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         statusUnavailable: Bool = false,
         isDark: Bool,
         isSpatial: Bool = SessionMetadataFooterCell.isSpatialPlatform,
+        isTightbeam: Bool = false,
         onSelect: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?,
         onTestMenuSelect: (@MainActor (FooterTestMenuAction) -> Void)? = nil,
         searchQuery: String = "",
@@ -7071,6 +7077,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             statusUnavailable: statusUnavailable,
             isDark: isDark,
             isSpatial: isSpatial,
+            isTightbeam: isTightbeam,
             onSelect: onSelect,
             onTestMenuSelect: onTestMenuSelect,
             searchQuery: searchQuery,
@@ -7089,7 +7096,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             versionStackView.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
-        let items = Self.footerItems(for: status, isUnavailable: statusUnavailable, isDark: isDark)
+        let items = Self.footerItems(for: status, isUnavailable: statusUnavailable, isDark: isDark, isTightbeam: isTightbeam)
         currentFooterItems = items
         for item in items {
             let itemColor = isSpatial ? textColor : (item.textColor ?? textColor)
@@ -7113,9 +7120,10 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
     static func height(
         for status: SessionStatus?,
         width: CGFloat = .greatestFiniteMagnitude,
-        compatibleWith traitCollection: UITraitCollection? = nil
+        compatibleWith traitCollection: UITraitCollection? = nil,
+        isTightbeam: Bool = false
     ) -> CGFloat {
-        let items = footerItems(for: status)
+        let items = footerItems(for: status, isTightbeam: isTightbeam)
         let font = UIFont.clawline(.timestamp, compatibleWith: traitCollection)
         let primaryHeight = controlRowHeight(compatibleWith: traitCollection)
         let secondaryHeight = items.contains { $0.row == .secondary }
@@ -7183,13 +7191,18 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         }
     }
 
-    static func footerText(for status: SessionStatus?, isUnavailable: Bool = false) -> String? {
-        let parts = footerItems(for: status, isUnavailable: isUnavailable).map(\.text)
+    static func footerText(for status: SessionStatus?, isUnavailable: Bool = false, isTightbeam: Bool = false) -> String? {
+        let parts = footerItems(for: status, isUnavailable: isUnavailable, isTightbeam: isTightbeam).map(\.text)
         guard !parts.isEmpty else { return nil }
         return parts.joined(separator: "  ·  ")
     }
 
-    private static func footerItems(for status: SessionStatus?, isUnavailable: Bool = false, isDark: Bool = false) -> [FooterItem] {
+    private static func footerItems(
+        for status: SessionStatus?,
+        isUnavailable: Bool = false,
+        isDark: Bool = false,
+        isTightbeam: Bool = false
+    ) -> [FooterItem] {
         guard let status else {
             if isUnavailable {
                 return metadataPlaceholderFooterItems(state: "unavailable", reason: "session_status_unavailable")
@@ -7247,6 +7260,27 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                 textColor: nil
             )
         ] + authModeFooterItems(display.authMode, codexUsage: display.codexUsage, isDark: isDark)
+            + hostFooterItems(display.host, isTightbeam: isTightbeam)
+    }
+
+    private static func hostFooterItems(_ host: String?, isTightbeam: Bool) -> [FooterItem] {
+        // Tightbeam-only. Absent/blank host renders nothing (openclaw payloads lack the key).
+        guard isTightbeam, let host = normalized(host) else { return [] }
+        // Display only. A future picker over the archetype's allowed hosts will replace this
+        // rendering to drive session-control {action: "set_host"}; keep it isolated as that seam.
+        return [
+            FooterItem(
+                text: host,
+                action: nil,
+                options: [],
+                unsupportedReason: nil,
+                textColor: nil,
+                row: .secondary,
+                accessibilityLabel: "Host \(host)",
+                isStaticLabel: true,
+                allowsWrapping: false
+            )
+        ]
     }
 
     private static func capability(_ capability: SessionStatus.Capability?,

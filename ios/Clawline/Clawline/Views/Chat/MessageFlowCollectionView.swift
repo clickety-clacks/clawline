@@ -2652,6 +2652,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let previousLastMessageId = lastMessageId
         let previousSessionStatus = self.sessionStatus
         let previousSessionStatusUnavailable = self.sessionStatusUnavailable
+        let previousHarnessOptions = self.viewModel?.orgOptionsHarnesses ?? []
+        let nextHarnessOptions = viewModel.orgOptionsHarnesses
         let previousLiveProgress = self.liveProgress
         let previousStreamSearchQuery = self.streamSearchQuery
         let previousEffectiveSessionKey = callbackSessionKey()
@@ -2938,7 +2940,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             changedIds.forEach { invalidateBubbleSizingV2Cache(for: $0) }
             removeBubbleV2PreviewVersions(for: changedIds)
         }
-        if previousSessionStatus != sessionStatus || previousSessionStatusUnavailable != sessionStatusUnavailable,
+        if previousSessionStatus != sessionStatus
+            || previousSessionStatusUnavailable != sessionStatusUnavailable
+            || previousHarnessOptions != nextHarnessOptions,
            snapshot.indexOfItem(SessionMetadataFooterCell.itemId) != nil,
            oldItemIds.contains(SessionMetadataFooterCell.itemId)
         {
@@ -3366,7 +3370,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 for: sessionStatus,
                 width: availableContentWidth(),
                 compatibleWith: traitCollection,
-                isTightbeam: viewModel?.isTightbeamServer ?? false
+                isTightbeam: viewModel?.isTightbeamServer ?? false,
+                harnessOptions: viewModel?.orgOptionsHarnesses ?? []
             ),
             hasFooter: dataSource.indexPath(for: SessionMetadataFooterCell.itemId) != nil
         )
@@ -4336,6 +4341,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                     statusUnavailable: self.sessionStatusUnavailable,
                     isDark: self.currentIsDark,
                     isTightbeam: viewModel.isTightbeamServer,
+                    harnessOptions: viewModel.orgOptionsHarnesses,
                     onSelect: self.onSessionControlSelected,
                     onTestMenuSelect: self.onFooterTestMenuSelected,
                     searchQuery: self.streamSearchQuery,
@@ -4412,6 +4418,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 truncationHeightOverride: truncationHeightOverrideV1,
                 bubbleSizingV2: layoutStateV2,
                 showsHeader: !hideHeader,
+                showsProvenanceChrome: viewModel.isTightbeamServer,
                 isDark: self.currentIsDark,
                 terminalConnectionPool: viewModel.terminalConnectionPool,
                 webBubbleCoordinator: self.webBubbleCoordinator,
@@ -4914,6 +4921,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 sendIndicatorState: nil,
                 maxWidth: maxWidth,
                 showsHeader: false,
+                showsProvenanceChrome: viewModel.isTightbeamServer,
                 paddingScale: TypingIndicatorCell.bubblePaddingScale,
                 minWidthOverride: TypingIndicatorCell.bubbleWidth,
                 maxWidthOverride: TypingIndicatorCell.bubbleWidth,
@@ -4985,7 +4993,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             sendIndicatorState: sendIndicatorState,
             maxWidth: maxWidth,
             bubbleHeightPolicy: bubbleHeightPolicy,
-            showsHeader: !hideHeader
+            showsHeader: !hideHeader,
+            showsProvenanceChrome: viewModel.isTightbeamServer
         )
         _ = writeMeasuredSize(messageId: id, measurement: measuredSize)
         return measuredSize
@@ -4999,6 +5008,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                                         bubbleHeightPolicy: BubbleSizingV2.BubbleHeightPolicy? = nil,
                                         truncationHeightOverride: CGFloat? = nil,
                                         showsHeader: Bool = true,
+                                        showsProvenanceChrome: Bool = false,
                                         paddingScale: CGFloat = 1,
                                         minWidthOverride: CGFloat? = nil,
                                         maxWidthOverride: CGFloat? = nil,
@@ -5016,6 +5026,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             bubbleHeightPolicy: bubbleHeightPolicy,
             truncationHeightOverride: truncationHeightOverride,
             showsHeader: showsHeader,
+            showsProvenanceChrome: showsProvenanceChrome,
             paddingScale: paddingScale,
             minWidthOverride: minWidthOverride,
             maxWidthOverride: maxWidthOverride,
@@ -5354,6 +5365,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             bubbleHeightPolicy: plan.heightPolicy,
             truncationHeightOverride: plan.heightPolicy.v1TruncationHeightOverride,
             showsHeader: showsHeader,
+            showsProvenanceChrome: viewModel?.isTightbeamServer ?? false,
             minWidthOverride: plan.minWidth,
             onRequestExpand: nil,
             onRequestLayout: nil,
@@ -5422,6 +5434,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             truncationHeightOverride: plan.heightPolicy.v1TruncationHeightOverride,
             bubbleSizingV2: provisional1,
             showsHeader: showsHeader,
+            showsProvenanceChrome: viewModel?.isTightbeamServer ?? false,
             minWidthOverride: plan.minWidth,
             onRequestExpand: nil,
             onRequestLayout: nil,
@@ -5469,6 +5482,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             truncationHeightOverride: plan.heightPolicy.v1TruncationHeightOverride,
             bubbleSizingV2: provisional2,
             showsHeader: showsHeader,
+            showsProvenanceChrome: viewModel?.isTightbeamServer ?? false,
             minWidthOverride: plan.minWidth,
             onRequestExpand: nil,
             onRequestLayout: nil,
@@ -6794,6 +6808,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         let isDark: Bool
         let isSpatial: Bool
         let isTightbeam: Bool
+        let harnessOptions: [String]
         let onSelect: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
         let onTestMenuSelect: (@MainActor (FooterTestMenuAction) -> Void)?
         let searchQuery: String
@@ -7053,6 +7068,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             isDark: configuration.isDark,
             isSpatial: configuration.isSpatial,
             isTightbeam: configuration.isTightbeam,
+            harnessOptions: configuration.harnessOptions,
             onSelect: configuration.onSelect,
             onTestMenuSelect: configuration.onTestMenuSelect,
             searchQuery: configuration.searchQuery,
@@ -7067,6 +7083,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         isDark: Bool,
         isSpatial: Bool = SessionMetadataFooterCell.isSpatialPlatform,
         isTightbeam: Bool = false,
+        harnessOptions: [String] = [],
         onSelect: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?,
         onTestMenuSelect: (@MainActor (FooterTestMenuAction) -> Void)? = nil,
         searchQuery: String = "",
@@ -7078,6 +7095,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             isDark: isDark,
             isSpatial: isSpatial,
             isTightbeam: isTightbeam,
+            harnessOptions: harnessOptions,
             onSelect: onSelect,
             onTestMenuSelect: onTestMenuSelect,
             searchQuery: searchQuery,
@@ -7096,7 +7114,13 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             versionStackView.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
-        let items = Self.footerItems(for: status, isUnavailable: statusUnavailable, isDark: isDark, isTightbeam: isTightbeam)
+        let items = Self.footerItems(
+            for: status,
+            isUnavailable: statusUnavailable,
+            isDark: isDark,
+            isTightbeam: isTightbeam,
+            harnessOptions: harnessOptions
+        )
         currentFooterItems = items
         for item in items {
             let itemColor = isSpatial ? textColor : (item.textColor ?? textColor)
@@ -7121,9 +7145,10 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         for status: SessionStatus?,
         width: CGFloat = .greatestFiniteMagnitude,
         compatibleWith traitCollection: UITraitCollection? = nil,
-        isTightbeam: Bool = false
+        isTightbeam: Bool = false,
+        harnessOptions: [String] = []
     ) -> CGFloat {
-        let items = footerItems(for: status, isTightbeam: isTightbeam)
+        let items = footerItems(for: status, isTightbeam: isTightbeam, harnessOptions: harnessOptions)
         let font = UIFont.clawline(.timestamp, compatibleWith: traitCollection)
         let primaryHeight = controlRowHeight(compatibleWith: traitCollection)
         let secondaryHeight = items.contains { $0.row == .secondary }
@@ -7191,8 +7216,18 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         }
     }
 
-    static func footerText(for status: SessionStatus?, isUnavailable: Bool = false, isTightbeam: Bool = false) -> String? {
-        let parts = footerItems(for: status, isUnavailable: isUnavailable, isTightbeam: isTightbeam).map(\.text)
+    static func footerText(
+        for status: SessionStatus?,
+        isUnavailable: Bool = false,
+        isTightbeam: Bool = false,
+        harnessOptions: [String] = []
+    ) -> String? {
+        let parts = footerItems(
+            for: status,
+            isUnavailable: isUnavailable,
+            isTightbeam: isTightbeam,
+            harnessOptions: harnessOptions
+        ).map(\.text)
         guard !parts.isEmpty else { return nil }
         return parts.joined(separator: "  ·  ")
     }
@@ -7201,7 +7236,8 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         for status: SessionStatus?,
         isUnavailable: Bool = false,
         isDark: Bool = false,
-        isTightbeam: Bool = false
+        isTightbeam: Bool = false,
+        harnessOptions: [String] = []
     ) -> [FooterItem] {
         guard let status else {
             if isUnavailable {
@@ -7260,7 +7296,36 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                 textColor: nil
             )
         ] + authModeFooterItems(display.authMode, codexUsage: display.codexUsage, isDark: isDark)
+            + harnessFooterItems(display.harness, isTightbeam: isTightbeam, options: harnessOptions)
             + hostFooterItems(display.host, isTightbeam: isTightbeam)
+    }
+
+    private static func harnessFooterItems(
+        _ harness: String?,
+        isTightbeam: Bool,
+        options: [String]
+    ) -> [FooterItem] {
+        // Tightbeam-only. Absent harness renders nothing (openclaw payloads lack it).
+        guard isTightbeam, let harness = normalized(harness) else { return [] }
+        // Options come from GET /api/org-options → harnesses. Until they load the
+        // item shows the current harness with no menu (disabled), then becomes a
+        // picker once options arrive. Selecting the current harness is a no-op
+        // resolved downstream; selecting a different one triggers the confirm.
+        let footerOptions = options.compactMap { normalized($0) }.map { value in
+            FooterOption(title: value, value: value, enabled: nil, isCurrent: value == harness)
+        }
+        return [
+            FooterItem(
+                text: harness,
+                action: .setHarness,
+                options: footerOptions,
+                unsupportedReason: "harness_options_unavailable",
+                textColor: nil,
+                row: .secondary,
+                accessibilityLabel: "Harness \(harness)",
+                allowsWrapping: false
+            )
+        ]
     }
 
     private static func hostFooterItems(_ host: String?, isTightbeam: Bool) -> [FooterItem] {

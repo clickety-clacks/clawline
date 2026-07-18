@@ -290,6 +290,17 @@ final class ProviderChatService: ChatServicing {
         }
     }
 
+    func fetchOrgOptions() async throws -> OrgOptions {
+        guard let token = await resolveControlPlaneToken() else {
+            throw Error.notConnected
+        }
+        do {
+            return try await streamAPIClient.fetchOrgOptions(token: token)
+        } catch {
+            throw mapStreamAPIError(error)
+        }
+    }
+
     func fetchSessionStatus(sessionKey: String) async throws -> SessionStatus {
         guard let token = await resolveControlPlaneToken() else {
             throw Error.notConnected
@@ -844,6 +855,8 @@ final class ProviderChatService: ChatServicing {
             handleStreamUpdated(data: data)
         case "stream_deleted":
             handleStreamDeleted(data: data)
+        case "stream_history_cleared":
+            handleStreamHistoryCleared(data: data)
         case "stream_read_state":
             handleStreamReadState(data: data)
         case "stream_tail_state":
@@ -859,6 +872,10 @@ final class ProviderChatService: ChatServicing {
 
     private enum FrameDecodeError: Swift.Error {
         case invalidUTF8
+    }
+
+    private struct StreamHistoryClearedPayload: Decodable {
+        let sessionKey: String
     }
 
     nonisolated private static func decodeEnvelopeFrame(_ text: String) async throws -> (Data, Envelope) {
@@ -1218,6 +1235,17 @@ final class ProviderChatService: ChatServicing {
         knownSessionKeys.remove(payload.sessionKey)
         setReplayCursor(nil, for: payload.sessionKey)
         emitServiceEvent(.streamDeleted(sessionKey: payload.sessionKey))
+    }
+
+    private func handleStreamHistoryCleared(data: Data) {
+        guard let payload = try? decoder.decode(StreamHistoryClearedPayload.self, from: data) else {
+            logger.warning("Failed to decode stream_history_cleared payload")
+            return
+        }
+        // Barrier moved server-side; drop the replay cursor so reconnect/replay
+        // returns only post-barrier messages. The ViewModel drops local state.
+        setReplayCursor(nil, for: payload.sessionKey)
+        emitServiceEvent(.streamHistoryCleared(sessionKey: payload.sessionKey))
     }
 
     private func handleStreamReadState(data: Data) {

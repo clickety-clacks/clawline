@@ -71,6 +71,7 @@ final class StreamAPIClient {
         let reasoningLevel: String?
         let fastMode: Bool?
         let mode: String?
+        let harness: String?
 
         init(sessionKey: String, action: SessionControlAction, value: String?, enabled: Bool?) {
             self.sessionKey = sessionKey
@@ -82,36 +83,51 @@ final class StreamAPIClient {
                 self.reasoningLevel = nil
                 self.fastMode = nil
                 self.mode = nil
+                self.harness = nil
             case .setModel:
                 self.model = value
                 self.thinkingLevel = nil
                 self.reasoningLevel = nil
                 self.fastMode = nil
                 self.mode = nil
+                self.harness = nil
             case .setThinking:
                 self.model = nil
                 self.thinkingLevel = value
                 self.reasoningLevel = nil
                 self.fastMode = nil
                 self.mode = nil
+                self.harness = nil
             case .setReasoning:
                 self.model = nil
                 self.thinkingLevel = nil
                 self.reasoningLevel = value
                 self.fastMode = nil
                 self.mode = nil
+                self.harness = nil
             case .setFastMode:
                 self.model = nil
                 self.thinkingLevel = nil
                 self.reasoningLevel = nil
                 self.fastMode = enabled
                 self.mode = nil
+                self.harness = nil
             case .setMode:
                 self.model = nil
                 self.thinkingLevel = nil
                 self.reasoningLevel = nil
                 self.fastMode = nil
                 self.mode = value
+                self.harness = nil
+            case .setHarness:
+                // Model intentionally omitted: the gateway picks the target
+                // harness's default from its catalog (spec §T-A / §4).
+                self.model = nil
+                self.thinkingLevel = nil
+                self.reasoningLevel = nil
+                self.fastMode = nil
+                self.mode = nil
+                self.harness = value
             }
         }
     }
@@ -158,6 +174,15 @@ final class StreamAPIClient {
             body: Optional<String>.none
         )
         return response.sessions
+    }
+
+    func fetchOrgOptions(token: String?) async throws -> OrgOptions {
+        try await sendRequest(
+            method: "GET",
+            path: "/api/org-options",
+            token: token,
+            body: Optional<String>.none
+        )
     }
 
     func fetchSessionStatus(sessionKey: String, token: String?) async throws -> SessionStatus {

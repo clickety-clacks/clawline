@@ -755,6 +755,23 @@ final class ChatViewModel {
         }
     }
 
+    /// On-demand fetch (no caching layer): loads org-options once per tightbeam
+    /// session lifetime so the footer harness picker has its options. Cleared on
+    /// disconnect/logout via `resetSessionProvisioningState`.
+    func loadOrgOptionsIfNeeded() {
+        guard isTightbeamServer, orgOptions == nil, !isLoadingOrgOptions else { return }
+        isLoadingOrgOptions = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.isLoadingOrgOptions = false }
+            do {
+                self.orgOptions = try await self.chatService.fetchOrgOptions()
+            } catch {
+                self.logger.info("org-options fetch failed error=\(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
     nonisolated static func placeholderText(displayName: String, sessionKey: String) -> String {
         guard !sessionKey.isEmpty else { return displayName }
         return "\(displayName) — \(sessionKey)"
@@ -889,6 +906,12 @@ final class ChatViewModel {
     /// Feature flags from `auth_result.features`; tightbeam-only affordances gate on this.
     private(set) var serverFeatures: Set<String> = []
     var isTightbeamServer: Bool { serverFeatures.contains("tightbeam") }
+    /// Org-level options (harnesses/models/hosts/archetypes) fetched on demand
+    /// from GET /api/org-options when the server is tightbeam. Feeds the footer
+    /// harness picker (T1751); the creation sheet (T1750) will read the rest.
+    private(set) var orgOptions: OrgOptions?
+    private var isLoadingOrgOptions = false
+    var orgOptionsHarnesses: [String] { orgOptions?.harnesses ?? [] }
     private var hasResolvedProvisioningCapability = true
     private var hasReceivedSessionProvisioning = false
     private var hasReceivedExplicitSessionInfo = false
@@ -3234,6 +3257,18 @@ final class ChatViewModel {
         applyMessagesWrite([], for: sessionKey)
     }
 
+    /// Server moved the history barrier (harness swap etc.); drop every local
+    /// trace for the stream so the post-barrier replay is the only truth. Do NOT
+    /// remove the stream itself — only its message history/cache (spec §T-A).
+    private func handleStreamHistoryCleared(sessionKey: String) {
+        let runtimeKey = sessionStatusAuthorityKey(for: sessionKey)
+        for key in Set([sessionKey, runtimeKey]) {
+            clearSessionMessages(sessionKey: key, reason: "stream_history_cleared")
+            removeCachedMessages(for: key)
+            chatService.setReplayCursor(nil, for: key)
+        }
+    }
+
     private func removeSession(sessionKey: String, reason: String) {
         _ = reason
         sessionMessages.removeValue(forKey: sessionKey)
@@ -4033,6 +4068,8 @@ final class ChatViewModel {
             refreshStreamsFromProvider(reason: "streamDeleted")
             refreshTrackableSessions(reason: "streamDeleted")
             attemptPendingProvisionedSendIfPossible()
+        case .streamHistoryCleared(let sessionKey):
+            handleStreamHistoryCleared(sessionKey: sessionKey)
         case .streamReadStateSnapshot(let snapshot):
             applyStreamReadStateSnapshot(snapshot)
         case .streamReadStateUpdated(let sessionKey, let lastReadMessageId):
@@ -4047,6 +4084,7 @@ final class ChatViewModel {
             attemptPendingProvisionedSendIfPossible()
         case .serverFeatures(let features):
             serverFeatures = Set(features)
+            loadOrgOptionsIfNeeded()
         case .sessionInfo(let info):
             hasResolvedProvisioningCapability = true
             supportsSessionProvisioning = true
@@ -4444,6 +4482,8 @@ final class ChatViewModel {
     private func resetSessionProvisioningState(clearPendingSend: Bool) {
         supportsSessionProvisioning = false
         serverFeatures.removeAll()
+        orgOptions = nil
+        isLoadingOrgOptions = false
         hasResolvedProvisioningCapability = false
         hasReceivedSessionProvisioning = false
         hasReceivedExplicitSessionInfo = false

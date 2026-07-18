@@ -182,6 +182,10 @@ final class StubChatService: ChatServicing {
         []
     }
 
+    func fetchOrgOptions() async throws -> OrgOptions {
+        OrgOptions()
+    }
+
     func fetchSessionStatus(sessionKey: String) async throws -> SessionStatus {
         throw ProviderChatService.Error.notConnected
     }

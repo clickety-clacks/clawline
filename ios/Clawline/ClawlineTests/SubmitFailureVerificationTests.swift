@@ -241,6 +241,7 @@ private final class VerificationChatService: ChatServicing {
 
     func fetchStreams() async throws -> [StreamSession] { [] }
     func fetchTrackableSessions() async throws -> [TrackableSession] { [] }
+    func fetchOrgOptions() async throws -> OrgOptions { OrgOptions() }
     func fetchSessionStatus(sessionKey: String) async throws -> SessionStatus {
         let _ = sessionKey
         throw ProviderChatService.Error.notConnected

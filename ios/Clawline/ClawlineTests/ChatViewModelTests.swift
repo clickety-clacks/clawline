@@ -1513,6 +1513,59 @@ struct ChatViewModelTests {
         #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceB]?.entries.map(\.content) == ["Replay B 1"])
     }
 
+    @Test("T1751 stream_history_cleared drops the local store, cache, and replay cursor for the stream")
+    @MainActor
+    func streamHistoryClearedDropsLocalStore() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_history_clear"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Cleared", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.t1751.historyClear")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        let message = #"{"type":"message","id":"s_history_1","role":"assistant","content":"Before clear","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(message.utf8))))
+        for _ in 0..<50 {
+            if !viewModel.messages(for: source).isEmpty { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.messages(for: source).map(\.id) == ["s_history_1"])
+
+        // Seed a replay cursor so the drop is observable (the gateway's barrier
+        // means replay must restart from scratch for this stream).
+        chatService.setReplayCursor("s_history_1", for: source)
+        #expect(chatService.replayCursorSnapshot()[source] == "s_history_1")
+
+        chatService.emitServiceEvent(.streamHistoryCleared(sessionKey: source))
+        for _ in 0..<50 {
+            if viewModel.messages(for: source).isEmpty { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.messages(for: source).isEmpty)
+        #expect(chatService.replayCursorSnapshot()[source] == nil)
+    }
+
     @Test("Read replayed assistant content does not resurrect cross-chat notification")
     @MainActor
     func readReplayedAssistantContentDoesNotResurrectCrossChatNotification() async throws {
@@ -7609,6 +7662,9 @@ final class TestChatService: ChatServicing {
     var deleteStreamError: Error?
     var deleteStreamErrorSequence: [Error] = []
     var fetchTrackableSessionsError: Error?
+    var fetchOrgOptionsError: Error?
+    var orgOptions = OrgOptions()
+    private(set) var fetchOrgOptionsCallCount: Int = 0
     var streams: [StreamSession] = []
     var trackableSessions: [TrackableSession] = []
     var sessionStatusBySessionKey: [String: SessionStatus] = [:]
@@ -7821,6 +7877,12 @@ final class TestChatService: ChatServicing {
         fetchTrackableSessionsCallCount += 1
         if let fetchTrackableSessionsError { throw fetchTrackableSessionsError }
         return trackableSessions
+    }
+
+    func fetchOrgOptions() async throws -> OrgOptions {
+        fetchOrgOptionsCallCount += 1
+        if let fetchOrgOptionsError { throw fetchOrgOptionsError }
+        return orgOptions
     }
 
     func fetchSessionStatus(sessionKey: String) async throws -> SessionStatus {

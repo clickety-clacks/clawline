@@ -1883,6 +1883,106 @@ struct ProviderServiceTests {
         #expect(payload?["idempotencyKey"] == "req_t142_delete")
     }
 
+    @Test("T1751 org-options fetch decodes the full shape over the device bearer")
+    func orgOptionsFetchDecodesFullShape() async throws {
+        let baseURL = URL(string: "http://127.0.0.1:18800")!
+        final class RequestBox: @unchecked Sendable {
+            var path: String?
+            var authorization: String?
+        }
+        let box = RequestBox()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            box.path = request.url?.path
+            box.authorization = request.value(forHTTPHeaderField: "Authorization")
+            let data = #"""
+            {
+              "harnesses": ["claude", "codex"],
+              "models": {
+                "claude": [{"id": "m1", "ref": "claude-fable-5", "name": "Fable 5", "provider": "anthropic"}],
+                "codex": [{"id": "m2", "ref": "gpt-5.6-sol", "name": "Sol", "provider": "openai"}]
+              },
+              "hosts": ["eezo", "tars"],
+              "archetypes": [{"name": "researcher", "where": ["*"], "defaults": {"harness": "claude"}}]
+            }
+            """#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+
+        let options = try await streamAPIClient.fetchOrgOptions(token: "jwt")
+
+        #expect(box.path == "/api/org-options")
+        #expect(box.authorization == "Bearer jwt")
+        #expect(options.harnesses == ["claude", "codex"])
+        #expect(options.models["codex"]?.first?.ref == "gpt-5.6-sol")
+        #expect(options.hosts == ["eezo", "tars"])
+        #expect(options.archetypes.first?.where == ["*"])
+    }
+
+    @Test("T1751 set_harness session-control carries the harness and omits the model")
+    func setHarnessSessionControlEncodesHarnessWithoutModel() async throws {
+        let baseURL = URL(string: "http://127.0.0.1:18800")!
+        final class RequestBox: @unchecked Sendable {
+            var body: Data?
+            var method: String?
+            var path: String?
+        }
+        let box = RequestBox()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            box.method = request.httpMethod
+            box.path = request.url?.path
+            box.body = request.httpBody ?? Self.bodyData(from: request.httpBodyStream)
+            let data = #"""
+            { "ok": true, "sessionKey": "agent:main:clawline:user:s_harness", "action": "set_harness" }
+            """#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+
+        let response = try await streamAPIClient.applySessionControl(
+            sessionKey: "agent:main:clawline:user:s_harness",
+            action: .setHarness,
+            value: "codex",
+            enabled: nil,
+            token: "jwt"
+        )
+
+        #expect(response.ok)
+        #expect(box.method == "POST")
+        #expect(box.path == "/api/session-control")
+        let body = try #require(box.body)
+        let payload = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        #expect(payload?["action"] as? String == "set_harness")
+        #expect(payload?["harness"] as? String == "codex")
+        #expect(payload?["sessionKey"] as? String == "agent:main:clawline:user:s_harness")
+        // Model omitted (encoded null): the gateway picks the target harness default.
+        #expect((payload?["model"] as? String) == nil)
+    }
+
     private static func bodyData(from stream: InputStream?) -> Data? {
         guard let stream else { return nil }
         stream.open()

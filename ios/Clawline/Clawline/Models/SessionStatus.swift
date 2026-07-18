@@ -213,6 +213,7 @@ enum SessionControlAction: String, Encodable, Equatable {
     case setReasoning = "set_reasoning"
     case setFastMode = "set_fast_mode"
     case setMode = "set_mode"
+    case setHarness = "set_harness"
 }
 
 struct SessionControlResponse: Decodable, Equatable {

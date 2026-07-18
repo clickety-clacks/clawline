@@ -41,6 +41,11 @@ enum ChatServiceEvent: Equatable {
     case streamCreated(StreamSession)
     case streamUpdated(StreamSession)
     case streamDeleted(sessionKey: String)
+    /// Gateway set a session's history barrier (e.g. after a harness swap) and
+    /// pushed this to every owner device. On receipt, drop the local message
+    /// store/UI and persisted cache for the stream; replay after the barrier
+    /// reconverges all devices (spec §T-A).
+    case streamHistoryCleared(sessionKey: String)
     case streamReadStateSnapshot([String: String])
     case streamReadStateUpdated(sessionKey: String, lastReadMessageId: String)
     case streamTailStateSnapshot([String: StreamTailState])
@@ -93,6 +98,7 @@ protocol ChatServicing: AnyObject {
 
     func fetchStreams() async throws -> [StreamSession]
     func fetchTrackableSessions() async throws -> [TrackableSession]
+    func fetchOrgOptions() async throws -> OrgOptions
     func fetchSessionStatus(sessionKey: String) async throws -> SessionStatus
     func applySessionControl(
         sessionKey: String,

@@ -136,7 +136,7 @@ nonisolated struct MessageProjectionSnapshot: Sendable {
     /// Returns a bounded suffix for incremental arrival notifications. The
     /// caller uses these IDs only for unread/event bookkeeping; switch-time
     /// work must never scan an unbounded transcript tail.
-    func messageIds(after messageId: String?, limit: Int = 128) -> [String] {
+    func messageIds(after messageId: String?, limit: Int = 100) -> [String] {
         guard let messageId, let index = projectedIndex(of: messageId) else { return [] }
         let next = index + 1
         guard next < count else { return [] }
@@ -179,6 +179,22 @@ nonisolated struct MessageProjectionIndex: Sendable {
                 && transcript[index].id == message.id
                 && transcript[index].role == message.role:
             transcript[index] = message
+            self.revision = revision
+        case let .remove(index) where messages.count == transcript.count - 1 && transcript.indices.contains(index):
+            let removed = transcript[index]
+            transcript.remove(at: index)
+            transcriptIndexByMessageId.removeValue(forKey: removed.id)
+            for offset in index..<transcript.count {
+                transcriptIndexByMessageId[transcript[offset].id] = offset
+            }
+            userTranscriptIndices = transcript.indices.filter { transcript[$0].role == .user }
+            self.revision = revision
+        case let .insert(index, message) where messages.count == transcript.count + 1 && index <= transcript.endIndex:
+            transcript.insert(message, at: index)
+            for offset in index..<transcript.count {
+                transcriptIndexByMessageId[transcript[offset].id] = offset
+            }
+            userTranscriptIndices = transcript.indices.filter { transcript[$0].role == .user }
             self.revision = revision
         case .insert, .replace, .remove, .replaceAll:
             self = MessageProjectionIndex(messages: messages, revision: revision)

@@ -1932,6 +1932,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         key: MaterializationProjectionKey
     ) {
         guard activeMaterializationProjectionKeyBySessionKey[sessionKey] != key else { return }
+        // Flush the outgoing projection before switching keys so each query retains
+        // its own settled location rather than inheriting the active projection's state.
+        if let snapshot = liveScrollSnapshotIfAvailable() {
+            persistScrollSnapshot(snapshot, for: sessionKey)
+        }
         if let previousKey = activeMaterializationProjectionKeyBySessionKey[sessionKey],
            let currentState = materializationStateBySessionKey[sessionKey]
         {

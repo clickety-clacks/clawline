@@ -676,6 +676,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var pendingMaterializationViewportAnchor: BubbleSizingV2ViewportAnchor?
     private var pendingMaterializationRefreshSuppressesActivationCompletion = false
     private var pendingMaterializationPostApplyAction: (@MainActor () -> Void)?
+    // Gestures/pages may hit a materialized edge while the next window is being
+    // applied. Preserve the unapplied movement and replay it after the shift.
+    private var pendingMaterializationResidualDelta: CGFloat = 0
     private var materializationEventQueue: [MaterializationEventEnvelope] = []
     private var isMaterializationQueueProcessing = false
     private var lastMaterializationPlanBySessionKey: [String: MaterializationPlan] = [:]
@@ -5780,9 +5783,17 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             // Clear transient projections before materializing the transcript edge.
             if !streamSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 onStreamSearchQueryChanged?(sessionKey, "")
+                pendingMaterializationPostApplyAction = { [weak self] in
+                    self?.scrollToBottom(animated: animated)
+                }
+                return
             }
             if readState(for: sessionKey).isShowingOnlyUserMessages {
                 setShowOnlyUserMessagesMode(false)
+                pendingMaterializationPostApplyAction = { [weak self] in
+                    self?.scrollToBottom(animated: animated)
+                }
+                return
             }
             pendingMaterializationPostApplyAction = { [weak self] in
                 self?.scrollToBottom(animated: animated)
@@ -5850,10 +5861,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let maxY = max(minY, collectionView.contentSize.height - collectionView.bounds.height + contentInset.bottom)
         let visibleHeight = collectionView.bounds.height - contentInset.top - contentInset.bottom
         guard visibleHeight > 0 else { return }
+        let pageIncrement = max(120, visibleHeight * 0.82)
         if maxY <= minY {
             if let sessionKey = callbackSessionKey() {
+                pendingMaterializationResidualDelta += direction == .down ? -pageIncrement : pageIncrement
                 pendingMaterializationPostApplyAction = { [weak self] in
-                    self?.scrollByPage(direction: direction, animated: animated)
+                    self?.replayPendingMaterializationResidualDelta()
                 }
                 if shiftMaterializationWindowIfNeeded(sessionKey: sessionKey) { return }
                 pendingMaterializationPostApplyAction = nil
@@ -5861,14 +5874,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             return
         }
 
-        let pageIncrement = max(120, visibleHeight * 0.82)
         let delta = direction == .down ? pageIncrement : -pageIncrement
         let targetY = collectionView.contentOffset.y + delta
         let clampedY = max(minY, min(targetY, maxY))
         guard abs(collectionView.contentOffset.y - clampedY) > 0.5 else {
             if let sessionKey = callbackSessionKey() {
+                pendingMaterializationResidualDelta += direction == .down ? -pageIncrement : pageIncrement
                 pendingMaterializationPostApplyAction = { [weak self] in
-                    self?.scrollByPage(direction: direction, animated: animated)
+                    self?.replayPendingMaterializationResidualDelta()
                 }
                 if shiftMaterializationWindowIfNeeded(sessionKey: sessionKey) {
                     return
@@ -5900,8 +5913,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let maxY = max(minY, collectionView.contentSize.height - collectionView.bounds.height + contentInset.bottom)
         if maxY <= minY {
             if let sessionKey = callbackSessionKey() {
+                pendingMaterializationResidualDelta += deltaY
                 pendingMaterializationPostApplyAction = { [weak self] in
-                    self?.scrollByGestureDelta(deltaY)
+                    self?.replayPendingMaterializationResidualDelta()
                 }
                 if shiftMaterializationWindowIfNeeded(sessionKey: sessionKey) { return }
                 pendingMaterializationPostApplyAction = nil
@@ -5913,8 +5927,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let clampedY = max(minY, min(targetY, maxY))
         guard abs(collectionView.contentOffset.y - clampedY) > 0.5 else {
             if let sessionKey = callbackSessionKey() {
+                pendingMaterializationResidualDelta += deltaY
                 pendingMaterializationPostApplyAction = { [weak self] in
-                    self?.scrollByGestureDelta(deltaY)
+                    self?.replayPendingMaterializationResidualDelta()
                 }
                 if shiftMaterializationWindowIfNeeded(sessionKey: sessionKey) {
                     return
@@ -5936,6 +5951,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if let sessionKey = callbackSessionKey() {
             refreshLastKnownScrollSnapshot(sessionKey: sessionKey)
         }
+    }
+
+    private func replayPendingMaterializationResidualDelta() {
+        let residual = pendingMaterializationResidualDelta
+        pendingMaterializationResidualDelta = 0
+        guard abs(residual) > 0.5 else { return }
+        scrollByGestureDelta(residual)
     }
 
     @discardableResult

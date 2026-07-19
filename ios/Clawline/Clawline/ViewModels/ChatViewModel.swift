@@ -772,22 +772,30 @@ final class ChatViewModel {
     /// session lifetime so the footer harness picker has its options. Cleared on
     /// disconnect/logout via `resetSessionProvisioningState`.
     private var orgOptionsLoadGeneration = 0
+    private var orgOptionsLoadTask: Task<Void, Never>?
 
     func loadOrgOptionsIfNeeded() {
         guard isTightbeamServer, orgOptions == nil, !isLoadingOrgOptions else { return }
         isLoadingOrgOptions = true
         let generation = orgOptionsLoadGeneration
-        Task { [weak self] in
+        // Explicit cancellable handle: cancelled+niled on disconnect/session reset
+        // and before replacement, so an in-flight fetch cannot repopulate a newer
+        // session's options.
+        orgOptionsLoadTask = Task { [weak self] in
             guard let self else { return }
             defer {
-                if self.orgOptionsLoadGeneration == generation { self.isLoadingOrgOptions = false }
+                if self.orgOptionsLoadGeneration == generation {
+                    self.isLoadingOrgOptions = false
+                    self.orgOptionsLoadTask = nil
+                }
             }
             do {
                 let fetched = try await self.chatService.fetchOrgOptions()
-                // Drop the result if a reset/disconnect advanced the generation or
-                // the gate closed while this fetch was in flight — a stale
-                // session's options must never overwrite a newer one's.
-                guard self.orgOptionsLoadGeneration == generation, self.isTightbeamServer else { return }
+                // Boundary validation: drop if cancelled, if a reset advanced the
+                // session generation, or if the gate closed while in flight.
+                guard !Task.isCancelled,
+                      self.orgOptionsLoadGeneration == generation,
+                      self.isTightbeamServer else { return }
                 self.orgOptions = fetched
             } catch {
                 self.logger.info("org-options fetch failed error=\(error.localizedDescription, privacy: .public)")
@@ -991,15 +999,41 @@ final class ChatViewModel {
     /// gate must invalidate what is already on screen — otherwise provenance
     /// chips and the harness/host footer stay missing for the whole session
     /// and only appear for content that arrives later.
+    /// Event-stream entry: a `.serverFeatures` event may be delayed past an
+    /// unexpected socket close or a reconnect, so it must NOT be trusted to
+    /// reopen the gate. Explicit current-link fence: apply only while the link is
+    /// actually connected, and re-derive from the service's authoritative feature
+    /// set (set on auth, cleared on disconnect) rather than the event payload —
+    /// so even a delayed pre-disconnect event resolves to the CURRENT link's
+    /// features (empty when disconnected, the new link's when reconnected).
+    private func applyServerFeaturesFromEvent() {
+        guard connectionState == .connected else {
+            // No live link: a stale/delayed feature event cannot open the gate.
+            applyServerFeatures([])
+            return
+        }
+        applyServerFeatures(chatService.serverFeatures)
+    }
+
     private func applyServerFeatures(_ features: [String]) {
         let updated = Set(features)
         guard updated != serverFeatures else { return }
+        let wasTightbeam = serverFeatures.contains("tightbeam")
         serverFeatures = updated
         presentationCache.removeAll()
         for key in sessionMessages.keys {
             armForceReRead(for: key)
         }
         armForceReRead(for: uiSelectedSessionKey)
+        if wasTightbeam, !isTightbeamServer {
+            // The gate just closed: invalidate any in-flight org-options load and
+            // drop cached options so a stale fetch cannot land in a later session.
+            orgOptionsLoadGeneration &+= 1
+            orgOptionsLoadTask?.cancel()
+            orgOptionsLoadTask = nil
+            isLoadingOrgOptions = false
+            orgOptions = nil
+        }
         loadOrgOptionsIfNeeded()
     }
 
@@ -1516,6 +1550,8 @@ final class ChatViewModel {
         pendingPersistPayloads.removeAll()
         restoreTaskBySessionKey.values.forEach { $0.cancel() }
         restoreTaskBySessionKey.removeAll()
+        orgOptionsLoadTask?.cancel()
+        orgOptionsLoadTask = nil
         clearSessionStatusRefreshes()
         discardCrossChatNotificationBatches()
         stopObservingLifecycle(origin: "prepareForReplacement")
@@ -4289,12 +4325,7 @@ final class ChatViewModel {
             supportsSessionProvisioning = supported
             attemptPendingProvisionedSendIfPossible()
         case .serverFeatures:
-            // Ignore the event's payload and re-derive from the service, which
-            // clears its feature set on disconnect. A .serverFeatures event
-            // delayed past an unexpected socket close would otherwise re-open the
-            // Tightbeam gate with no live authed link (the event stream and the
-            // connection-state stream are independent).
-            applyServerFeatures(chatService.serverFeatures)
+            applyServerFeaturesFromEvent()
         case .sessionInfo(let info):
             hasResolvedProvisioningCapability = true
             supportsSessionProvisioning = true
@@ -4701,9 +4732,11 @@ final class ChatViewModel {
         serverFeatures.removeAll()
         orgOptions = nil
         isLoadingOrgOptions = false
-        // Invalidate any in-flight org-options fetch from the prior session so
-        // its result cannot land in the next session's picker.
+        // Invalidate AND cancel any in-flight org-options fetch from the prior
+        // session so its result cannot land in the next session's picker.
         orgOptionsLoadGeneration &+= 1
+        orgOptionsLoadTask?.cancel()
+        orgOptionsLoadTask = nil
         hasResolvedProvisioningCapability = false
         hasReceivedSessionProvisioning = false
         hasReceivedExplicitSessionInfo = false

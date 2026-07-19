@@ -1605,24 +1605,33 @@ struct ChatViewModelTests {
         }
         #expect(viewModel.isTightbeamServer == false)
 
-        // A .serverFeatures(["tightbeam"]) event delayed from before the close now
-        // arrives. It must NOT re-open the gate — the handler re-derives from the
-        // service (now empty), not the stale payload.
+        // A NEW link reconnects as an openclaw server (no tightbeam feature).
+        chatService.serverFeatures = []
+        chatService.emitConnectionState(.connected)
+        chatService.emitServiceEvent(.serverFeatures([]))
+        try await Task.sleep(forDuration: .milliseconds(40))
+        #expect(viewModel.isTightbeamServer == false)
+
+        // A .serverFeatures(["tightbeam"]) event delayed from the OLD link now
+        // arrives while connected to the NEW (openclaw) link. It must NOT reopen
+        // the gate — the handler re-derives from the service's authoritative
+        // current-link features (empty), never the stale payload.
         chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))
         try await Task.sleep(forDuration: .milliseconds(80))
         #expect(viewModel.isTightbeamServer == false)
     }
 
-    @Test("F3 regression: a stale in-flight org-options fetch is dropped when the session resets")
+    @Test("F3 regression: an in-flight org-options fetch cannot repopulate a newer session after the gate closes")
     @MainActor
-    func staleOrgOptionsFetchDroppedOnReset() async throws {
+    func staleOrgOptionsFetchCannotRepopulateAfterGateCloses() async throws {
         resetChatPersistence()
         let auth = TestAuthManager()
         auth.storeCredentials(token: "jwt", userId: "user")
         let chatService = TestChatService()
-        chatService.orgOptionsFetchDelay = .milliseconds(120)
+        // Session A's fetch is slow and returns STALE options.
+        chatService.orgOptionsFetchDelay = .milliseconds(150)
         chatService.orgOptions = OrgOptions(
-            harnesses: ["stale"], models: [:], hosts: ["stale-host"], archetypes: []
+            harnesses: ["stale-A"], models: [:], hosts: ["stale-host"], archetypes: []
         )
         let viewModel = ChatViewModel(
             auth: auth, chatService: chatService, settings: SettingsManager(),
@@ -1631,24 +1640,70 @@ struct ChatViewModelTests {
         )
         defer { viewModel.prepareForReplacement() }
 
-        await viewModel.activate(origin: "test.f3.staleOptions")
+        await viewModel.activate(origin: "test.f3.aAfterB")
+        // Session A: gate opens, slow fetch begins.
         chatService.serverFeatures = ["tightbeam"]
-        chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))  // triggers loadOrgOptionsIfNeeded
+        chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))
         for _ in 0..<50 {
             if viewModel.isTightbeamServer { break }
             try await Task.sleep(forDuration: .milliseconds(10))
         }
 
-        // The fetch is in flight (delayed). Reset the session before it returns.
+        // Gate closes (A's link lost) while A's fetch is still in flight — this
+        // cancels A's task and advances the session generation.
         chatService.serverFeatures = []
-        chatService.emitConnectionState(.disconnected)
+        chatService.emitServiceEvent(.serverFeatures([]))
+        for _ in 0..<50 {
+            if !viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
 
-        // Let the stale fetch resolve; its result must be dropped (generation moved).
+        // Session B connects with DIFFERENT options and a fast fetch.
+        chatService.orgOptionsFetchDelay = nil
+        chatService.orgOptions = OrgOptions(
+            harnesses: ["fresh-B"], models: [:], hosts: ["b-host"], archetypes: []
+        )
+        chatService.serverFeatures = ["tightbeam"]
+        chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))
+        for _ in 0..<80 {
+            if viewModel.orgOptions?.harnesses == ["fresh-B"] { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        // Let A's slow fetch resolve; it must NOT overwrite B's options.
         try await Task.sleep(forDuration: .milliseconds(200))
+        #expect(viewModel.orgOptions?.harnesses == ["fresh-B"])
+        #expect(viewModel.orgOptions?.harnesses.contains("stale-A") != true)
+    }
+
+    @Test("F3 regression: prepareForReplacement cancels the in-flight org-options task")
+    @MainActor
+    func prepareForReplacementCancelsOrgOptionsTask() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.orgOptionsFetchDelay = .milliseconds(150)
+        chatService.orgOptions = OrgOptions(harnesses: ["late"], models: [:], hosts: [], archetypes: [])
+        let viewModel = ChatViewModel(
+            auth: auth, chatService: chatService, settings: SettingsManager(),
+            device: TestDevice(), uploadService: TestUploadService(),
+            toastManager: ToastManager(), salientHighlightService: SalientHighlightService()
+        )
+        await viewModel.activate(origin: "test.f3.retire")
+        chatService.serverFeatures = ["tightbeam"]
+        chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))
+        for _ in 0..<50 {
+            if viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        // Retire while the fetch is in flight — the task is cancelled.
+        viewModel.prepareForReplacement()
+        try await Task.sleep(forDuration: .milliseconds(220))
         #expect(viewModel.orgOptions == nil)
     }
 
-    @Test("R4 composition: RootView preserves one injected cache-IO identity across scenes — no per-view default/static escape")
+    @Test("R4 composition: RootView preserves one injected cache-IO identity across scenes    @Test("R4 composition: RootView preserves one injected cache-IO identity across scenes — no per-view default/static escape")
     @MainActor
     func rootViewPreservesInjectedCacheIOIdentityAcrossScenes() {
         // The @main App owns ONE MessageCacheIO and injects it into every scene's

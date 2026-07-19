@@ -1688,7 +1688,7 @@ struct ChatViewModelTests {
         #expect(FileManager.default.fileExists(atPath: cacheURL.path) == false)
     }
 
-    @Test("F1 regression: a .serverFeatures event delayed past disconnect does not re-open the tightbeam gate")    @Test("F1 regression: a .serverFeatures event delayed past disconnect does not re-open the tightbeam gate")    @Test("F1 regression: a .serverFeatures event delayed past disconnect does not re-open the tightbeam gate")
+    @Test("F1 regression: a .serverFeatures event delayed past disconnect does not re-open the tightbeam gate")
     @MainActor
     func delayedServerFeaturesAfterDisconnectDoesNotReopenGate() async throws {
         resetChatPersistence()

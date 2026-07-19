@@ -884,7 +884,11 @@ final class ProviderChatService: ChatServicing {
         case "stream_deleted":
             handleStreamDeleted(data: data)
         case "stream_history_cleared":
-            handleStreamHistoryCleared(data: data)
+            handleStreamHistoryCleared(
+                data: data,
+                lifecycleEpoch: lifecycleEpoch,
+                lifecycleConnectionToken: lifecycleConnectionToken
+            )
         case "stream_read_state":
             handleStreamReadState(data: data)
         case "stream_tail_state":
@@ -1266,7 +1270,11 @@ final class ProviderChatService: ChatServicing {
         emitServiceEvent(.streamDeleted(sessionKey: payload.sessionKey))
     }
 
-    private func handleStreamHistoryCleared(data: Data) {
+    private func handleStreamHistoryCleared(
+        data: Data,
+        lifecycleEpoch: Int?,
+        lifecycleConnectionToken: UUID?
+    ) {
         guard let payload = try? decoder.decode(StreamHistoryClearedPayload.self, from: data) else {
             logger.warning("Failed to decode stream_history_cleared payload")
             return
@@ -1274,6 +1282,18 @@ final class ProviderChatService: ChatServicing {
         // Barrier moved server-side; drop the replay cursor so reconnect/replay
         // returns only post-barrier messages. The ViewModel drops local state.
         setReplayCursor(nil, for: payload.sessionKey)
+        // Emit the barrier IN-BAND on the lifecycle stream when one is active:
+        // server messages travel that stream, and frames are decoded in wire
+        // order here, so a pre-barrier message can never be delivered after the
+        // barrier (and vice versa). The service-event emission remains for
+        // non-lifecycle consumers; ViewModel handling is idempotent.
+        if let lifecycleEpoch {
+            emitLifecycleEvent(
+                epoch: lifecycleEpoch,
+                payload: .historyCleared(sessionKey: payload.sessionKey),
+                lifecycleConnectionToken: lifecycleConnectionToken
+            )
+        }
         emitServiceEvent(.streamHistoryCleared(sessionKey: payload.sessionKey))
     }
 

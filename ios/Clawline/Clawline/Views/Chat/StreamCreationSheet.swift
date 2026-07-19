@@ -108,7 +108,7 @@ struct StreamCreationSheet: View {
                         Picker("Model", selection: $selectedModel) {
                             Text("Default").tag(String?.none)
                             ForEach(modelOptions, id: \.ref) { model in
-                                Text(model.name ?? model.ref).tag(String?.some(model.ref))
+                                Text(model.name).tag(String?.some(model.ref))
                             }
                         }
                     }

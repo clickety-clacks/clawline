@@ -51,6 +51,11 @@ struct LifecycleTransportEvent: Equatable, Sendable {
             failureReason: AuthFailureReason?
         )
         case serverMessage(data: Data)
+        /// Gateway history barrier, delivered IN-BAND with `serverMessage` so it
+        /// cannot be reordered against the messages it must separate. The
+        /// service also emits `.streamHistoryCleared` on the service-event
+        /// stream for non-lifecycle consumers; handling is idempotent.
+        case historyCleared(sessionKey: String)
         case syncComplete
         case transportClosed(reason: TransportCloseReason)
         case transportTimeout
@@ -112,6 +117,8 @@ enum ConnectionLifecycleOutput: Equatable, Sendable {
     case historyResetRequired(epoch: Int)
     case replayStarted(epoch: Int, replayCount: Int, replayTruncated: Bool, historyReset: Bool)
     case serverMessage(epoch: Int, payload: Data)
+    /// Gateway history barrier, ordered in-band with `serverMessage`.
+    case historyCleared(epoch: Int, sessionKey: String)
     case replayCompleted(epoch: Int)
     case historyTruncated(epoch: Int)
 }
@@ -410,6 +417,8 @@ actor ConnectionLifecycleCoordinator {
             )
         case .serverMessage(let data):
             handleServerMessage(epoch: event.epoch, data: data)
+        case .historyCleared(let sessionKey):
+            emit(.historyCleared(epoch: event.epoch, sessionKey: sessionKey))
         case .syncComplete:
             handleSyncComplete(epoch: event.epoch)
         case .transportClosed:

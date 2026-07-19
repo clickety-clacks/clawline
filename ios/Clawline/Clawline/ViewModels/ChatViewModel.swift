@@ -891,11 +891,13 @@ final class ChatViewModel {
     /// independent of task timing (spec §T-A: post-barrier replay is the only
     /// truth).
     private var historyBarrierGenerationBySessionKey: [String: Int] = [:]
+    private let messageCacheIOQueue = DispatchQueue(label: "co.clicketyclacks.Clawline.messageCacheIO")
     /// All message-cache file mutations (writes and deletes) run on this one
     /// serial queue, so a barrier's cache delete is strictly ordered after any
     /// previously enqueued write — a detached write can never land after the
-    /// delete and resurrect pre-barrier history on disk.
-    private static let messageCacheIOQueue = DispatchQueue(label: "co.clicketyclacks.Clawline.messageCacheIO")
+    /// delete and resurrect pre-barrier history on disk. Instance-owned (not
+    /// static/shared) per COMMON.md: the cache files it guards are owned by
+    /// this view model, and one view model's IO must not stall another's.
     private var writerCurrentEpoch: Int?
     private var firstReplayAppliedEpoch: Int?
     private var pendingHistoryResetReplay: PendingHistoryResetReplay?
@@ -3527,6 +3529,8 @@ final class ChatViewModel {
             beginCrossChatNotificationBatch(epoch: epoch, waitsForTruncationBoundary: replayTruncated)
         case .serverMessage(let epoch, let payload):
             await handleLifecycleServerMessage(epoch: epoch, payload: payload)
+        case .historyCleared(_, let sessionKey):
+            handleStreamHistoryCleared(sessionKey: sessionKey)
         case .replayCompleted(let epoch):
             applyPendingHistoryResetReplayIfNeeded()
             markMissingFinalsAfterReplay()
@@ -5220,7 +5224,7 @@ final class ChatViewModel {
         pendingPersistPayloads.removeValue(forKey: sessionKey)
         // Same serial queue as cache writes: this delete is ordered after any
         // write already enqueued, so pre-barrier payloads cannot land after it.
-        Self.messageCacheIOQueue.async {
+        messageCacheIOQueue.async {
             try? FileManager.default.removeItem(at: url)
         }
     }
@@ -5242,7 +5246,7 @@ final class ChatViewModel {
             }
             guard let pendingPayload = self.pendingPersistPayloads[sessionKey] else { return }
             self.pendingPersistPayloads[sessionKey] = nil
-            Self.messageCacheIOQueue.async { [pendingPayload, url, sessionKey] in
+            messageCacheIOQueue.async { [pendingPayload, url, sessionKey] in
                 let encoder = JSONEncoder()
                 encoder.dateEncodingStrategy = .iso8601
                 do {

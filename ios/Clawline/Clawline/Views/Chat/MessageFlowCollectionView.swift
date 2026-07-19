@@ -588,6 +588,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     /// Last tightbeam gate value this controller rendered with. Controller-owned
     /// because the view model instance is stable across updates.
     private var currentIsTightbeam: Bool?
+    /// Last harness options this controller rendered with, controller-owned for
+    /// the same reason.
+    private var currentHarnessOptions: [String]?
     private var currentFontScaleChangeSequence: Int = 0
     private var onExpand: ((Message) -> Void)?
     private var onScrollEvent: (@MainActor (MessageFlowScrollEvent) -> Void)?
@@ -2655,8 +2658,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let previousLastMessageId = lastMessageId
         let previousSessionStatus = self.sessionStatus
         let previousSessionStatusUnavailable = self.sessionStatusUnavailable
-        let previousHarnessOptions = self.viewModel?.orgOptionsHarnesses ?? []
+        // Controller-owned for the same reason as the gate below: `self.viewModel`
+        // is the SAME instance as the incoming one, so reading both sides off it
+        // would always compare equal and the footer would never reconfigure when
+        // /api/org-options resolves after the first render.
+        let previousHarnessOptions = currentHarnessOptions
         let nextHarnessOptions = viewModel.orgOptionsHarnesses
+        currentHarnessOptions = nextHarnessOptions
         // The tightbeam gate decides provenance chrome on every message cell and
         // the harness/host footer items. It flips mid-session (auth completes
         // after cached history has already rendered on a cold launch), so a
@@ -2959,8 +2967,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
         if previousSessionStatus != sessionStatus
             || previousSessionStatusUnavailable != sessionStatusUnavailable
-            || previousHarnessOptions != nextHarnessOptions
-            || previousIsTightbeam != nextIsTightbeam,
+            || (previousHarnessOptions ?? nextHarnessOptions) != nextHarnessOptions
+            || (previousIsTightbeam ?? nextIsTightbeam) != nextIsTightbeam,
            snapshot.indexOfItem(SessionMetadataFooterCell.itemId) != nil,
            oldItemIds.contains(SessionMetadataFooterCell.itemId)
         {

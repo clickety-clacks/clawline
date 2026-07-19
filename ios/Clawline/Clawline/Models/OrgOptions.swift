@@ -36,10 +36,13 @@ struct OrgOptions: Decodable, Equatable {
     static let empty = OrgOptions(harnesses: [], models: [:], hosts: [], archetypes: [])
 
     struct HarnessModel: Decodable, Equatable {
+        // Spec §T-B names the full shape {id, ref, name, provider}; all four are
+        // required so server contract drift surfaces instead of silently
+        // decoding into a half-populated picker entry.
         let id: String
         let ref: String
-        let name: String?
-        let provider: String?
+        let name: String
+        let provider: String
     }
 
     struct Archetype: Decodable, Equatable {

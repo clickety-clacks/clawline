@@ -43,7 +43,7 @@ struct T1751HarnessSelectorTests {
     func orgOptionsRejectsMissingContractKeys() throws {
         let fullPayload: [String: Any] = [
             "harnesses": ["claude"],
-            "models": ["claude": [["id": "m1", "ref": "claude-fable-5"]]],
+            "models": ["claude": [["id": "m1", "ref": "claude-fable-5", "name": "Fable 5", "provider": "anthropic"]]],
             "hosts": ["eezo"],
             "archetypes": [["name": "default", "where": ["*"]]]
         ]
@@ -61,6 +61,23 @@ struct T1751HarnessSelectorTests {
         """
         #expect(throws: (any Error).self) {
             _ = try JSONDecoder().decode(OrgOptions.self, from: Data(missingWhere.utf8))
+        }
+
+        // Spec §T-B names the full model shape {id, ref, name, provider}; a
+        // model missing name or provider is contract drift, not a tolerance.
+        for missingModelKey in ["id", "ref", "name", "provider"] {
+            var model: [String: Any] = [
+                "id": "m1", "ref": "claude-fable-5", "name": "Fable 5", "provider": "anthropic"
+            ]
+            model.removeValue(forKey: missingModelKey)
+            let payload: [String: Any] = [
+                "harnesses": ["claude"], "models": ["claude": [model]],
+                "hosts": ["eezo"], "archetypes": [["name": "default", "where": ["*"]]]
+            ]
+            let data = try JSONSerialization.data(withJSONObject: payload)
+            #expect(throws: (any Error).self, "model missing \(missingModelKey) must fail") {
+                _ = try JSONDecoder().decode(OrgOptions.self, from: data)
+            }
         }
     }
 

@@ -233,6 +233,11 @@ final class ProviderChatService: ChatServicing {
 
     private static let serverEventIDPrefix = "s_"
 
+    /// Features of the current authed link (`auth_result.features`). Set on
+    /// auth success before the `.serverFeatures` event fires, cleared when the
+    /// link goes away, so late subscribers can always pull the current value.
+    private(set) var serverFeatures: [String] = []
+
     var isTransportReadyForSend: Bool {
         guard socket != nil, authToken != nil else { return false }
         return lastConnectionState == .connected
@@ -550,6 +555,7 @@ final class ProviderChatService: ChatServicing {
         socket?.close(with: .normalClosure)
         socket = nil
         authToken = nil
+        serverFeatures = []
         if !pendingMessages.isEmpty {
             for messageId in pendingMessages {
                 emitServiceEvent(.messageError(
@@ -940,6 +946,7 @@ final class ProviderChatService: ChatServicing {
         if result.success {
             resolveAuthContinuation(with: .success(()))
             logger.info("state -> connected (auth success)")
+            serverFeatures = result.features ?? []
             updateState(.connected)
             let supportsSessionProvisioning = result.features?.contains("session_info") ?? false
             emitServiceEvent(.sessionProvisioningAvailable(supportsSessionProvisioning))

@@ -1809,6 +1809,39 @@ struct ChatViewModelTests {
         #expect(placement.archetype == "default")
     }
 
+    @Test("Gate regression: tightbeam gate converges from the service's pulled features even when the serverFeatures event is never observed")
+    @MainActor
+    func tightbeamGateConvergesFromPulledFeatures() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        // The authed link already carries the feature set (as after an auth
+        // that completed before the view model subscribed to serviceEvents);
+        // no .serverFeatures event is ever emitted in this scenario.
+        chatService.serverFeatures = ["tightbeam"]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.gate.pulledFeatures")
+        #expect(viewModel.isTightbeamServer == false)
+
+        chatService.emitConnectionState(.connected)
+        for _ in 0..<50 {
+            if viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.isTightbeamServer)
+    }
+
     @Test("Read replayed assistant content does not resurrect cross-chat notification")
     @MainActor
     func readReplayedAssistantContentDoesNotResurrectCrossChatNotification() async throws {
@@ -7949,6 +7982,7 @@ final class TestChatService: ChatServicing {
         }
     }()
 
+    var serverFeatures: [String] = []
     private(set) lazy var connectionState: AsyncStream<ConnectionState> = {
         AsyncStream { continuation in
             self.stateContinuation = continuation

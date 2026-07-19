@@ -4569,6 +4569,14 @@ final class ChatViewModel {
             clearAllLiveProgress()
             clearAllTypingIndicatorMorphTargets()
             auth.refreshAdminStatusFromToken()
+            // Pull the authed link's feature set from the service on every
+            // connected transition. The `.serverFeatures` service event and
+            // this connectionState stream are separate AsyncStreams with no
+            // cross-stream ordering, so the event alone can be lost to a late
+            // subscription or wiped by a reset that lands after it; the pull
+            // makes the gate converge on the service's authoritative value.
+            serverFeatures = Set(chatService.serverFeatures)
+            loadOrgOptionsIfNeeded()
             attemptPendingProvisionedSendIfPossible()
             scheduleSessionStatusRefresh(for: uiSelectedSessionKey, reason: "connectionRestored")
         case .connecting, .reconnecting:

@@ -72,6 +72,12 @@ protocol ChatServicing: AnyObject {
     var serviceEvents: AsyncStream<ChatServiceEvent> { get }
     var lifecycleTransportEvents: AsyncStream<LifecycleTransportEvent> { get }
     var isTransportReadyForSend: Bool { get }
+    /// The feature set of the CURRENT authed link (`auth_result.features`),
+    /// owned by the service as pull-able truth. The `.serverFeatures` event
+    /// still announces changes, but consumers must be able to read the value
+    /// after the fact — events ride a separate stream from connection state
+    /// and can be lost to late subscription. Empty when not authed.
+    var serverFeatures: [String] { get }
 
     func connect(token: String, lastMessageId: String?) async throws
     func startConnectionAttempt(epoch: Int, lastMessageId: String?, token: String)

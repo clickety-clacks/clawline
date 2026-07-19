@@ -126,6 +126,7 @@ private final class VerificationChatService: ChatServicing {
     private(set) var startConnectionAttemptCallCount = 0
     private var replayCursorBySessionKey: [String: String] = [:]
     var isTransportReadyForSend = false
+    var serverFeatures: [String] = []
 
     lazy var incomingMessages: AsyncStream<Message> = {
         AsyncStream { continuation in

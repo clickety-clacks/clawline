@@ -6172,6 +6172,7 @@ private final class PreviewChatService: ChatServicing {
     var incomingMessages: AsyncStream<Message> {
         AsyncStream { _ in }
     }
+    var serverFeatures: [String] { [] }
     var connectionState: AsyncStream<ConnectionState> {
         AsyncStream { continuation in
             continuation.yield(.connected)

@@ -49,6 +49,8 @@ final class StubChatService: ChatServicing {
         }
     }()
 
+    var serverFeatures: [String] = []
+
     var isTransportReadyForSend: Bool {
         latestConnectionState == .connected
     }

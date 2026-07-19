@@ -488,8 +488,10 @@ final class ProviderChatService: ChatServicing {
             do {
                 authToken = token
                 let client = try await connector.connect(to: wsURL)
+                let connectionToken = UUID()
+                activeLifecycleConnectionToken = connectionToken
                 socket = client
-                startListening(on: client)
+                startListening(on: client, connectionToken: connectionToken)
                 try await awaitAuthResult(client: client, token: token, lastMessageId: lastMessageId)
                 return
             } catch {
@@ -830,14 +832,19 @@ final class ProviderChatService: ChatServicing {
             }
     }
 
-    private func startListening(on client: any WebSocketClient) {
+    private func startListening(on client: any WebSocketClient, connectionToken: UUID) {
         receiveTask = Task { [weak self] in
             guard let self else { return }
             var iterator = client.incomingTextMessages.makeAsyncIterator()
             while let text = await iterator.next() {
-                await handle(text: text, lifecycleEpoch: nil, lifecycleConnectionToken: nil)
+                // The direct connect() path is token-guarded exactly like the
+                // lifecycle path: a frame carries the token of the link it was read
+                // on, so a retired link's delayed auth_result (or any frame) is
+                // dropped and cannot restore serverFeatures on a link that has since
+                // reconnected — including a reconnect to a featureless OpenClaw link.
+                await handle(text: text, lifecycleEpoch: nil, lifecycleConnectionToken: connectionToken)
             }
-            handleSocketClose(closeInfo: client.lastCloseInfo, lifecycleEpoch: nil, lifecycleConnectionToken: nil)
+            handleSocketClose(closeInfo: client.lastCloseInfo, lifecycleEpoch: nil, lifecycleConnectionToken: connectionToken)
         }
     }
 

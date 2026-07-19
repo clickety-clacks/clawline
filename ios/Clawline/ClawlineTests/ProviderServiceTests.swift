@@ -764,6 +764,64 @@ struct ProviderServiceTests {
         return (service, mockSocket)
     }
 
+    @Test("retired-link + fence: a delayed retired-link tightbeam auth_result cannot restore the gate after an OpenClaw reconnect, and queued set_harness/placement-create stay refused by the current-link fence")
+    func retiredLinkCannotRestoreTightbeamAndQueuedControlStaysRefused() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_retired",
+            baseURLProvider: { baseURL }
+        )
+
+        // Link A is the tightbeam link: its auth_result opens the gate.
+        let tokenA = service.debugSetActiveLifecycleToken()
+        await service.debugDispatchFrameAfterDecode(
+            text: #"{ "type": "auth_result", "success": true, "features": ["tightbeam"] }"#,
+            lifecycleConnectionToken: tokenA
+        )
+        #expect(service.serverFeatures == ["tightbeam"])
+
+        // Link A retires and the service reconnects to an OpenClaw link B whose
+        // auth_result advertises NO tightbeam feature — the gate closes.
+        let tokenB = service.debugSetActiveLifecycleToken()   // retires A -> B
+        #expect(tokenA != tokenB)
+        await service.debugDispatchFrameAfterDecode(
+            text: #"{ "type": "auth_result", "success": true, "features": [] }"#,
+            lifecycleConnectionToken: tokenB
+        )
+        #expect(service.serverFeatures.isEmpty)
+
+        // The delayed RETIRED-link (A) tightbeam auth_result now resumes — an
+        // expected-close/retired-lifecycle callback firing late. It must be dropped
+        // by the current-link token guard; it must NOT restore tightbeam onto link B.
+        await service.debugDispatchFrameAfterDecode(
+            text: #"{ "type": "auth_result", "success": true, "features": ["tightbeam"] }"#,
+            lifecycleConnectionToken: tokenA
+        )
+        #expect(service.serverFeatures.contains("tightbeam") == false)
+        #expect(service.serverFeatures.isEmpty)
+
+        // Because the gate stayed closed, a queued Tightbeam-only session control
+        // and a placement-bearing create are still refused by the current-link fence.
+        do {
+            _ = try await service.applySessionControl(
+                sessionKey: "agent:main:clawline:user:main", action: .setHarness, value: "codex", enabled: nil
+            )
+            Issue.record("queued set_harness must stay refused after a retired-link restore attempt")
+        } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
+        } catch { Issue.record("expected tightbeamCapabilityUnavailable, got \(error)") }
+        do {
+            _ = try await service.createStream(
+                displayName: "P", idempotencyKey: "req_retired",
+                harness: "codex", model: nil, host: "eezo", archetype: nil
+            )
+            Issue.record("queued placement create must stay refused after a retired-link restore attempt")
+        } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
+        } catch { Issue.record("expected tightbeamCapabilityUnavailable, got \(error)") }
+    }
+
     @Test("TB-D5 fence: a placement-bearing create is refused at the service when the current link lacks the tightbeam feature")
     func placementCreateRefusedWhenLinkLacksTightbeam() async throws {
         let (service, _) = try await makeConnectedService(features: [])

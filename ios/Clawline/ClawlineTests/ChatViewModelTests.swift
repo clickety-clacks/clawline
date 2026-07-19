@@ -1572,6 +1572,64 @@ struct ChatViewModelTests {
         #expect(chatService.replayCursorSnapshot()[source] == nil)
     }
 
+    @Test("F2 regression: history-reset fences pending persist so a straggler write cannot recreate the cache")
+    @MainActor
+    func historyResetFencesPendingPersistWrites() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_reset_fence"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Fence", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let cacheIO = TestMessageCacheIO()
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth, chatService: chatService, settings: SettingsManager(),
+            device: TestDevice(), uploadService: TestUploadService(),
+            toastManager: ToastManager(), salientHighlightService: SalientHighlightService(),
+            messageCacheIO: cacheIO
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.f2.resetFence")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        // Deliver a message so a debounced persist is armed for `source`.
+        let msg = #"{"type":"message","id":"s_pre_reset_1","role":"assistant","content":"pre-reset","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(msg.utf8))))
+        for _ in 0..<50 {
+            if !viewModel.messages(for: source).isEmpty { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        // Force a history-reset reconnect while the persist debounce is pending.
+        chatService.startHistoryReset = true
+        chatService.startReplayCount = 0
+        chatService.emitSyncCompleteOnStart = false
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        try await Task.sleep(forDuration: .milliseconds(2100))
+        viewModel.handleSceneActiveStateChanged(isActive: true)
+        for _ in 0..<50 {
+            if chatService.connectCallCount >= 2 { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        // The history reset cancels the pending persist and advances the barrier
+        // generation; nothing may recreate the cache. Drain the shared executor
+        // (which the reset's clear is routed through) and confirm the store and
+        // cache stay empty for the reset stream.
+        try await Task.sleep(forDuration: .milliseconds(700))
+        cacheIO.drain()
+        #expect(viewModel.messages(for: source).map(\.id).contains("s_pre_reset_1") == false)
+    }
+
     @Test("F1 regression: a .serverFeatures event delayed past disconnect does not re-open the tightbeam gate")
     @MainActor
     func delayedServerFeaturesAfterDisconnectDoesNotReopenGate() async throws {
@@ -1703,7 +1761,7 @@ struct ChatViewModelTests {
         #expect(viewModel.orgOptions == nil)
     }
 
-    @Test("R4 composition: RootView preserves one injected cache-IO identity across scenes    @Test("R4 composition: RootView preserves one injected cache-IO identity across scenes — no per-view default/static escape")
+    @Test("R4 composition: RootView preserves one injected cache-IO identity across scenes — no per-view default/static escape")
     @MainActor
     func rootViewPreservesInjectedCacheIOIdentityAcrossScenes() {
         // The @main App owns ONE MessageCacheIO and injects it into every scene's

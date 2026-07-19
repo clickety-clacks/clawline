@@ -2654,6 +2654,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let previousSessionStatusUnavailable = self.sessionStatusUnavailable
         let previousHarnessOptions = self.viewModel?.orgOptionsHarnesses ?? []
         let nextHarnessOptions = viewModel.orgOptionsHarnesses
+        // The tightbeam gate decides provenance chrome on every message cell and
+        // the harness/host footer items. It flips mid-session (auth completes
+        // after cached history has already rendered on a cold launch), so a
+        // change must reconfigure what is already on screen.
+        let previousIsTightbeam = self.viewModel?.isTightbeamServer
+        let nextIsTightbeam = viewModel.isTightbeamServer
         let previousLiveProgress = self.liveProgress
         let previousStreamSearchQuery = self.streamSearchQuery
         let previousEffectiveSessionKey = callbackSessionKey()
@@ -2702,6 +2708,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if let isDark = isDark, currentIsDark != isDark {
             logger.info("update: appearance changed isDark=\(isDark, privacy: .public)")
             currentIsDark = isDark
+            forceReconfigureAll = true
+        }
+        if let previousIsTightbeam, previousIsTightbeam != nextIsTightbeam {
+            logger.info("update: tightbeam gate changed isTightbeam=\(nextIsTightbeam, privacy: .public)")
+            executeInvalidationPlan(invalidateFor(reason: .envChanged))
             forceReconfigureAll = true
         }
         let didFontScaleChange = currentFontScaleChangeSequence != request.fontScaleChangeSequence
@@ -2942,7 +2953,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
         if previousSessionStatus != sessionStatus
             || previousSessionStatusUnavailable != sessionStatusUnavailable
-            || previousHarnessOptions != nextHarnessOptions,
+            || previousHarnessOptions != nextHarnessOptions
+            || previousIsTightbeam != nextIsTightbeam,
            snapshot.indexOfItem(SessionMetadataFooterCell.itemId) != nil,
            oldItemIds.contains(SessionMetadataFooterCell.itemId)
         {

@@ -585,6 +585,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var lastMeasurementMetricsFingerprint: Int?
     private var pendingBoundsChange = false
     private var forceReconfigureAll = false
+    /// Last tightbeam gate value this controller rendered with. Controller-owned
+    /// because the view model instance is stable across updates.
+    private var currentIsTightbeam: Bool?
     private var currentFontScaleChangeSequence: Int = 0
     private var onExpand: ((Message) -> Void)?
     private var onScrollEvent: (@MainActor (MessageFlowScrollEvent) -> Void)?
@@ -2657,9 +2660,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         // The tightbeam gate decides provenance chrome on every message cell and
         // the harness/host footer items. It flips mid-session (auth completes
         // after cached history has already rendered on a cold launch), so a
-        // change must reconfigure what is already on screen.
-        let previousIsTightbeam = self.viewModel?.isTightbeamServer
+        // change must reconfigure what is already on screen. The previous value
+        // is held by the CONTROLLER: `self.viewModel` is the same object as the
+        // incoming one, so reading the gate off it would always compare equal.
+        let previousIsTightbeam = currentIsTightbeam
         let nextIsTightbeam = viewModel.isTightbeamServer
+        currentIsTightbeam = nextIsTightbeam
         let previousLiveProgress = self.liveProgress
         let previousStreamSearchQuery = self.streamSearchQuery
         let previousEffectiveSessionKey = callbackSessionKey()

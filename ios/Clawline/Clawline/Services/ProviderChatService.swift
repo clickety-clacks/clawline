@@ -703,7 +703,8 @@ final class ProviderChatService: ChatServicing {
                  .sessionReplaced,
                  .invalidMessageId,
                  .serverError,
-                 .policyViolation:
+                 .policyViolation,
+                 .tightbeamCapabilityUnavailable:
                 return false
             case .notConnected, .authTimeout:
                 return true

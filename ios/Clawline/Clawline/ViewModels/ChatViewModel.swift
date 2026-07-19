@@ -732,6 +732,11 @@ final class ChatViewModel {
         guard !normalizedSessionKey.isEmpty else { return }
         Task { [weak self] in
             guard let self else { return }
+            // Recheck the gate INSIDE the async boundary: the gate can close
+            // between enqueueing this task and its execution (the modal's
+            // synchronous check is not enough), and a Tightbeam-only control
+            // must never post to a link that lost the feature.
+            guard self.canApplyTightbeamSessionControl(action) else { return }
             do {
                 let response = try await self.chatService.applySessionControl(
                     sessionKey: normalizedSessionKey,
@@ -2640,13 +2645,14 @@ final class ChatViewModel {
         host: String?,
         archetype: String?
     ) async -> StreamCreateOutcome {
-        // Placement is a Tightbeam-only capability. Re-check the shared gate at
-        // submission (defense in depth behind the modal's onChange dismissal):
-        // if the gate closed after the sheet opened, refuse placement rather
-        // than post harness/model/host/archetype to an ungated server.
-        let hasPlacement = harness != nil || model != nil || host != nil || archetype != nil
-        if hasPlacement, !isTightbeamServer {
-            return .failed(message: "Placement options are unavailable on this server.")
+        // This placement-aware create is the Tightbeam creation SHEET's only
+        // submit path (the legacy openclaw manager uses createStream(displayName:)).
+        // The whole sheet is Tightbeam-gated, so refuse ANY submission — including
+        // name-only — once the gate has closed, not just placement-bearing ones.
+        // Re-checked here at the async submission boundary as defense in depth
+        // behind the modal's onChange dismissal.
+        guard isTightbeamServer else {
+            return .failed(message: "New-chat options are unavailable on this server.")
         }
         switch await performStreamCreate(
             displayName: displayName,

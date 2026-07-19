@@ -52,9 +52,12 @@ struct LifecycleTransportEvent: Equatable, Sendable {
         )
         case serverMessage(data: Data)
         /// Gateway history barrier, delivered IN-BAND with `serverMessage` so it
-        /// cannot be reordered against the messages it must separate. The
-        /// service also emits `.streamHistoryCleared` on the service-event
-        /// stream for non-lifecycle consumers; handling is idempotent.
+        /// cannot be reordered against the messages it must separate. The service
+        /// emits the barrier on EXACTLY ONE channel per occurrence — the in-band
+        /// lifecycle event when a lifecycle epoch is active, otherwise the
+        /// `.streamHistoryCleared` service event — never both, because clearing
+        /// is destructive and not idempotent (a duplicate would erase a
+        /// legitimately post-barrier message).
         case historyCleared(sessionKey: String)
         case syncComplete
         case transportClosed(reason: TransportCloseReason)

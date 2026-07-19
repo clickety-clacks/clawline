@@ -1670,14 +1670,28 @@ struct ChatViewModelTests {
             try await Task.sleep(forDuration: .milliseconds(10))
         }
         #expect(viewModel.isTightbeamServer == false)
-
-        // set_harness is no longer applicable...
         #expect(viewModel.canApplyTightbeamSessionControl(.setHarness) == false)
-        // ...and a placement-carrying create is refused rather than posted.
-        let outcome = await viewModel.createStream(
+
+        // Actually INVOKE applySessionControl(.setHarness) after closure and
+        // assert the service was NOT called — the async task must recheck the
+        // gate at its own boundary, not just at the modal.
+        viewModel.applySessionControl(sessionKey: personalSessionKey, action: .setHarness, value: "codex")
+        try await Task.sleep(forDuration: .milliseconds(80))
+        #expect(chatService.lastSessionControl == nil)
+
+        // A NAME-ONLY create from the sheet path is refused too (the whole sheet
+        // is Tightbeam-gated), and nothing is posted to the service.
+        let nameOnly = await viewModel.createStream(
+            displayName: "Late Name Only", harness: nil, model: nil, host: nil, archetype: nil
+        )
+        #expect(nameOnly == .failed(message: "New-chat options are unavailable on this server."))
+        #expect(chatService.lastCreatePlacement == nil)
+
+        // A placement-carrying create is likewise refused and not posted.
+        let placement = await viewModel.createStream(
             displayName: "Late Placement", harness: "codex", model: nil, host: "eezo", archetype: nil
         )
-        #expect(outcome == .failed(message: "Placement options are unavailable on this server."))
+        #expect(placement == .failed(message: "New-chat options are unavailable on this server."))
         #expect(chatService.lastCreatePlacement == nil)
     }
 

@@ -16,6 +16,11 @@ import UIKit
 struct Clawline_SpatialApp: App {
     @State private var authManager: AuthManager
     @State private var settingsManager: SettingsManager
+    // Process-wide message-cache serial IO, owned at the app composition root.
+    // visionOS presents MULTIPLE scenes, each with its own RootView; injecting
+    // this one instance into every scene keeps cache write/delete ordering
+    // correct across scenes (spec §T-A).
+    @State private var messageCacheIO: any MessageCacheIOServicing = MessageCacheIO()
 
     private let deviceIdentifier: any DeviceIdentifying
     private let connectionService: any ConnectionServicing
@@ -43,7 +48,7 @@ struct Clawline_SpatialApp: App {
     var body: some Scene {
         WindowGroup {
             @Bindable var settingsManager = settingsManager
-            RootView(uploadService: uploadService)
+            RootView(uploadService: uploadService, messageCacheIO: messageCacheIO)
                 .environment(authManager)
                 .environment(\.connectionService, connectionService)
                 .environment(\.deviceIdentifier, deviceIdentifier)

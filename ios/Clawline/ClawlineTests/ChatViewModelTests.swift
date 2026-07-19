@@ -1538,7 +1538,13 @@ struct ChatViewModelTests {
         defer { viewModel.prepareForReplacement() }
 
         await viewModel.activate(origin: "test.t1751.historyClear")
+        // Establish the connection/lifecycle epoch before delivering an epoch-1
+        // message — without onAppear + setConnected the coordinator is not at
+        // epoch 1 and drops the frame (guard currentEpoch == epoch), which made
+        // this test fail solo at every SHA. Matches every reliable delivery test.
+        await viewModel.onAppear()
         chatService.emitServiceEvent(.streamSnapshot(streams))
+        try await setConnected(chatService: chatService, viewModel: viewModel)
         for _ in 0..<50 {
             if viewModel.stream(for: source) != nil { break }
             try await Task.sleep(forDuration: .milliseconds(10))

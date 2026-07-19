@@ -1653,10 +1653,11 @@ struct ChatViewModelTests {
         }
         #expect(viewModel.isTightbeamServer)
 
-        // Socket closes: the service clears its authoritative feature set, and the
-        // view model resets on the disconnected transition.
+        // Socket closes: the service clears its authoritative feature set. The
+        // gate closes (the last on-link feature snapshot was empty).
         chatService.serverFeatures = []
         chatService.emitConnectionState(.disconnected)
+        chatService.emitServiceEvent(.serverFeatures([]))
         for _ in 0..<50 {
             if !viewModel.isTightbeamServer { break }
             try await Task.sleep(forDuration: .milliseconds(10))

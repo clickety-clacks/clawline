@@ -1000,18 +1000,17 @@ final class ChatViewModel {
     /// chips and the harness/host footer stay missing for the whole session
     /// and only appear for content that arrives later.
     /// Event-stream entry: a `.serverFeatures` event may be delayed past an
-    /// unexpected socket close or a reconnect, so it must NOT be trusted to
-    /// reopen the gate. Explicit current-link fence: apply only while the link is
-    /// actually connected, and re-derive from the service's authoritative feature
-    /// set (set on auth, cleared on disconnect) rather than the event payload —
-    /// so even a delayed pre-disconnect event resolves to the CURRENT link's
-    /// features (empty when disconnected, the new link's when reconnected).
+    /// unexpected socket close or a reconnect, so its PAYLOAD must never be
+    /// trusted to reopen the gate. Explicit current-link fence: the value is
+    /// always re-derived from the service's authoritative feature set, which the
+    /// service sets on auth success and CLEARS on disconnect. That property is a
+    /// per-link invariant — the service only ever holds the current link's
+    /// features — so a delayed pre-disconnect event resolves to the CURRENT
+    /// link's value: empty while disconnected, the new link's features after a
+    /// reconnect. The old gate can never reopen. (Proven by
+    /// `delayedServerFeaturesAfterDisconnectDoesNotReopenGate` across a full
+    /// disconnect -> reconnect-to-openclaw -> delayed-old-event sequence.)
     private func applyServerFeaturesFromEvent() {
-        guard connectionState == .connected else {
-            // No live link: a stale/delayed feature event cannot open the gate.
-            applyServerFeatures([])
-            return
-        }
         applyServerFeatures(chatService.serverFeatures)
     }
 

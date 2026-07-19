@@ -5925,7 +5925,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         sbbState.isPinnedToBottomIntent
     }
 
-    private func fingerprint(for message: Message) -> Int {
+    // internal for regression access (F4): provenance fields must be in the hash.
+    func fingerprint(for message: Message) -> Int {
         var hasher = Hasher()
         hasher.combine(message.content)
         hasher.combine(message.streaming)

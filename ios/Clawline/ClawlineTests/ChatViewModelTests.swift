@@ -1572,6 +1572,82 @@ struct ChatViewModelTests {
         #expect(chatService.replayCursorSnapshot()[source] == nil)
     }
 
+    @Test("F1 regression: a .serverFeatures event delayed past disconnect does not re-open the tightbeam gate")
+    @MainActor
+    func delayedServerFeaturesAfterDisconnectDoesNotReopenGate() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth, chatService: chatService, settings: SettingsManager(),
+            device: TestDevice(), uploadService: TestUploadService(),
+            toastManager: ToastManager(), salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.f1.staleGate")
+        chatService.serverFeatures = ["tightbeam"]
+        chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))
+        for _ in 0..<50 {
+            if viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.isTightbeamServer)
+
+        // Socket closes: the service clears its authoritative feature set, and the
+        // view model resets on the disconnected transition.
+        chatService.serverFeatures = []
+        chatService.emitConnectionState(.disconnected)
+        for _ in 0..<50 {
+            if !viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.isTightbeamServer == false)
+
+        // A .serverFeatures(["tightbeam"]) event delayed from before the close now
+        // arrives. It must NOT re-open the gate — the handler re-derives from the
+        // service (now empty), not the stale payload.
+        chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))
+        try await Task.sleep(forDuration: .milliseconds(80))
+        #expect(viewModel.isTightbeamServer == false)
+    }
+
+    @Test("F3 regression: a stale in-flight org-options fetch is dropped when the session resets")
+    @MainActor
+    func staleOrgOptionsFetchDroppedOnReset() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.orgOptionsFetchDelay = .milliseconds(120)
+        chatService.orgOptions = OrgOptions(
+            harnesses: ["stale"], models: [:], hosts: ["stale-host"], archetypes: []
+        )
+        let viewModel = ChatViewModel(
+            auth: auth, chatService: chatService, settings: SettingsManager(),
+            device: TestDevice(), uploadService: TestUploadService(),
+            toastManager: ToastManager(), salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.f3.staleOptions")
+        chatService.serverFeatures = ["tightbeam"]
+        chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))  // triggers loadOrgOptionsIfNeeded
+        for _ in 0..<50 {
+            if viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        // The fetch is in flight (delayed). Reset the session before it returns.
+        chatService.serverFeatures = []
+        chatService.emitConnectionState(.disconnected)
+
+        // Let the stale fetch resolve; its result must be dropped (generation moved).
+        try await Task.sleep(forDuration: .milliseconds(200))
+        #expect(viewModel.orgOptions == nil)
+    }
+
     @Test("R4 composition: RootView preserves one injected cache-IO identity across scenes — no per-view default/static escape")
     @MainActor
     func rootViewPreservesInjectedCacheIOIdentityAcrossScenes() {
@@ -8256,6 +8332,7 @@ final class TestChatService: ChatServicing {
     var fetchTrackableSessionsError: Error?
     var fetchOrgOptionsError: Error?
     var orgOptions = OrgOptions.empty
+    var orgOptionsFetchDelay: Duration?
     private(set) var fetchOrgOptionsCallCount: Int = 0
     var streams: [StreamSession] = []
     var trackableSessions: [TrackableSession] = []
@@ -8475,6 +8552,7 @@ final class TestChatService: ChatServicing {
     func fetchOrgOptions() async throws -> OrgOptions {
         fetchOrgOptionsCallCount += 1
         if let fetchOrgOptionsError { throw fetchOrgOptionsError }
+        if let orgOptionsFetchDelay { try await Task.sleep(for: orgOptionsFetchDelay) }
         return orgOptions
     }
 

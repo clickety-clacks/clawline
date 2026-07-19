@@ -1627,9 +1627,11 @@ struct ChatViewModelTests {
         #expect(viewModel.debugCacheFileExists(for: source) == false)
         #expect(chatService.replayCursorSnapshot()[source] == nil)
 
-        // A genuinely post-reset write (current generation) still persists.
+        // A genuinely post-reset write (current generation) still persists. The
+        // reset was triggered directly, so the transport epoch is unchanged (1);
+        // deliver on that epoch so the frame is accepted by the coordinator.
         let postReset = #"{"type":"message","id":"s_post_reset_1","role":"assistant","content":"post-reset","timestamp":1700000009000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
-        chatService.emitLifecycleEvent(.init(epoch: 3, payload: .serverMessage(data: Data(postReset.utf8))))
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(postReset.utf8))))
         for _ in 0..<120 {
             if cacheIO.pendingCount >= 1 { break }
             try await Task.sleep(forDuration: .milliseconds(10))

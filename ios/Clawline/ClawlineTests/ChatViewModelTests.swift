@@ -2847,6 +2847,61 @@ struct ChatViewModelTests {
         #expect(chatService.replayCursorSnapshot()[customKey] == "s_side_replay")
     }
 
+    @Test("B4 regression: a barrier during history-reset replay does not resurrect the staged pre-barrier message")
+    @MainActor
+    func barrierDuringHistoryResetReplayPurgesStagedMessages() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let customKey = "agent:main:clawline:user:s_reset_barrier"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customKey, displayName: "Side", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth, chatService: chatService, settings: SettingsManager(),
+            device: TestDevice(), uploadService: TestUploadService(),
+            toastManager: ToastManager(), salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.b4.barrierDuringReset")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.orderedSessionKeys.contains(customKey) { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        // Force a history-reset reconnect.
+        chatService.startHistoryReset = true
+        chatService.startReplayCount = 1
+        chatService.emitSyncCompleteOnStart = false
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        try await Task.sleep(forDuration: .milliseconds(2100))
+        viewModel.handleSceneActiveStateChanged(isActive: true)
+        for _ in 0..<50 {
+            if chatService.connectCallCount >= 2 { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        // A replay frame stages a pre-barrier message in pendingHistoryResetReplay...
+        let staged = #"{"type":"message","id":"s_pre_barrier_reset","role":"assistant","content":"pre-barrier","timestamp":1700000000002,"streaming":false,"sessionKey":"\#(customKey)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .serverMessage(data: Data(staged.utf8))))
+        // ...then a barrier for that stream lands mid-replay...
+        chatService.emitServiceEvent(.streamHistoryCleared(sessionKey: customKey))
+        // ...and replay completes (this is where resurrection happened before the fix).
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .syncComplete))
+
+        try await Task.sleep(forDuration: .milliseconds(150))
+
+        // The staged pre-barrier message must NOT be reinserted, and the cursor
+        // must not be re-seeded from it.
+        #expect(viewModel.messages(for: customKey).map(\.id).contains("s_pre_barrier_reset") == false)
+        #expect(chatService.replayCursorSnapshot()[customKey] == nil)
+    }
+
     @Test("Cache restore seeds missing cursor without replacing a live cursor")
     @MainActor
     func cacheRestoreSeedsMissingCursorOnly() async throws {

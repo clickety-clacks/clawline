@@ -1572,6 +1572,27 @@ struct ChatViewModelTests {
         #expect(chatService.replayCursorSnapshot()[source] == nil)
     }
 
+    @Test("R4 composition: RootView preserves one injected cache-IO identity across scenes — no per-view default/static escape")
+    @MainActor
+    func rootViewPreservesInjectedCacheIOIdentityAcrossScenes() {
+        // The @main App owns ONE MessageCacheIO and injects it into every scene's
+        // RootView. RootView takes it as a required `let` (no default, no @State),
+        // so it cannot substitute its own instance. Two RootViews standing in for
+        // two visionOS WindowGroup scenes, both built from the single app-owned
+        // instance, must therefore hold THAT exact identity — a per-RootView
+        // default or static would surface as a different object here.
+        let appOwned = MessageCacheIO()
+        let sceneA = RootView(uploadService: TestUploadService(), messageCacheIO: appOwned)
+        let sceneB = RootView(uploadService: TestUploadService(), messageCacheIO: appOwned)
+        #expect((sceneA.messageCacheIO as AnyObject) === (appOwned as AnyObject))
+        #expect((sceneB.messageCacheIO as AnyObject) === (appOwned as AnyObject))
+        #expect((sceneA.messageCacheIO as AnyObject) === (sceneB.messageCacheIO as AnyObject))
+        // A DIFFERENT app-owned instance is a distinct identity (sanity: identity
+        // comparison is meaningful, not trivially true).
+        let otherApp = MessageCacheIO()
+        #expect((sceneA.messageCacheIO as AnyObject) !== (otherApp as AnyObject))
+    }
+
     @Test("R4 regression: production MessageCacheIO has no static/global executor — two instances are independent")
     func productionCacheIOHasNoGlobalExecutor() async throws {
         // If the executor were static/process-global, blocking one instance's

@@ -771,14 +771,24 @@ final class ChatViewModel {
     /// On-demand fetch (no caching layer): loads org-options once per tightbeam
     /// session lifetime so the footer harness picker has its options. Cleared on
     /// disconnect/logout via `resetSessionProvisioningState`.
+    private var orgOptionsLoadGeneration = 0
+
     func loadOrgOptionsIfNeeded() {
         guard isTightbeamServer, orgOptions == nil, !isLoadingOrgOptions else { return }
         isLoadingOrgOptions = true
+        let generation = orgOptionsLoadGeneration
         Task { [weak self] in
             guard let self else { return }
-            defer { self.isLoadingOrgOptions = false }
+            defer {
+                if self.orgOptionsLoadGeneration == generation { self.isLoadingOrgOptions = false }
+            }
             do {
-                self.orgOptions = try await self.chatService.fetchOrgOptions()
+                let fetched = try await self.chatService.fetchOrgOptions()
+                // Drop the result if a reset/disconnect advanced the generation or
+                // the gate closed while this fetch was in flight — a stale
+                // session's options must never overwrite a newer one's.
+                guard self.orgOptionsLoadGeneration == generation, self.isTightbeamServer else { return }
+                self.orgOptions = fetched
             } catch {
                 self.logger.info("org-options fetch failed error=\(error.localizedDescription, privacy: .public)")
             }
@@ -3127,6 +3137,19 @@ final class ChatViewModel {
     private func handleHistoryResetRequired(epoch: Int) {
         restoreTaskBySessionKey.values.forEach { $0.cancel() }
         restoreTaskBySessionKey.removeAll()
+        // Fence the cache the same way a per-stream barrier does: cancel pending
+        // persist debounces, drop their payloads, and advance EVERY known
+        // stream's barrier generation so a debounce that already fired self-
+        // discards instead of re-writing pre-reset history after clearMessageCache.
+        let fencedKeys = Set(sessionMessages.keys)
+            .union(pendingPersistPayloads.keys)
+            .union(persistDebounceTasks.keys)
+        persistDebounceTasks.values.forEach { $0.cancel() }
+        persistDebounceTasks.removeAll()
+        pendingPersistPayloads.removeAll()
+        for key in fencedKeys {
+            historyBarrierGenerationBySessionKey[key, default: 0] += 1
+        }
         pendingLocalMessages.removeAll()
         ackedPendingLocalMessageIDs.removeAll()
         messageFailures.removeAll()
@@ -4265,8 +4288,13 @@ final class ChatViewModel {
             hasResolvedProvisioningCapability = true
             supportsSessionProvisioning = supported
             attemptPendingProvisionedSendIfPossible()
-        case .serverFeatures(let features):
-            applyServerFeatures(features)
+        case .serverFeatures:
+            // Ignore the event's payload and re-derive from the service, which
+            // clears its feature set on disconnect. A .serverFeatures event
+            // delayed past an unexpected socket close would otherwise re-open the
+            // Tightbeam gate with no live authed link (the event stream and the
+            // connection-state stream are independent).
+            applyServerFeatures(chatService.serverFeatures)
         case .sessionInfo(let info):
             hasResolvedProvisioningCapability = true
             supportsSessionProvisioning = true
@@ -4673,6 +4701,9 @@ final class ChatViewModel {
         serverFeatures.removeAll()
         orgOptions = nil
         isLoadingOrgOptions = false
+        // Invalidate any in-flight org-options fetch from the prior session so
+        // its result cannot land in the next session's picker.
+        orgOptionsLoadGeneration &+= 1
         hasResolvedProvisioningCapability = false
         hasReceivedSessionProvisioning = false
         hasReceivedExplicitSessionInfo = false
@@ -5350,13 +5381,18 @@ final class ChatViewModel {
     }
 
     private func clearMessageCache() {
-        let fileManager = FileManager.default
         guard let directoryURL = messageCacheDirectoryURL() else { return }
-        guard let contents = try? fileManager.contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: nil) else {
-            return
-        }
-        for fileURL in contents {
-            try? fileManager.removeItem(at: fileURL)
+        // Route deletes through the shared serial executor (same queue as writes)
+        // so a history-reset wipe is strictly ordered after any previously
+        // enqueued persist — a straggler write cannot recreate the files after.
+        messageCacheIO.perform {
+            let fileManager = FileManager.default
+            guard let contents = try? fileManager.contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: nil) else {
+                return
+            }
+            for fileURL in contents {
+                try? fileManager.removeItem(at: fileURL)
+            }
         }
     }
 

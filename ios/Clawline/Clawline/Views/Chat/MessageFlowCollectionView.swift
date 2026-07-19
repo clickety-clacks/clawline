@@ -5929,6 +5929,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         var hasher = Hasher()
         hasher.combine(message.content)
         hasher.combine(message.streaming)
+        // Provenance drives the chip class, sender label, and stamp-strip. A
+        // replay/authoritative update can correct sender/role on a same-id,
+        // same-content message; without these the diff misses it and the cell
+        // keeps the wrong chip (spec §T-D).
+        hasher.combine(message.sender)
+        hasher.combine(message.role)
         hasher.combine(viewModel?.sendIndicatorState(for: message.id))
         hasher.combine(message.replyToMessageId)
         hasher.combine(message.replyToClientMessageId)

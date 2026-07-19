@@ -671,6 +671,41 @@ struct ProviderServiceTests {
         #expect(message?.content == "ok")
     }
 
+    @Test("F1 suspension-window regression: a frame whose link token retired DURING decode is dropped and cannot mutate the new link")
+    func staleFrameAfterTokenRetirementDuringDecodeIsDropped() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+
+        // Link A is active; a frame is read and captures token A. Then the link
+        // retires and reconnects (token B) while the decode await is suspended.
+        let tokenA = service.debugSetActiveLifecycleToken()
+        let tokenB = service.debugSetActiveLifecycleToken()   // retires A -> B
+        #expect(tokenA != tokenB)
+
+        // The stale link-A auth_result (tightbeam) resumes after the retirement.
+        // The post-decode recheck must drop it — it must NOT set serverFeatures
+        // on the new link.
+        await service.debugDispatchFrameAfterDecode(
+            text: #"{ "type": "auth_result", "success": true, "features": ["tightbeam"] }"#,
+            lifecycleConnectionToken: tokenA
+        )
+        #expect(service.serverFeatures.isEmpty)
+
+        // Control: the same frame on the CURRENT token B is accepted (proves the
+        // drop is due to the retired token, not a broken dispatch path).
+        await service.debugDispatchFrameAfterDecode(
+            text: #"{ "type": "auth_result", "success": true, "features": ["tightbeam"] }"#,
+            lifecycleConnectionToken: tokenB
+        )
+        #expect(service.serverFeatures == ["tightbeam"])
+    }
+
     @Test("F1 production: an unexpected socket close clears the service's authoritative tightbeam feature set")
     func socketCloseClearsServerFeatures() async throws {
         let mockSocket = MockWebSocketClient()

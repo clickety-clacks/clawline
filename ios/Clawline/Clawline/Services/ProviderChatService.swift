@@ -846,6 +846,30 @@ final class ProviderChatService: ChatServicing {
             return
         }
 
+        await dispatchDecodedFrame(
+            data: data,
+            envelope: envelope,
+            lifecycleEpoch: lifecycleEpoch,
+            lifecycleConnectionToken: lifecycleConnectionToken
+        )
+    }
+
+    /// Dispatch a decoded inbound frame. Split out of `handle(text:)` so the
+    /// post-decode link-token recheck is the FIRST thing that runs here: the
+    /// token can retire while the decode await is suspended (socket close +
+    /// reconnect), and dispatching a stale frame would mutate the NEW link
+    /// (e.g. an old auth_result setting serverFeatures for a replaced link).
+    private func dispatchDecodedFrame(
+        data: Data,
+        envelope: Envelope,
+        lifecycleEpoch: Int?,
+        lifecycleConnectionToken: UUID?
+    ) async {
+        if let lifecycleConnectionToken, !isCurrentLifecycleConnectionToken(lifecycleConnectionToken) {
+            logger.debug("dropping stale inbound frame: link token retired during decode")
+            return
+        }
+
         switch envelope.type {
         case "auth_result":
             handleAuthResult(
@@ -1624,4 +1648,27 @@ final class ProviderChatService: ChatServicing {
     private func isReplayCursorEvent(_ message: Message) -> Bool {
         normalizeServerEventID(message.id) != nil && !message.streaming
     }
+
+#if DEBUG
+    // Suspension-window regression hooks (post-decode token fence).
+    func debugSetActiveLifecycleToken() -> UUID {
+        let token = UUID()
+        activeLifecycleConnectionToken = token
+        return token
+    }
+
+    /// Dispatch a frame exactly as `handle(text:)` does AFTER its decode await —
+    /// i.e. with a token captured at read time — so a test can retire the token
+    /// first and prove the post-decode recheck drops the stale frame.
+    func debugDispatchFrameAfterDecode(text: String, lifecycleConnectionToken: UUID?) async {
+        guard let data = text.data(using: .utf8),
+              let envelope = try? JSONDecoder().decode(Envelope.self, from: data) else { return }
+        await dispatchDecodedFrame(
+            data: data,
+            envelope: envelope,
+            lifecycleEpoch: 1,
+            lifecycleConnectionToken: lifecycleConnectionToken
+        )
+    }
+#endif
 }

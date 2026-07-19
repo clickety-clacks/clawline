@@ -1744,6 +1744,59 @@ struct ChatViewModelTests {
         #expect(viewModel.isTightbeamServer == false)
     }
 
+    @Test("F1 integration: with the REAL ProviderChatService, an unexpected socket close closes the view model's tightbeam gate (no test-side manual clear)")
+    @MainActor
+    func realServiceSocketCloseClosesViewModelGate() async throws {
+        resetChatPersistence()
+        ChatViewModel.resetConnectionOwnershipForTesting()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let socket = IntegrationMockSocket()
+        let connector = IntegrationMockConnector(client: socket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL },
+            authTokenProvider: { "jwt" }
+        )
+        let viewModel = ChatViewModel(
+            auth: auth, chatService: service, settings: SettingsManager(),
+            device: TestDevice(), uploadService: TestUploadService(),
+            toastManager: ToastManager(), salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.f1.integration")
+        await viewModel.onAppear()
+
+        // The view model's lifecycle drives startConnectionAttempt -> the real
+        // service opens the mock socket and sends its auth frame.
+        for _ in 0..<200 {
+            if socket.sentTexts.contains(where: { $0.contains("\"type\":\"auth\"") }) { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(socket.sentTexts.contains(where: { $0.contains("\"type\":\"auth\"") }))
+
+        // Server authenticates the link as a Tightbeam server.
+        socket.enqueue(text: #"{ "type": "auth_result", "success": true, "features": ["tightbeam"] }"#)
+        for _ in 0..<200 {
+            if viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.isTightbeamServer)
+
+        // Unexpected socket close. The bridge here is PRODUCTION ONLY: the real
+        // service clears serverFeatures in handleSocketClose, and the view model
+        // re-derives from it — no test manually clears anything.
+        socket.simulateClose()
+        for _ in 0..<200 {
+            if !viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.isTightbeamServer == false)
+    }
+
     @Test("F3 regression: an in-flight org-options fetch cannot repopulate a newer session after the gate closes")
     @MainActor
     func staleOrgOptionsFetchCannotRepopulateAfterGateCloses() async throws {
@@ -8965,6 +9018,38 @@ private final class TestMessageCacheIO: MessageCacheIOServicing {
             lock.lock(); performed += 1; lock.unlock()
         }
     }
+}
+
+private final class IntegrationMockSocket: WebSocketClient, @unchecked Sendable {
+    private let stream: AsyncStream<String>
+    private let continuation: AsyncStream<String>.Continuation
+    private let lock = NSLock()
+    private var _sentTexts: [String] = []
+
+    var sentTexts: [String] {
+        lock.lock(); defer { lock.unlock() }
+        return _sentTexts
+    }
+
+    init() {
+        var c: AsyncStream<String>.Continuation!
+        self.stream = AsyncStream { c = $0 }
+        self.continuation = c
+    }
+
+    var incomingTextMessages: AsyncStream<String> { stream }
+    func send(text: String) async throws {
+        lock.lock(); _sentTexts.append(text); lock.unlock()
+    }
+    func close(with code: URLSessionWebSocketTask.CloseCode?) { continuation.finish() }
+    func enqueue(text: String) { continuation.yield(text) }
+    func simulateClose() { continuation.finish() }
+}
+
+private final class IntegrationMockConnector: WebSocketConnecting {
+    let client: IntegrationMockSocket
+    init(client: IntegrationMockSocket) { self.client = client }
+    func connect(to url: URL) async throws -> WebSocketClient { client }
 }
 
 private func resetChatPersistence() {

@@ -1769,6 +1769,7 @@ struct ChatViewModelTests {
 
         await viewModel.activate(origin: "test.f1.integration")
         await viewModel.onAppear()
+        viewModel.handleSceneActiveStateChanged(isActive: true)
 
         // The view model's lifecycle drives startConnectionAttempt -> the real
         // service opens the mock socket and sends its auth frame.
@@ -1779,8 +1780,8 @@ struct ChatViewModelTests {
         #expect(socket.sentTexts.contains(where: { $0.contains("\"type\":\"auth\"") }))
 
         // Server authenticates the link as a Tightbeam server.
-        socket.enqueue(text: #"{ "type": "auth_result", "success": true, "features": ["tightbeam"] }"#)
-        for _ in 0..<200 {
+        socket.enqueue(text: #"{ "type": "auth_result", "success": true, "features": ["tightbeam"], "sessionKeys": [] }"#)
+        for _ in 0..<300 {
             if viewModel.isTightbeamServer { break }
             try await Task.sleep(forDuration: .milliseconds(10))
         }

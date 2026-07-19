@@ -4726,6 +4726,17 @@ final class ChatViewModel {
             attemptPendingProvisionedSendIfPossible()
             scheduleSessionStatusRefresh(for: uiSelectedSessionKey, reason: "connectionRestored")
         case .connecting, .reconnecting:
+            // No authenticated link exists in any non-live phase the coordinator
+            // collapses into .reconnecting (.connecting/.authenticating/.recovering).
+            // Re-derive the gate from the service's authoritative feature set, which
+            // `handleSocketClose` clears BEFORE it drives this transition, so the
+            // Tightbeam gate closes the instant the link drops instead of lingering
+            // open through reconnect. The service still holds the current link's
+            // features during the authenticated .replaying phase (also mapped to
+            // .reconnecting), so a live replay keeps the gate open with no flicker.
+            // This only touches the feature gate + its org-options; unrelated
+            // session/provisioning state is left intact for the reconnect.
+            applyServerFeatures(chatService.serverFeatures)
             isAssistantTyping = false
             typingSessionKey = nil
             clearAllLiveProgress()
@@ -6197,6 +6208,18 @@ final class ChatViewModel {
     }
 
 #if DEBUG
+    /// Drives the real coordinator-output path so a test can exercise the exact
+    /// production phase mapping (e.g. an unexpected drop's replaying -> recovering,
+    /// which collapses to .reconnecting) without standing up a live socket.
+    func debugDriveLifecyclePhaseForTesting(
+        from: ConnectionLifecyclePhase,
+        to: ConnectionLifecyclePhase,
+        epoch: Int,
+        reason: ConnectionLifecycleReason
+    ) async {
+        await handleLifecycleOutput(.phaseTransition(from: from, to: to, epoch: epoch, reason: reason))
+    }
+
     func debugConnectionSnapshot() -> (token: String?, lastMessageId: String?) {
         connectionSnapshot()
     }

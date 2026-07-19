@@ -2024,6 +2024,61 @@ struct ChatViewModelTests {
         #expect(chatService.lastCreatePlacement == nil)
     }
 
+    @Test("F1 regression: a reconnecting (non-live) phase closes the tightbeam gate and refuses queued actions — the gate must not linger open through reconnect")
+    @MainActor
+    func reconnectingPhaseClosesGateAndRefusesQueuedActions() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth, chatService: chatService, settings: SettingsManager(),
+            device: TestDevice(), uploadService: TestUploadService(),
+            toastManager: ToastManager(), salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.f1.reconnecting")
+        // Authenticated tightbeam link: service holds the features and emits them.
+        chatService.serverFeatures = ["tightbeam"]
+        chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))
+        for _ in 0..<50 {
+            if viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.isTightbeamServer)
+        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness))
+
+        // The link drops: production's handleSocketClose clears the service's
+        // authoritative feature set BEFORE it drives the coordinator, so the
+        // service reads empty by the time the reconnecting phase lands. Drive the
+        // real replaying -> recovering mapping (collapses to .reconnecting) — NOT
+        // a .disconnected/.failed terminal state, and NOT a manual gate clear.
+        chatService.serverFeatures = []
+        await viewModel.debugDriveLifecyclePhaseForTesting(
+            from: .replaying, to: .recovering, epoch: 1, reason: .transportInterrupted
+        )
+
+        // The gate must close on the reconnecting phase itself, not wait for a
+        // terminal disconnect.
+        #expect(viewModel.connectionState == .reconnecting)
+        #expect(viewModel.isTightbeamServer == false)
+        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness) == false)
+
+        // A queued set_harness invoked during reconnect is refused at the async
+        // boundary and never reaches the service.
+        viewModel.applySessionControl(sessionKey: personalSessionKey, action: .setHarness, value: "codex")
+        try await Task.sleep(forDuration: .milliseconds(80))
+        #expect(chatService.lastSessionControl == nil)
+
+        // A placement-carrying create during reconnect is likewise refused/unposted.
+        let placement = await viewModel.createStream(
+            displayName: "Reconnect Placement", harness: "codex", model: nil, host: "eezo", archetype: nil
+        )
+        #expect(placement == .failed(message: "New-chat options are unavailable on this server."))
+        #expect(chatService.lastCreatePlacement == nil)
+    }
+
     @Test("B2 regression: prepareForReplacement cancels the instance's pending cache writes")
     @MainActor
     func prepareForReplacementCancelsPendingCacheWork() async throws {

@@ -2889,12 +2889,14 @@ struct ChatViewModelTests {
         // A replay frame stages a pre-barrier message in pendingHistoryResetReplay...
         let staged = #"{"type":"message","id":"s_pre_barrier_reset","role":"assistant","content":"pre-barrier","timestamp":1700000000002,"streaming":false,"sessionKey":"\#(customKey)","attachments":[]}"#
         chatService.emitLifecycleEvent(.init(epoch: 2, payload: .serverMessage(data: Data(staged.utf8))))
-        // ...then a barrier for that stream lands mid-replay...
-        chatService.emitServiceEvent(.streamHistoryCleared(sessionKey: customKey))
+        // ...then a barrier lands mid-replay IN-BAND on the lifecycle stream, so
+        // it is strictly ordered after the staged message (production emits the
+        // barrier in-band; a service-event barrier could reorder against it).
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .historyCleared(sessionKey: customKey)))
         // ...and replay completes (this is where resurrection happened before the fix).
         chatService.emitLifecycleEvent(.init(epoch: 2, payload: .syncComplete))
 
-        try await Task.sleep(forDuration: .milliseconds(150))
+        try await Task.sleep(forDuration: .milliseconds(200))
 
         // The staged pre-barrier message must NOT be reinserted, and the cursor
         // must not be re-seeded from it.

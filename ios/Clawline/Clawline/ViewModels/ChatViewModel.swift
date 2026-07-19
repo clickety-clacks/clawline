@@ -616,6 +616,24 @@ final class ChatViewModel {
     func setActiveSessionKeyForTesting(_ sessionKey: String) {
         setEngineActiveSessionKey(sessionKey)
     }
+
+    // F2 (sixth-review) deterministic disk-cache fence proof hooks.
+    func triggerHistoryResetForTesting(epoch: Int) {
+        handleHistoryResetRequired(epoch: epoch)
+    }
+
+    func debugBarrierGeneration(for sessionKey: String) -> Int {
+        historyBarrierGenerationBySessionKey[sessionKey, default: 0]
+    }
+
+    func debugCacheFileExists(for sessionKey: String) -> Bool {
+        guard let url = messageCacheURL(for: sessionKey) else { return false }
+        return FileManager.default.fileExists(atPath: url.path)
+    }
+
+    func debugHasPendingPersist(for sessionKey: String) -> Bool {
+        persistDebounceTasks[sessionKey] != nil
+    }
 #endif
 
     private func scheduleDebouncedEngineActivation(target: String, epoch: Int) {

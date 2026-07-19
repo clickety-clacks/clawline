@@ -1572,13 +1572,13 @@ struct ChatViewModelTests {
         #expect(chatService.replayCursorSnapshot()[source] == nil)
     }
 
-    @Test("F2 regression: history-reset fences pending persist so a straggler write cannot recreate the cache")
+    @Test("F2 regression: history reset cancels a pending persist and bumps the barrier generation before the ordered cache delete")
     @MainActor
-    func historyResetFencesPendingPersistWrites() async throws {
+    func historyResetCancelsPendingPersistBeforeDelete() async throws {
         resetChatPersistence()
         let auth = TestAuthManager()
         auth.storeCredentials(token: "jwt", userId: "user")
-        let source = "agent:main:clawline:user:s_reset_fence"
+        let source = "agent:main:clawline:user:s_reset_cancel_fence"
         let streams = [
             makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
             makeStreamSession(sessionKey: source, displayName: "Fence", kind: "custom", orderIndex: 1, isBuiltIn: false),
@@ -1594,43 +1594,101 @@ struct ChatViewModelTests {
         )
         defer { viewModel.prepareForReplacement() }
 
-        await viewModel.activate(origin: "test.f2.resetFence")
+        await viewModel.activate(origin: "test.f2.cancelFence")
         chatService.emitServiceEvent(.streamSnapshot(streams))
         for _ in 0..<50 {
             if viewModel.stream(for: source) != nil { break }
             try await Task.sleep(forDuration: .milliseconds(10))
         }
 
-        // Deliver a message so a debounced persist is armed for `source`.
+        // Deliver a message: a persist debounce is armed (not yet fired).
         let msg = #"{"type":"message","id":"s_pre_reset_1","role":"assistant","content":"pre-reset","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
         chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(msg.utf8))))
         for _ in 0..<50 {
-            if !viewModel.messages(for: source).isEmpty { break }
+            if viewModel.debugHasPendingPersist(for: source) { break }
             try await Task.sleep(forDuration: .milliseconds(10))
         }
+        #expect(viewModel.debugHasPendingPersist(for: source))
+        let genBefore = viewModel.debugBarrierGeneration(for: source)
 
-        // Force a history-reset reconnect while the persist debounce is pending.
-        chatService.startHistoryReset = true
-        chatService.startReplayCount = 0
-        chatService.emitSyncCompleteOnStart = false
-        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
-        try await Task.sleep(forDuration: .milliseconds(2100))
-        viewModel.handleSceneActiveStateChanged(isActive: true)
-        for _ in 0..<50 {
-            if chatService.connectCallCount >= 2 { break }
-            try await Task.sleep(forDuration: .milliseconds(10))
-        }
+        // Trigger the reset BEFORE the debounce fires. It must cancel the pending
+        // persist and advance the barrier generation, so the straggler can never
+        // enqueue a resurrecting write.
+        viewModel.triggerHistoryResetForTesting(epoch: 2)
+        #expect(viewModel.debugHasPendingPersist(for: source) == false)
+        #expect(viewModel.debugBarrierGeneration(for: source) > genBefore)
 
-        // The history reset cancels the pending persist and advances the barrier
-        // generation; nothing may recreate the cache. Drain the shared executor
-        // (which the reset's clear is routed through) and confirm the store and
-        // cache stay empty for the reset stream.
-        try await Task.sleep(forDuration: .milliseconds(700))
+        // Drain the executor (the reset's clear delete). Wait past the original
+        // debounce window: no write may appear.
+        try await Task.sleep(forDuration: .milliseconds(650))
         cacheIO.drain()
-        #expect(viewModel.messages(for: source).map(\.id).contains("s_pre_reset_1") == false)
+        #expect(viewModel.debugCacheFileExists(for: source) == false)
+        #expect(chatService.replayCursorSnapshot()[source] == nil)
+
+        // A genuinely post-reset write (current generation) still persists.
+        let postReset = #"{"type":"message","id":"s_post_reset_1","role":"assistant","content":"post-reset","timestamp":1700000009000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 3, payload: .serverMessage(data: Data(postReset.utf8))))
+        for _ in 0..<120 {
+            if cacheIO.pendingCount >= 1 { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        cacheIO.drain()
+        #expect(viewModel.debugCacheFileExists(for: source) == true)
     }
 
-    @Test("F1 regression: a .serverFeatures event delayed past disconnect does not re-open the tightbeam gate")
+    @Test("F2 regression: a queued pre-reset write is serially ordered before the reset's cache delete — no on-disk resurrection")
+    @MainActor
+    func historyResetDeleteIsOrderedAfterQueuedWrite() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_reset_order_fence"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Order", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let cacheIO = TestMessageCacheIO()
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth, chatService: chatService, settings: SettingsManager(),
+            device: TestDevice(), uploadService: TestUploadService(),
+            toastManager: ToastManager(), salientHighlightService: SalientHighlightService(),
+            messageCacheIO: cacheIO
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.f2.orderFence")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        // Simulate a straggler pre-reset write that already reached the shared
+        // executor (a debounce that fired just before the reset): it writes the
+        // stream's cache file. Enqueued directly on the same injected executor.
+        let cacheURL = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Clawline", isDirectory: true)
+            .appendingPathComponent("MessageCache", isDirectory: true)
+            .appendingPathComponent(source.replacingOccurrences(of: ":", with: "-").appending(".json"))
+        cacheIO.perform {
+            try? FileManager.default.createDirectory(at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? Data("stale".utf8).write(to: cacheURL)
+        }
+
+        // The reset routes its cache delete through the SAME serial executor, so
+        // it is ordered strictly AFTER the queued write.
+        viewModel.triggerHistoryResetForTesting(epoch: 2)
+        #expect(cacheIO.pendingCount >= 2)  // straggler write + ordered delete
+
+        // Drain in submission order: write creates the file, delete removes it.
+        cacheIO.drain()
+        #expect(FileManager.default.fileExists(atPath: cacheURL.path) == false)
+    }
+
+    @Test("F1 regression: a .serverFeatures event delayed past disconnect does not re-open the tightbeam gate")    @Test("F1 regression: a .serverFeatures event delayed past disconnect does not re-open the tightbeam gate")    @Test("F1 regression: a .serverFeatures event delayed past disconnect does not re-open the tightbeam gate")
     @MainActor
     func delayedServerFeaturesAfterDisconnectDoesNotReopenGate() async throws {
         resetChatPersistence()
@@ -8878,6 +8936,11 @@ private final class TestMessageCacheIO: MessageCacheIOServicing {
     var performedCount: Int {
         lock.lock(); defer { lock.unlock() }
         return performed
+    }
+
+    var pendingCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return queued.count
     }
 
     func perform(_ work: @escaping @Sendable () -> Void) {

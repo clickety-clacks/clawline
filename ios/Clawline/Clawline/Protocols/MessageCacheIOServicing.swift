@@ -24,14 +24,15 @@ protocol MessageCacheIOServicing: Sendable {
     func perform(_ work: @escaping @Sendable () -> Void)
 }
 
-/// Production implementation. The queue is `static` *inside this type* on
-/// purpose: it guards a single process-global resource (the on-disk cache), so
-/// every instance must serialize against the same executor for the ordering
-/// guarantee to mean anything. Callers still receive it by injection.
+/// Production implementation. The queue is an INSTANCE property, not static:
+/// the composition root creates exactly ONE `MessageCacheIO` and injects that
+/// same instance into every `ChatViewModel`, so all instances serialize against
+/// one executor without any global/static state (COMMON.md). Constructing a
+/// second instance (previews/tests) yields an independent queue by design.
 final class MessageCacheIO: MessageCacheIOServicing {
-    private static let queue = DispatchQueue(label: "co.clicketyclacks.Clawline.messageCacheIO")
+    private let queue = DispatchQueue(label: "co.clicketyclacks.Clawline.messageCacheIO")
 
     func perform(_ work: @escaping @Sendable () -> Void) {
-        Self.queue.async(execute: work)
+        queue.async(execute: work)
     }
 }

@@ -13,6 +13,11 @@ struct RootView: View {
     let uploadService: any UploadServicing
     @State private var toastManager = ToastManager()
     @State private var salientHighlightService = SalientHighlightService()
+    // One process-wide cache-IO service, injected into every ChatViewModel so
+    // message-cache write/delete ordering holds across overlapping/replaced
+    // instances that share the on-disk cache (spec §T-A). Owned here (the
+    // composition root), not reached for as global state.
+    @State private var messageCacheIO: any MessageCacheIOServicing = MessageCacheIO()
     @State private var chatViewModel: ChatViewModel?
     @State private var didForceRecoveryLogout = false
     @State private var rootViewTraceId = UUID().uuidString
@@ -145,7 +150,8 @@ struct RootView: View {
             device: device,
             uploadService: uploadService,
             toastManager: toastManager,
-            salientHighlightService: salientHighlightService
+            salientHighlightService: salientHighlightService,
+            messageCacheIO: messageCacheIO
         )
         if let created = chatViewModel {
             if let providerChatService = chatService as? ProviderChatService {

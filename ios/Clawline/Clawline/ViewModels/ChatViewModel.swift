@@ -904,12 +904,13 @@ final class ChatViewModel {
     /// view-model instances (overlapping/replaced ones), not just within one.
     /// Injected so tests can substitute or drain it deterministically.
     private let messageCacheIO: any MessageCacheIOServicing
-    /// All message-cache file mutations (writes and deletes) run on this one
-    /// serial queue, so a barrier's cache delete is strictly ordered after any
-    /// previously enqueued write — a detached write can never land after the
-    /// delete and resurrect pre-barrier history on disk. Instance-owned (not
-    /// static/shared) per COMMON.md: the cache files it guards are owned by
-    /// this view model, and one view model's IO must not stall another's.
+    /// All message-cache file mutations (writes and deletes) run through the
+    /// injected `messageCacheIO`, so a barrier's cache delete is strictly
+    /// ordered after any previously enqueued write — a detached write can never
+    /// land after the delete and resurrect pre-barrier history on disk. The
+    /// composition root injects ONE shared instance into every view model, so
+    /// ordering holds across overlapping/replaced instances (the cache files are
+    /// a single process-wide resource) without any static/global state.
     private var writerCurrentEpoch: Int?
     private var firstReplayAppliedEpoch: Int?
     private var pendingHistoryResetReplay: PendingHistoryResetReplay?
@@ -3419,6 +3420,18 @@ final class ChatViewModel {
             clearSessionMessages(sessionKey: key, reason: "stream_history_cleared")
             removeCachedMessages(for: key)
             chatService.setReplayCursor(nil, for: key)
+            // Also purge any pre-barrier messages staged in a pending
+            // history-reset replay for this stream. Without this, a barrier
+            // that lands mid-replay clears the visible store but
+            // applyPendingHistoryResetReplayIfNeeded would reinsert the
+            // pre-barrier messages (and re-seed the cursor) at replayCompleted,
+            // resurrecting cleared history.
+            if pendingHistoryResetReplay?.messagesBySessionKey[key] != nil {
+                let dropped = pendingHistoryResetReplay?.messagesBySessionKey.removeValue(forKey: key) ?? []
+                for message in dropped {
+                    pendingHistoryResetReplay?.notificationSequenceByMessageId.removeValue(forKey: message.id)
+                }
+            }
         }
     }
 

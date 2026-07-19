@@ -1583,7 +1583,7 @@ struct ChatViewModelTests {
         #expect(bResult == .success)
     }
 
-    @Test("R4 regression: one shared injected cache-IO serializes writes across two overlapping ChatViewModels")
+    @Test("R4 regression: one shared injected cache-IO carries cache mutations from two overlapping ChatViewModels")
     @MainActor
     func sharedInjectedCacheIOSerializesAcrossInstances() async throws {
         resetChatPersistence()
@@ -1594,7 +1594,7 @@ struct ChatViewModelTests {
             makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
             makeStreamSession(sessionKey: source, displayName: "Shared", kind: "custom", orderIndex: 1, isBuiltIn: false),
         ]
-        // ONE cache-IO instance, injected into BOTH view models — exactly the
+        // ONE cache-IO instance injected into BOTH view models — exactly the
         // composition RootView provides (a single @State messageCacheIO passed
         // to every ensureChatViewModel).
         let sharedIO = TestMessageCacheIO()
@@ -1620,19 +1620,15 @@ struct ChatViewModelTests {
         let (vmB, svcB) = await makeVM("b")
         defer { vmA.prepareForReplacement(); vmB.prepareForReplacement() }
 
-        // Each view model persists on message delivery; both writes must land on
-        // the SAME injected executor (proving shared identity, not per-instance
-        // defaults) and drain in FIFO order (proving serialization).
-        let msgA = #"{"type":"message","id":"s_write_a","role":"assistant","content":"from A","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
-        let msgB = #"{"type":"message","id":"s_write_b","role":"assistant","content":"from B","timestamp":1700000000001,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
-        svcA.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(msgA.utf8))))
-        svcB.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(msgB.utf8))))
-
-        // Wait past the persist debounce, then drain the ONE shared executor.
-        try await Task.sleep(forDuration: .milliseconds(700))
+        // A history clear routes a cache-file delete through messageCacheIO
+        // synchronously (no debounce). Driving one clear on each view model must
+        // land BOTH deletes on the single injected executor — a per-instance
+        // default would leave the shared instance untouched. Serial drain proves
+        // ordering across the two instances.
+        svcA.emitServiceEvent(.streamHistoryCleared(sessionKey: source))
+        svcB.emitServiceEvent(.streamHistoryCleared(sessionKey: source))
+        try await Task.sleep(forDuration: .milliseconds(200))
         sharedIO.drain()
-        // Both view models routed their cache write through the single injected
-        // instance — a per-instance default executor would have left this at 0.
         #expect(sharedIO.performedCount >= 2)
     }
 

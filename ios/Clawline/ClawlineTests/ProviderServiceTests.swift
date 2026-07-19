@@ -740,6 +740,126 @@ struct ProviderServiceTests {
         #expect(service.serverFeatures.isEmpty)
     }
 
+    /// TB-D5 mutation-boundary fence: helper to bring the service to a connected
+    /// link whose auth advertised the given features.
+    private func makeConnectedService(features: [String]) async throws -> (ProviderChatService, MockWebSocketClient) {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_fence",
+            baseURLProvider: { baseURL }
+        )
+        let featuresJSON = "[" + features.map { "\"\($0)\"" }.joined(separator: ",") + "]"
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true, "features": \#(featuresJSON) }"#)
+        }
+        try await service.connect(token: "jwt", lastMessageId: nil)
+        for _ in 0..<50 {
+            if Set(service.serverFeatures) == Set(features) { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        return (service, mockSocket)
+    }
+
+    @Test("TB-D5 fence: a placement-bearing create is refused at the service when the current link lacks the tightbeam feature")
+    func placementCreateRefusedWhenLinkLacksTightbeam() async throws {
+        let (service, _) = try await makeConnectedService(features: [])
+        do {
+            _ = try await service.createStream(
+                displayName: "Placement", idempotencyKey: "req_x",
+                harness: "codex", model: nil, host: "eezo", archetype: nil
+            )
+            Issue.record("placement create must be refused on a featureless link")
+        } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
+            // expected
+        } catch {
+            Issue.record("expected tightbeamCapabilityUnavailable, got \(error)")
+        }
+    }
+
+    @Test("TB-D5 fence: set_harness is refused at the service when the current link lacks the tightbeam feature")
+    func setHarnessRefusedWhenLinkLacksTightbeam() async throws {
+        let (service, _) = try await makeConnectedService(features: [])
+        do {
+            _ = try await service.applySessionControl(
+                sessionKey: "agent:main:clawline:user:main", action: .setHarness, value: "codex", enabled: nil
+            )
+            Issue.record("set_harness must be refused on a featureless link")
+        } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
+            // expected
+        } catch {
+            Issue.record("expected tightbeamCapabilityUnavailable, got \(error)")
+        }
+    }
+
+    @Test("TB-D5 fence: a create that began on tightbeam and whose link RETIRED (socket close) is refused on the retry submission — the exact mid-operation gate-retirement hole")
+    func placementCreateRefusedAfterLinkRetiresToFeatureless() async throws {
+        let (service, mockSocket) = try await makeConnectedService(features: ["tightbeam"])
+        #expect(service.serverFeatures == ["tightbeam"])
+        // The link drops mid-operation (as it would between the first notConnected
+        // failure and the VM's post-reconnect retry, if the reconnect landed on a
+        // featureless/OpenClaw link). handleSocketClose clears the authoritative set.
+        mockSocket.close(with: .normalClosure)
+        for _ in 0..<50 {
+            if service.serverFeatures.isEmpty { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(service.serverFeatures.isEmpty)
+        // The retry submission (a second createStream call, exactly what
+        // createStreamRequestingRetry issues) must be refused, not posted.
+        do {
+            _ = try await service.createStream(
+                displayName: "Placement", idempotencyKey: "req_retry",
+                harness: "codex", model: nil, host: "eezo", archetype: nil
+            )
+            Issue.record("retry after link retirement must be refused")
+        } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
+            // expected
+        } catch {
+            Issue.record("expected tightbeamCapabilityUnavailable, got \(error)")
+        }
+    }
+
+    @Test("TB-D5 fence: the legacy name-only create is NOT gated by tightbeam (OpenClaw path stays usable)")
+    func nameOnlyCreateNotGatedByTightbeam() async throws {
+        let (service, _) = try await makeConnectedService(features: [])
+        // All placement fields nil -> the capability fence must NOT fire. It may
+        // fail downstream (no real control-plane), but never with the capability error.
+        do {
+            _ = try await service.createStream(displayName: "Name Only", idempotencyKey: "req_n")
+        } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
+            Issue.record("name-only create must not be gated by the tightbeam capability fence")
+        } catch {
+            // Any other failure (e.g. notConnected/network) is acceptable here.
+        }
+    }
+
+    @Test("TB-D5 fence: placement create and set_harness PASS the capability fence on a tightbeam link (no false refusal)")
+    func placementAndSetHarnessPassFenceOnTightbeamLink() async throws {
+        let (service, _) = try await makeConnectedService(features: ["tightbeam"])
+        for op in ["create", "harness"] {
+            do {
+                if op == "create" {
+                    _ = try await service.createStream(
+                        displayName: "P", idempotencyKey: "req_ok",
+                        harness: "codex", model: nil, host: "eezo", archetype: nil
+                    )
+                } else {
+                    _ = try await service.applySessionControl(
+                        sessionKey: "agent:main:clawline:user:main", action: .setHarness, value: "codex", enabled: nil
+                    )
+                }
+            } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
+                Issue.record("\(op) must pass the capability fence on a tightbeam link")
+            } catch {
+                // Downstream (no real control-plane) failures are fine; the fence passed.
+            }
+        }
+    }
+
     @Test("B1 regression: under a lifecycle epoch, a history barrier is emitted in-band and NOT duplicated as a service event")
     func historyBarrierIsSingleChannelUnderLifecycle() async throws {
         let mockSocket = MockWebSocketClient()

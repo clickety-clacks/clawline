@@ -56,6 +56,12 @@ final class ProviderChatService: ChatServicing {
         case invalidMessageId
         case serverError(code: String, message: String?)
         case policyViolation(code: Int, reason: String?)
+        /// A Tightbeam-only control-plane mutation (placement create / set_harness)
+        /// was attempted on a link whose current authenticated features do not
+        /// include "tightbeam". Thrown at the service boundary so a stale
+        /// view-model gate or a post-reconnect retry can never post to a
+        /// featureless/OpenClaw link.
+        case tightbeamCapabilityUnavailable
 
         var errorDescription: String? {
             switch self {
@@ -83,6 +89,8 @@ final class ProviderChatService: ChatServicing {
                     return reason
                 }
                 return "Connection rejected by server."
+            case .tightbeamCapabilityUnavailable:
+                return "New-chat options are unavailable on this server."
             }
         }
     }
@@ -323,6 +331,13 @@ final class ProviderChatService: ChatServicing {
         value: String?,
         enabled: Bool?
     ) async throws -> SessionControlResponse {
+        // Current-link capability fence: set_harness is Tightbeam-only. Checked
+        // here (not just at the view-model) against the service's authoritative
+        // feature set immediately before posting, so a queued task whose link was
+        // retired/reconnected to a featureless link cannot post set_harness.
+        if action == .setHarness, !serverFeatures.contains("tightbeam") {
+            throw Error.tightbeamCapabilityUnavailable
+        }
         guard let token = await resolveControlPlaneToken() else {
             throw Error.notConnected
         }
@@ -358,6 +373,16 @@ final class ProviderChatService: ChatServicing {
         host: String?,
         archetype: String?
     ) async throws -> StreamSession {
+        // Current-link capability fence: a placement-bearing create is
+        // Tightbeam-only. The legacy name-only create (all placement fields nil)
+        // is an OpenClaw path and stays ungated. Checked against the service's
+        // authoritative feature set immediately before EVERY submission — the VM's
+        // retry-after-reconnect calls back through here, so a create that began on
+        // Tightbeam and reconnected to a featureless link is refused, not posted.
+        let hasPlacement = harness != nil || model != nil || host != nil || archetype != nil
+        if hasPlacement, !serverFeatures.contains("tightbeam") {
+            throw Error.tightbeamCapabilityUnavailable
+        }
         guard let token = await resolveControlPlaneToken() else {
             throw Error.notConnected
         }

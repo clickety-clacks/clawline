@@ -1609,58 +1609,6 @@ struct ChatViewModelTests {
         #expect(chatService.lastCreatePlacement == nil)
     }
 
-    @Test("B1 regression: a post-barrier message survives a delayed duplicate history-clear")
-    @MainActor
-    func postBarrierMessageSurvivesDelayedDuplicateClear() async throws {
-        resetChatPersistence()
-        let auth = TestAuthManager()
-        auth.storeCredentials(token: "jwt", userId: "user")
-        let source = "agent:main:clawline:user:s_dup_clear"
-        let streams = [
-            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
-            makeStreamSession(sessionKey: source, displayName: "Dup", kind: "custom", orderIndex: 1, isBuiltIn: false),
-        ]
-        let chatService = TestChatService()
-        chatService.streams = streams
-        let viewModel = ChatViewModel(
-            auth: auth,
-            chatService: chatService,
-            settings: SettingsManager(),
-            device: TestDevice(),
-            uploadService: TestUploadService(),
-            toastManager: ToastManager(),
-            salientHighlightService: SalientHighlightService()
-        )
-        defer { viewModel.prepareForReplacement() }
-
-        await viewModel.activate(origin: "test.b1.dupClear")
-        chatService.emitServiceEvent(.streamSnapshot(streams))
-        for _ in 0..<50 {
-            if viewModel.stream(for: source) != nil { break }
-            try await Task.sleep(forDuration: .milliseconds(10))
-        }
-
-        // Wire order: clear, then a POST-barrier message. The barrier arrives
-        // in-band on the lifecycle stream so it cannot reorder against the
-        // message that follows it.
-        chatService.emitServiceEvent(.streamHistoryCleared(sessionKey: source))
-        let postBarrier = #"{"type":"message","id":"s_post_1","role":"assistant","content":"After the barrier","timestamp":1700000001000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
-        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(postBarrier.utf8))))
-        for _ in 0..<50 {
-            if viewModel.messages(for: source).map(\.id) == ["s_post_1"] { break }
-            try await Task.sleep(forDuration: .milliseconds(10))
-        }
-        #expect(viewModel.messages(for: source).map(\.id) == ["s_post_1"])
-
-        // A DELAYED duplicate of the same clear (e.g. an out-of-band service
-        // event after the in-band one already ran) must NOT erase the
-        // post-barrier message. Before the fix, the second emission's
-        // destructive handler wiped it.
-        chatService.emitServiceEvent(.streamHistoryCleared(sessionKey: source))
-        try await Task.sleep(forDuration: .milliseconds(60))
-        #expect(viewModel.messages(for: source).map(\.id) == ["s_post_1"])
-    }
-
     @Test("B2 regression: prepareForReplacement cancels the instance's pending cache writes")
     @MainActor
     func prepareForReplacementCancelsPendingCacheWork() async throws {

@@ -671,6 +671,69 @@ struct ProviderServiceTests {
         #expect(message?.content == "ok")
     }
 
+    @Test("B1 regression: under a lifecycle epoch, a history barrier is emitted in-band and NOT duplicated as a service event")
+    func historyBarrierIsSingleChannelUnderLifecycle() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+        let sessionKey = "agent:main:clawline:user:s_barrier"
+
+        final class Collector: @unchecked Sendable {
+            let lock = NSLock()
+            var lifecycleClears: [String] = []
+            var serviceClears: [String] = []
+        }
+        let collector = Collector()
+
+        let lifecycleTask = Task {
+            for await event in service.lifecycleTransportEvents {
+                if case .historyCleared(let key) = event.payload {
+                    collector.lock.lock(); collector.lifecycleClears.append(key); collector.lock.unlock()
+                }
+            }
+        }
+        let serviceTask = Task {
+            for await event in service.serviceEvents {
+                if case .streamHistoryCleared(let key) = event {
+                    collector.lock.lock(); collector.serviceClears.append(key); collector.lock.unlock()
+                }
+            }
+        }
+        defer { lifecycleTask.cancel(); serviceTask.cancel() }
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "stream_history_cleared", "sessionKey": "\#(sessionKey)" }"#)
+        }
+
+        // Managed lifecycle mode: inbound frames carry the lifecycle epoch, so the
+        // barrier must ride the lifecycle stream and the service-event duplicate
+        // must be suppressed (the two emissions are mutually exclusive).
+        service.startConnectionAttempt(epoch: 1, lastMessageId: nil, token: "jwt")
+        for _ in 0..<50 {
+            collector.lock.lock(); let got = !collector.lifecycleClears.isEmpty; collector.lock.unlock()
+            if got { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        // Give any (erroneous) duplicate a chance to arrive before asserting absence.
+        try await Task.sleep(forDuration: .milliseconds(60))
+
+        collector.lock.lock()
+        let lifecycleClears = collector.lifecycleClears
+        let serviceClears = collector.serviceClears
+        collector.lock.unlock()
+
+        #expect(lifecycleClears == [sessionKey])
+        #expect(serviceClears.isEmpty)
+    }
+
     @Test("Malformed ack frame is dropped and valid ack still emits")
     func malformedAckFrameIsDropped() async throws {
         let mockSocket = MockWebSocketClient()

@@ -1595,7 +1595,9 @@ struct ChatViewModelTests {
         defer { viewModel.prepareForReplacement() }
 
         await viewModel.activate(origin: "test.f2.cancelFence")
+        await viewModel.onAppear()
         chatService.emitServiceEvent(.streamSnapshot(streams))
+        try await setConnected(chatService: chatService, viewModel: viewModel)
         for _ in 0..<50 {
             if viewModel.stream(for: source) != nil { break }
             try await Task.sleep(forDuration: .milliseconds(10))

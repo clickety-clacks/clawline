@@ -4,8 +4,10 @@
 //
 //  Decoded shape of GET /api/org-options (tightbeam device bearer). Reused by
 //  the footer harness selector (T1751) and the new-chat creation sheet
-//  (T1750/T-B), which consumes the same call. Absent keys decode as empty so a
-//  minimal payload still succeeds; a present key of the wrong type still fails.
+//  (T1750/T-B), which consumes the same call. The contract (spec §T-B) names
+//  all four keys, so all four are required — a payload missing any of them is
+//  a contract violation and must fail the decode loudly, not degrade to an
+//  empty picker.
 //
 
 import Foundation
@@ -17,10 +19,10 @@ struct OrgOptions: Decodable, Equatable {
     let archetypes: [Archetype]
 
     init(
-        harnesses: [String] = [],
-        models: [String: [HarnessModel]] = [:],
-        hosts: [String] = [],
-        archetypes: [Archetype] = []
+        harnesses: [String],
+        models: [String: [HarnessModel]],
+        hosts: [String],
+        archetypes: [Archetype]
     ) {
         self.harnesses = harnesses
         self.models = models
@@ -28,20 +30,10 @@ struct OrgOptions: Decodable, Equatable {
         self.archetypes = archetypes
     }
 
-    enum CodingKeys: String, CodingKey {
-        case harnesses
-        case models
-        case hosts
-        case archetypes
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        harnesses = try container.decodeIfPresent([String].self, forKey: .harnesses) ?? []
-        models = try container.decodeIfPresent([String: [HarnessModel]].self, forKey: .models) ?? [:]
-        hosts = try container.decodeIfPresent([String].self, forKey: .hosts) ?? []
-        archetypes = try container.decodeIfPresent([Archetype].self, forKey: .archetypes) ?? []
-    }
+    /// The explicit not-yet-loaded value for UI/stub call sites. This is an
+    /// in-app placeholder, not a wire tolerance — decoding still requires all
+    /// four contract keys.
+    static let empty = OrgOptions(harnesses: [], models: [:], hosts: [], archetypes: [])
 
     struct HarnessModel: Decodable, Equatable {
         let id: String
@@ -55,6 +47,12 @@ struct OrgOptions: Decodable, Equatable {
         let `where`: [String]
         let defaults: JSONValue?
 
+        init(name: String, where whereHosts: [String], defaults: JSONValue?) {
+            self.name = name
+            self.`where` = whereHosts
+            self.defaults = defaults
+        }
+
         enum CodingKeys: String, CodingKey {
             case name
             case `where`
@@ -64,7 +62,11 @@ struct OrgOptions: Decodable, Equatable {
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             name = try container.decode(String.self, forKey: .name)
-            `where` = try container.decodeIfPresent([String].self, forKey: .where) ?? []
+            `where` = try container.decode([String].self, forKey: .where)
+            // `defaults` is server-applied at spawn; the client never reads it.
+            // It stays optional so an archetype without defaults cannot take
+            // down the whole options fetch over a field we do not consume.
+            // name/where are client-consumed and therefore required.
             defaults = try container.decodeIfPresent(JSONValue.self, forKey: .defaults)
         }
     }

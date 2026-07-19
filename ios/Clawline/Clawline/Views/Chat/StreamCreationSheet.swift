@@ -56,7 +56,7 @@ struct StreamCreationSheet: View {
     }
 
     private var orgOptions: OrgOptions {
-        viewModel.orgOptions ?? OrgOptions()
+        viewModel.orgOptions ?? OrgOptions.empty
     }
 
     private var modelOptions: [OrgOptions.HarnessModel] {

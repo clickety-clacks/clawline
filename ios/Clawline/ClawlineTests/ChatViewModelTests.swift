@@ -1566,6 +1566,249 @@ struct ChatViewModelTests {
         #expect(chatService.replayCursorSnapshot()[source] == nil)
     }
 
+    @Test("R1 regression: history clear discards an in-flight cache restore instead of resurrecting pre-barrier history")
+    @MainActor
+    func streamHistoryClearedDiscardsInFlightRestore() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_restore_race"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Race", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.r1.restoreRace")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        // Plant a pre-barrier cache file on disk, exactly where the app's
+        // persist pipeline writes it. A large payload keeps the restore's
+        // decode in flight long enough for the barrier to land first; even if
+        // timing collapses, the post-fix assertions still hold (the barrier
+        // ordering deletes the file before a later restore can read it).
+        let cacheDirectory = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Clawline", isDirectory: true)
+            .appendingPathComponent("MessageCache", isDirectory: true)
+        try FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+        let cacheURL = cacheDirectory.appendingPathComponent(
+            source.replacingOccurrences(of: ":", with: "-").appending(".json")
+        )
+        let preBarrier = (0..<500).map { index in
+            Message(
+                id: "s_pre_barrier_\(index)",
+                role: .assistant,
+                content: "Pre-barrier message \(index) that must never come back after the clear.",
+                timestamp: Date(timeIntervalSince1970: 1_700_000_000 + Double(index)),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: source
+            )
+        }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(preBarrier).write(to: cacheURL, options: [.atomic])
+
+        // Begin a forced restore (detached disk read + decode), then land the
+        // barrier while it is in flight.
+        viewModel.setShowOnlyUserMessagesMode(true, for: source)
+        chatService.emitServiceEvent(.streamHistoryCleared(sessionKey: source))
+
+        try await Task.sleep(forDuration: .milliseconds(800))
+        #expect(viewModel.messages(for: source).isEmpty)
+        #expect(chatService.replayCursorSnapshot()[source] == nil)
+    }
+
+    @Test("R1 regression: a pending debounced persist does not recreate the message cache after a history clear")
+    @MainActor
+    func streamHistoryClearedOutlivesPendingPersist() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_persist_race"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Persist Race", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.r1.persistRace")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        // Deliver a message (arms the 500ms persist debounce), then clear the
+        // history before the debounce can flush.
+        let message = #"{"type":"message","id":"s_persist_1","role":"assistant","content":"Doomed","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(message.utf8))))
+        for _ in 0..<50 {
+            if !viewModel.messages(for: source).isEmpty { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        chatService.emitServiceEvent(.streamHistoryCleared(sessionKey: source))
+
+        // Wait past the debounce window plus the serialized IO queue drain: no
+        // write may recreate the cache file after the barrier's delete.
+        try await Task.sleep(forDuration: .milliseconds(900))
+        let cacheURL = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Clawline", isDirectory: true)
+            .appendingPathComponent("MessageCache", isDirectory: true)
+            .appendingPathComponent(source.replacingOccurrences(of: ":", with: "-").appending(".json"))
+        #expect(FileManager.default.fileExists(atPath: cacheURL.path) == false)
+        #expect(viewModel.messages(for: source).isEmpty)
+        #expect(chatService.replayCursorSnapshot()[source] == nil)
+    }
+
+    @Test("R2 regression: provenance presentation (the sizing source) is built from the stripped body on tightbeam")
+    @MainActor
+    func provenancePresentationBuildsFromStrippedBody() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.r2.strippedPresentation")
+        chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))
+        for _ in 0..<50 {
+            if viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.isTightbeamServer)
+
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
+        func markdownText(_ presentation: MessagePresentation) -> String {
+            presentation.parts.compactMap { part -> String? in
+                if case let .markdown(text) = part { return text }
+                return nil
+            }.joined(separator: "\n")
+        }
+
+        // A stamped wake message presents from the stripped body: the stamp
+        // line contributes nothing to what sizing measures.
+        let stamped = Message(
+            id: "m_provenance_stamped",
+            role: .user,
+            content: "[from user:mike]\nshort body",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: personalSessionKey,
+            sender: "user:mike"
+        )
+        let stampedText = markdownText(viewModel.presentation(for: stamped, metrics: metrics))
+        #expect(stampedText.contains("[from user:mike]") == false)
+        #expect(stampedText.contains("short body"))
+
+        // Anti-forgery: a first line that fails the sender cross-check stays
+        // in the measured/rendered body verbatim.
+        let forged = Message(
+            id: "m_provenance_forged",
+            role: .user,
+            content: "[from agent:notetaker]\nshort body",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_001),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: personalSessionKey,
+            sender: "user:mike"
+        )
+        let forgedText = markdownText(viewModel.presentation(for: forged, metrics: metrics))
+        #expect(forgedText.contains("[from agent:notetaker]"))
+
+        // A device-typed message (no sender) keeps a literal stamp-shaped
+        // first line even on tightbeam.
+        let typed = Message(
+            id: "m_provenance_typed",
+            role: .user,
+            content: "[from user:mike]\ntyped literal",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_002),
+            streaming: false,
+            attachments: [],
+            deviceId: "device-1",
+            sessionKey: personalSessionKey
+        )
+        let typedText = markdownText(viewModel.presentation(for: typed, metrics: metrics))
+        #expect(typedText.contains("[from user:mike]"))
+    }
+
+    @Test("R3 regression: a placement-carrying create reaches the service verbatim — no silent drop")
+    @MainActor
+    func placementCreateReachesServiceVerbatim() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.r3.placement")
+        let outcome = await viewModel.createStream(
+            displayName: "Placed",
+            harness: "claude",
+            model: "sonnet",
+            host: "eezo",
+            archetype: "default"
+        )
+        if case .failed(let message) = outcome {
+            Issue.record("placement create unexpectedly failed: \(message)")
+        }
+        let placement = try #require(chatService.lastCreatePlacement)
+        #expect(placement.harness == "claude")
+        #expect(placement.model == "sonnet")
+        #expect(placement.host == "eezo")
+        #expect(placement.archetype == "default")
+    }
+
     @Test("Read replayed assistant content does not resurrect cross-chat notification")
     @MainActor
     func readReplayedAssistantContentDoesNotResurrectCrossChatNotification() async throws {
@@ -7659,11 +7902,12 @@ final class TestChatService: ChatServicing {
     var sendError: Swift.Error?
     var sendDelay: Duration?
     var createStreamError: Error?
+    var lastCreatePlacement: (harness: String?, model: String?, host: String?, archetype: String?)?
     var deleteStreamError: Error?
     var deleteStreamErrorSequence: [Error] = []
     var fetchTrackableSessionsError: Error?
     var fetchOrgOptionsError: Error?
-    var orgOptions = OrgOptions()
+    var orgOptions = OrgOptions.empty
     private(set) var fetchOrgOptionsCallCount: Int = 0
     var streams: [StreamSession] = []
     var trackableSessions: [TrackableSession] = []
@@ -7926,6 +8170,18 @@ final class TestChatService: ChatServicing {
         )
         streams.append(stream)
         return stream
+    }
+
+    func createStream(
+        displayName: String,
+        idempotencyKey: String,
+        harness: String?,
+        model: String?,
+        host: String?,
+        archetype: String?
+    ) async throws -> StreamSession {
+        lastCreatePlacement = (harness, model, host, archetype)
+        return try await createStream(displayName: displayName, idempotencyKey: idempotencyKey)
     }
 
     func adoptStream(sessionKey: String) async throws -> StreamSession {

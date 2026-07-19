@@ -883,6 +883,19 @@ final class ChatViewModel {
     private var persistDebounceTasks: [String: Task<Void, Never>] = [:]
     private var pendingPersistPayloads: [String: [Message]] = [:]
     private var restoreTaskBySessionKey: [String: Task<Void, Never>] = [:]
+    /// Monotonic per-stream barrier generation. `stream_history_cleared` bumps
+    /// it; every async producer of pre-barrier material (cache restores,
+    /// debounced persist writes) captures the generation when it starts and is
+    /// discarded on completion if the generation moved. This is the structural
+    /// guarantee that a barrier can never be crossed by in-flight work,
+    /// independent of task timing (spec §T-A: post-barrier replay is the only
+    /// truth).
+    private var historyBarrierGenerationBySessionKey: [String: Int] = [:]
+    /// All message-cache file mutations (writes and deletes) run on this one
+    /// serial queue, so a barrier's cache delete is strictly ordered after any
+    /// previously enqueued write — a detached write can never land after the
+    /// delete and resurrect pre-barrier history on disk.
+    private static let messageCacheIOQueue = DispatchQueue(label: "co.clicketyclacks.Clawline.messageCacheIO")
     private var writerCurrentEpoch: Int?
     private var firstReplayAppliedEpoch: Int?
     private var pendingHistoryResetReplay: PendingHistoryResetReplay?
@@ -3346,6 +3359,12 @@ final class ChatViewModel {
     private func handleStreamHistoryCleared(sessionKey: String) {
         let runtimeKey = sessionStatusAuthorityKey(for: sessionKey)
         for key in Set([sessionKey, runtimeKey]) {
+            // Move the barrier FIRST: any in-flight restore or debounced
+            // persist that started before this instant is now stale by
+            // construction and self-discards when it completes.
+            historyBarrierGenerationBySessionKey[key, default: 0] += 1
+            restoreTaskBySessionKey[key]?.cancel()
+            restoreTaskBySessionKey[key] = nil
             clearSessionMessages(sessionKey: key, reason: "stream_history_cleared")
             removeCachedMessages(for: key)
             chatService.setReplayCursor(nil, for: key)
@@ -3972,7 +3991,16 @@ final class ChatViewModel {
     }
 
     func presentation(for message: Message, metrics: ChatFlowTheme.Metrics) -> MessagePresentation {
-        let key = PresentationCacheKey(messageID: message.id, isCompact: metrics.isCompact)
+        // Provenance messages present (and are therefore measured, sized, and
+        // copied) from the STRIPPED body on tightbeam servers — the same seam
+        // the bubble renders from, so V1/V2 sizing can never classify off the
+        // hidden stamp line (spec §T-D strip rule).
+        let displayMessage = isTightbeamServer ? message.strippingProvenanceStampForDisplay() : message
+        let key = PresentationCacheKey(
+            messageID: message.id,
+            isCompact: metrics.isCompact,
+            stripsProvenance: displayMessage.content != message.content
+        )
         let fingerprint = presentationFingerprint(for: message)
         if let cached = presentationCache[key], cached.fingerprint == fingerprint {
             return cached.presentation
@@ -3980,7 +4008,7 @@ final class ChatViewModel {
 
         var state = tableParseStates[message.id] ?? StreamingTableParseState()
         let presentation = MessagePresentationBuilder.build(
-            from: message,
+            from: displayMessage,
             metrics: metrics,
             streamingState: &state
         )
@@ -3989,7 +4017,7 @@ final class ChatViewModel {
         if !message.streaming, state.isDirty {
             var canonicalState = StreamingTableParseState()
             resolvedPresentation = MessagePresentationBuilder.build(
-                from: message,
+                from: displayMessage,
                 metrics: metrics,
                 streamingState: &canonicalState
             )
@@ -5107,7 +5135,8 @@ final class ChatViewModel {
         }
         guard let url = messageCacheURL(for: sessionKey) else { return }
         restoreTaskBySessionKey[sessionKey]?.cancel()
-        let restoreTask = Task.detached { [weak self, sessionKey, url] in
+        let barrierGeneration = historyBarrierGenerationBySessionKey[sessionKey, default: 0]
+        let restoreTask = Task.detached { [weak self, sessionKey, url, barrierGeneration] in
             guard let self else { return }
             guard let data = try? Data(contentsOf: url) else {
                 return
@@ -5127,6 +5156,11 @@ final class ChatViewModel {
                 await MainActor.run { [weak self, filtered] in
                     guard let self else { return }
                     guard self.restoreTaskBySessionKey[sessionKey] != nil else { return }
+                    // Barrier guard: a history clear that landed while this
+                    // restore was reading disk moved the generation; applying
+                    // the cached (pre-barrier) messages or re-seeding the
+                    // replay cursor now would resurrect cleared history.
+                    guard self.historyBarrierGenerationBySessionKey[sessionKey, default: 0] == barrierGeneration else { return }
                     if let epoch {
                         guard self.writerCurrentEpoch == epoch else { return }
                         guard self.firstReplayAppliedEpoch != epoch else { return }
@@ -5161,7 +5195,11 @@ final class ChatViewModel {
         persistDebounceTasks[sessionKey]?.cancel()
         persistDebounceTasks[sessionKey] = nil
         pendingPersistPayloads.removeValue(forKey: sessionKey)
-        try? FileManager.default.removeItem(at: url)
+        // Same serial queue as cache writes: this delete is ordered after any
+        // write already enqueued, so pre-barrier payloads cannot land after it.
+        Self.messageCacheIOQueue.async {
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 
     private func persistMessages(_ messages: [Message], for sessionKey: String) {
@@ -5169,12 +5207,19 @@ final class ChatViewModel {
         let payload = trimMessagesForCache(messages, for: sessionKey)
         pendingPersistPayloads[sessionKey] = payload
         persistDebounceTasks[sessionKey]?.cancel()
-        persistDebounceTasks[sessionKey] = Task { [weak self] in
+        let barrierGeneration = historyBarrierGenerationBySessionKey[sessionKey, default: 0]
+        persistDebounceTasks[sessionKey] = Task { [weak self, barrierGeneration] in
             guard let self else { return }
-            try? await Task.sleep(for: .milliseconds(500))
+            do { try await Task.sleep(for: .milliseconds(500)) } catch is CancellationError { return } catch { return }
+            // Barrier guard: never enqueue a write of material captured before
+            // a history clear (the payload predates the barrier by definition).
+            guard self.historyBarrierGenerationBySessionKey[sessionKey, default: 0] == barrierGeneration else {
+                self.pendingPersistPayloads[sessionKey] = nil
+                return
+            }
             guard let pendingPayload = self.pendingPersistPayloads[sessionKey] else { return }
             self.pendingPersistPayloads[sessionKey] = nil
-            Task.detached { [pendingPayload, url, sessionKey] in
+            Self.messageCacheIOQueue.async { [pendingPayload, url, sessionKey] in
                 let encoder = JSONEncoder()
                 encoder.dateEncodingStrategy = .iso8601
                 do {
@@ -5770,6 +5815,7 @@ final class ChatViewModel {
     private struct PresentationCacheKey: Hashable {
         let messageID: String
         let isCompact: Bool
+        let stripsProvenance: Bool
     }
 
     private struct PresentationCacheEntry {

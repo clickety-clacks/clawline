@@ -6236,6 +6236,17 @@ private final class PreviewChatService: ChatServicing {
             updatedAt: Date()
         )
     }
+    func createStream(
+        displayName: String,
+        idempotencyKey: String,
+        harness: String?,
+        model: String?,
+        host: String?,
+        archetype: String?
+    ) async throws -> StreamSession {
+        // Previews have no gateway; placement params are explicitly ignored here.
+        try await createStream(displayName: displayName, idempotencyKey: idempotencyKey)
+    }
     func renameStream(sessionKey: String, displayName: String) async throws -> StreamSession {
         StreamSession(
             sessionKey: sessionKey,

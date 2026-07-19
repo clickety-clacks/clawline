@@ -95,4 +95,33 @@ extension Message {
     var provenanceOrigin: MessageProvenanceOrigin? {
         MessageProvenance.origin(role: role, sender: sender)
     }
+
+    /// A copy of this message with the first-line provenance stamp removed.
+    /// This is the ONE seam that produces the display body for provenance
+    /// messages: presentation building (and therefore V1/V2 sizing), bubble
+    /// rendering, and copy/accessibility all consume its output, so measure
+    /// and render can never disagree about the stamp line. Returns `self`
+    /// unchanged when there is no provenance origin or the first line fails
+    /// the anti-forgery cross-check.
+    func strippingProvenanceStampForDisplay() -> Message {
+        guard provenanceOrigin != nil, let sender else { return self }
+        let stripped = MessageProvenance.strippingProvenanceStamp(from: content, sender: sender)
+        guard stripped != content else { return self }
+        return Message(
+            id: id,
+            llmVisibleMessageId: llmVisibleMessageId,
+            role: role,
+            content: stripped,
+            timestamp: timestamp,
+            streaming: streaming,
+            attachments: attachments,
+            deviceId: deviceId,
+            sessionKey: sessionKey,
+            sender: sender,
+            clientMessageId: clientMessageId,
+            replyToMessageId: replyToMessageId,
+            replyToClientMessageId: replyToClientMessageId,
+            deliveryState: deliveryState
+        )
+    }
 }

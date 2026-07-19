@@ -109,9 +109,9 @@ protocol ChatServicing: AnyObject {
     func adoptStream(sessionKey: String) async throws -> StreamSession
     func createStream(displayName: String, idempotencyKey: String) async throws -> StreamSession
     /// T-B placement-aware create: optional harness/model/host/archetype ride
-    /// alongside the name-only create. Conformers that do not provision placement
-    /// (previews/stubs) inherit the default below, which drops the placement
-    /// params and falls back to the name-only create.
+    /// alongside the name-only create. Every conformer implements this
+    /// explicitly — there is deliberately no protocol-level default, so a
+    /// conformer can never silently drop a user's placement choice.
     func createStream(
         displayName: String,
         idempotencyKey: String,
@@ -122,17 +122,4 @@ protocol ChatServicing: AnyObject {
     ) async throws -> StreamSession
     func renameStream(sessionKey: String, displayName: String) async throws -> StreamSession
     func deleteStream(sessionKey: String, idempotencyKey: String?) async throws -> String
-}
-
-extension ChatServicing {
-    func createStream(
-        displayName: String,
-        idempotencyKey: String,
-        harness: String?,
-        model: String?,
-        host: String?,
-        archetype: String?
-    ) async throws -> StreamSession {
-        try await createStream(displayName: displayName, idempotencyKey: idempotencyKey)
-    }
 }

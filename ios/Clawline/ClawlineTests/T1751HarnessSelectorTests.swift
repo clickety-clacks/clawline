@@ -39,16 +39,29 @@ struct T1751HarnessSelectorTests {
         #expect(options.archetypes.first?.where == ["*"])
     }
 
-    @Test("T1751 org-options decodes a minimal payload with absent keys as empty")
-    func orgOptionsDecodesMinimalPayload() throws {
-        let json = """
-        { "harnesses": ["claude"] }
+    @Test("R4 regression: org-options decode is strict — a payload missing any contract key fails loudly")
+    func orgOptionsRejectsMissingContractKeys() throws {
+        let fullPayload: [String: Any] = [
+            "harnesses": ["claude"],
+            "models": ["claude": [["id": "m1", "ref": "claude-fable-5"]]],
+            "hosts": ["eezo"],
+            "archetypes": [["name": "default", "where": ["*"]]]
+        ]
+        for missingKey in ["harnesses", "models", "hosts", "archetypes"] {
+            var payload = fullPayload
+            payload.removeValue(forKey: missingKey)
+            let data = try JSONSerialization.data(withJSONObject: payload)
+            #expect(throws: (any Error).self, "missing \(missingKey) must fail the decode") {
+                _ = try JSONDecoder().decode(OrgOptions.self, from: data)
+            }
+        }
+        // Archetype `where` is client-consumed and equally required.
+        let missingWhere = """
+        {"harnesses": [], "models": {}, "hosts": [], "archetypes": [{"name": "default"}]}
         """
-        let options = try JSONDecoder().decode(OrgOptions.self, from: Data(json.utf8))
-        #expect(options.harnesses == ["claude"])
-        #expect(options.models.isEmpty)
-        #expect(options.hosts.isEmpty)
-        #expect(options.archetypes.isEmpty)
+        #expect(throws: (any Error).self) {
+            _ = try JSONDecoder().decode(OrgOptions.self, from: Data(missingWhere.utf8))
+        }
     }
 
     // MARK: - footer picker gating

@@ -266,6 +266,18 @@ private final class VerificationChatService: ChatServicing {
         throw ProviderChatService.Error.notConnected
     }
 
+    func createStream(
+        displayName: String,
+        idempotencyKey: String,
+        harness: String?,
+        model: String?,
+        host: String?,
+        archetype: String?
+    ) async throws -> StreamSession {
+        let _ = (harness, model, host, archetype)
+        throw ProviderChatService.Error.notConnected
+    }
+
     func renameStream(sessionKey: String, displayName: String) async throws -> StreamSession {
         let _ = sessionKey
         let _ = displayName

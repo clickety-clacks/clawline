@@ -1270,6 +1270,12 @@ struct ChatView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+        // Same gate rule as the creation sheet: a pending harness confirmation
+        // must not survive the Tightbeam gate closing and drive set_harness
+        // against an ungated server.
+        .onChange(of: viewModel.isTightbeamServer) { _, isTightbeam in
+            if !isTightbeam { pendingHarnessChange = nil }
+        }
         .confirmationDialog(
             "Switching harnesses will clear this chat.",
             isPresented: Binding(
@@ -1280,11 +1286,13 @@ struct ChatView: View {
             presenting: pendingHarnessChange
         ) { change in
             Button("Switch to \(change.harness)", role: .destructive) {
-                viewModel.applySessionControl(
-                    sessionKey: change.sessionKey,
-                    action: .setHarness,
-                    value: change.harness
-                )
+                if viewModel.canApplyTightbeamSessionControl(.setHarness) {
+                    viewModel.applySessionControl(
+                        sessionKey: change.sessionKey,
+                        action: .setHarness,
+                        value: change.harness
+                    )
+                }
                 pendingHarnessChange = nil
             }
             Button("Cancel", role: .cancel) { pendingHarnessChange = nil }

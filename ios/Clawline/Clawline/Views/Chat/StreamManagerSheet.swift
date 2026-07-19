@@ -428,6 +428,13 @@ struct StreamManagerSheet: View {
         .sheet(isPresented: $isPresentingCreationSheet) {
             StreamCreationSheet(viewModel: viewModel, defaultName: nextStreamDefaultName)
         }
+        // The creation sheet is a Tightbeam-only affordance. If the shared gate
+        // closes while it is open (disconnect, or a feature set without
+        // "tightbeam"), it must stop being actionable rather than continue to
+        // offer placement creation against an ungated server.
+        .onChange(of: viewModel.isTightbeamServer) { _, isTightbeam in
+            if !isTightbeam { isPresentingCreationSheet = false }
+        }
     }
 
 

@@ -714,6 +714,14 @@ final class ChatViewModel {
         sessionStatusBySessionKey[sessionStatusAuthorityKey(for: sessionKey)]
     }
 
+    /// Whether a Tightbeam-gated session control may be applied right now. Used
+    /// to keep a pending harness confirmation from driving set_harness after the
+    /// gate closed.
+    func canApplyTightbeamSessionControl(_ action: SessionControlAction) -> Bool {
+        guard action == .setHarness else { return true }
+        return isTightbeamServer
+    }
+
     func applySessionControl(
         sessionKey: String,
         action: SessionControlAction,
@@ -891,7 +899,11 @@ final class ChatViewModel {
     /// independent of task timing (spec §T-A: post-barrier replay is the only
     /// truth).
     private var historyBarrierGenerationBySessionKey: [String: Int] = [:]
-    private let messageCacheIOQueue = DispatchQueue(label: "co.clicketyclacks.Clawline.messageCacheIO")
+    /// Serial executor for message-cache file mutations. The cache files live at
+    /// one process-wide Application Support path, so ordering must hold ACROSS
+    /// view-model instances (overlapping/replaced ones), not just within one.
+    /// Injected so tests can substitute or drain it deterministically.
+    private let messageCacheIO: any MessageCacheIOServicing
     /// All message-cache file mutations (writes and deletes) run on this one
     /// serial queue, so a barrier's cache delete is strictly ordered after any
     /// previously enqueued write — a detached write can never land after the
@@ -1141,6 +1153,7 @@ final class ChatViewModel {
          uploadService: any UploadServicing,
          toastManager: ToastManager,
          salientHighlightService: any SalientHighlightServicing,
+         messageCacheIO: any MessageCacheIOServicing = MessageCacheIO(),
          connectionAlertGracePeriod: Duration = .seconds(2),
          nowProvider: @escaping () -> Date = Date.init,
          assistantIncomingHaptic: @escaping @MainActor () -> Void = {
@@ -1150,6 +1163,7 @@ final class ChatViewModel {
              #endif
          }) {
         logger.info("ChatViewModel init id=\(self.instanceId, privacy: .public)")
+        self.messageCacheIO = messageCacheIO
         self.auth = auth
         self.chatService = chatService
         self.settings = settings
@@ -1476,6 +1490,16 @@ final class ChatViewModel {
         guard !isRetired else { return }
         isRetired = true
         hasActivatedLifecycleOwnership = false
+        // A retired instance must not keep mutating the message cache: every
+        // ChatViewModel writes the SAME Application Support files, so a pending
+        // persist or in-flight restore from this instance could otherwise land
+        // after a replacement instance has applied a history barrier and
+        // resurrect cleared history.
+        persistDebounceTasks.values.forEach { $0.cancel() }
+        persistDebounceTasks.removeAll()
+        pendingPersistPayloads.removeAll()
+        restoreTaskBySessionKey.values.forEach { $0.cancel() }
+        restoreTaskBySessionKey.removeAll()
         clearSessionStatusRefreshes()
         discardCrossChatNotificationBatches()
         stopObservingLifecycle(origin: "prepareForReplacement")
@@ -2615,6 +2639,14 @@ final class ChatViewModel {
         host: String?,
         archetype: String?
     ) async -> StreamCreateOutcome {
+        // Placement is a Tightbeam-only capability. Re-check the shared gate at
+        // submission (defense in depth behind the modal's onChange dismissal):
+        // if the gate closed after the sheet opened, refuse placement rather
+        // than post harness/model/host/archetype to an ungated server.
+        let hasPlacement = harness != nil || model != nil || host != nil || archetype != nil
+        if hasPlacement, !isTightbeamServer {
+            return .failed(message: "Placement options are unavailable on this server.")
+        }
         switch await performStreamCreate(
             displayName: displayName,
             harness: harness,
@@ -5224,7 +5256,7 @@ final class ChatViewModel {
         pendingPersistPayloads.removeValue(forKey: sessionKey)
         // Same serial queue as cache writes: this delete is ordered after any
         // write already enqueued, so pre-barrier payloads cannot land after it.
-        messageCacheIOQueue.async {
+        messageCacheIO.perform {
             try? FileManager.default.removeItem(at: url)
         }
     }
@@ -5246,7 +5278,7 @@ final class ChatViewModel {
             }
             guard let pendingPayload = self.pendingPersistPayloads[sessionKey] else { return }
             self.pendingPersistPayloads[sessionKey] = nil
-            messageCacheIOQueue.async { [pendingPayload, url, sessionKey] in
+            messageCacheIO.perform { [pendingPayload, url, sessionKey] in
                 let encoder = JSONEncoder()
                 encoder.dateEncodingStrategy = .iso8601
                 do {

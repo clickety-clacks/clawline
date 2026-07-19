@@ -1285,14 +1285,17 @@ final class ProviderChatService: ChatServicing {
         // Emit the barrier IN-BAND on the lifecycle stream when one is active:
         // server messages travel that stream, and frames are decoded in wire
         // order here, so a pre-barrier message can never be delivered after the
-        // barrier (and vice versa). The service-event emission remains for
-        // non-lifecycle consumers; ViewModel handling is idempotent.
+        // barrier (and vice versa). The two emissions are MUTUALLY EXCLUSIVE —
+        // same shape as `handleMessage` — because clearing is destructive and
+        // NOT idempotent once content arrives between two invocations: a
+        // delayed duplicate would wipe a legitimately post-barrier message.
         if let lifecycleEpoch {
             emitLifecycleEvent(
                 epoch: lifecycleEpoch,
                 payload: .historyCleared(sessionKey: payload.sessionKey),
                 lifecycleConnectionToken: lifecycleConnectionToken
             )
+            return
         }
         emitServiceEvent(.streamHistoryCleared(sessionKey: payload.sessionKey))
     }

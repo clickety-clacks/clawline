@@ -1709,6 +1709,9 @@ struct ChatViewModelTests {
         defer { viewModel.prepareForReplacement() }
 
         await viewModel.activate(origin: "test.r2.strippedPresentation")
+        // Production invariant: the service property and the event always
+        // carry the same value (the property is set before the event fires).
+        chatService.serverFeatures = ["tightbeam"]
         chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))
         for _ in 0..<50 {
             if viewModel.isTightbeamServer { break }

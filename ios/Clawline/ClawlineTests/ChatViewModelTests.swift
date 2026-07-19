@@ -1566,6 +1566,147 @@ struct ChatViewModelTests {
         #expect(chatService.replayCursorSnapshot()[source] == nil)
     }
 
+    @Test("R3 regression: placement create and set_harness are refused once the tightbeam gate closes")
+    @MainActor
+    func gatedSubmissionsRefusedAfterGateCloses() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth, chatService: chatService, settings: SettingsManager(),
+            device: TestDevice(), uploadService: TestUploadService(),
+            toastManager: ToastManager(), salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.r3.gateClose")
+        chatService.serverFeatures = ["tightbeam"]
+        chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))
+        for _ in 0..<50 {
+            if viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.isTightbeamServer)
+        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness))
+
+        // Gate closes (feature set without "tightbeam").
+        chatService.serverFeatures = []
+        chatService.emitServiceEvent(.serverFeatures([]))
+        for _ in 0..<50 {
+            if !viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.isTightbeamServer == false)
+
+        // set_harness is no longer applicable...
+        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness) == false)
+        // ...and a placement-carrying create is refused rather than posted.
+        let outcome = await viewModel.createStream(
+            displayName: "Late Placement", harness: "codex", model: nil, host: "eezo", archetype: nil
+        )
+        #expect(outcome == .failed(message: "Placement options are unavailable on this server."))
+        #expect(chatService.lastCreatePlacement == nil)
+    }
+
+    @Test("B1 regression: a post-barrier message survives a delayed duplicate history-clear")
+    @MainActor
+    func postBarrierMessageSurvivesDelayedDuplicateClear() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_dup_clear"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Dup", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.b1.dupClear")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        // Wire order: clear, then a POST-barrier message. The barrier arrives
+        // in-band on the lifecycle stream so it cannot reorder against the
+        // message that follows it.
+        chatService.emitServiceEvent(.streamHistoryCleared(sessionKey: source))
+        let postBarrier = #"{"type":"message","id":"s_post_1","role":"assistant","content":"After the barrier","timestamp":1700000001000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(postBarrier.utf8))))
+        for _ in 0..<50 {
+            if viewModel.messages(for: source).map(\.id) == ["s_post_1"] { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.messages(for: source).map(\.id) == ["s_post_1"])
+
+        // A DELAYED duplicate of the same clear (e.g. an out-of-band service
+        // event after the in-band one already ran) must NOT erase the
+        // post-barrier message. Before the fix, the second emission's
+        // destructive handler wiped it.
+        chatService.emitServiceEvent(.streamHistoryCleared(sessionKey: source))
+        try await Task.sleep(forDuration: .milliseconds(60))
+        #expect(viewModel.messages(for: source).map(\.id) == ["s_post_1"])
+    }
+
+    @Test("B2 regression: prepareForReplacement cancels the instance's pending cache writes")
+    @MainActor
+    func prepareForReplacementCancelsPendingCacheWork() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_retire_cache"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Retire", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        // Manually-drained cache IO double stands in for the process-wide queue.
+        let cacheIO = TestMessageCacheIO()
+        let svc = TestChatService()
+        svc.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth, chatService: svc, settings: SettingsManager(),
+            device: TestDevice(), uploadService: TestUploadService(),
+            toastManager: ToastManager(), salientHighlightService: SalientHighlightService(),
+            messageCacheIO: cacheIO
+        )
+        await viewModel.activate(origin: "test.b2.retire")
+        svc.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        // Deliver a message so a debounced persist is armed for `source`.
+        let msg = #"{"type":"message","id":"s_retire_1","role":"assistant","content":"doomed on retire","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        svc.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(msg.utf8))))
+        for _ in 0..<50 {
+            if !viewModel.messages(for: source).isEmpty { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        // Retire the instance BEFORE the 500ms debounce flushes. The pending
+        // persist must be cancelled, so no cache write is ever submitted to the
+        // shared IO — a replacement instance's later barrier delete cannot be
+        // undone by this instance.
+        viewModel.prepareForReplacement()
+        try await Task.sleep(forDuration: .milliseconds(700))
+        cacheIO.drain()
+        #expect(cacheIO.performedCount == 0)
+    }
+
     @Test("R1 regression: history clear discards an in-flight cache restore instead of resurrecting pre-barrier history")
     @MainActor
     func streamHistoryClearedDiscardsInFlightRestore() async throws {
@@ -8425,6 +8566,29 @@ private func requireLastSentId(_ chatService: TestChatService) async throws -> S
 }
 
 @MainActor
+
+@MainActor
+private final class TestMessageCacheIO: MessageCacheIOServicing {
+    // Serial like production, but manually drained so tests are deterministic.
+    private var queued: [@Sendable () -> Void] = []
+    private(set) var performedCount = 0
+
+    nonisolated func perform(_ work: @escaping @Sendable () -> Void) {
+        MainActor.assumeIsolated {
+            queued.append(work)
+        }
+    }
+
+    func drain() {
+        let work = queued
+        queued.removeAll()
+        for item in work {
+            item()
+            performedCount += 1
+        }
+    }
+}
+
 private func resetChatPersistence() {
     // ChatViewModel restores per-session message caches and cursors from disk/UserDefaults.
     // Tests must start from a clean slate to avoid cross-test pollution.

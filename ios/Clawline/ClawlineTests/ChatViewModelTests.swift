@@ -8565,26 +8565,31 @@ private func requireLastSentId(_ chatService: TestChatService) async throws -> S
     return try #require(chatService.lastSentId)
 }
 
-@MainActor
-
-@MainActor
 private final class TestMessageCacheIO: MessageCacheIOServicing {
     // Serial like production, but manually drained so tests are deterministic.
+    private let lock = NSLock()
     private var queued: [@Sendable () -> Void] = []
-    private(set) var performedCount = 0
+    private var performed = 0
 
-    nonisolated func perform(_ work: @escaping @Sendable () -> Void) {
-        MainActor.assumeIsolated {
-            queued.append(work)
-        }
+    var performedCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return performed
+    }
+
+    func perform(_ work: @escaping @Sendable () -> Void) {
+        lock.lock()
+        queued.append(work)
+        lock.unlock()
     }
 
     func drain() {
+        lock.lock()
         let work = queued
         queued.removeAll()
+        lock.unlock()
         for item in work {
             item()
-            performedCount += 1
+            lock.lock(); performed += 1; lock.unlock()
         }
     }
 }

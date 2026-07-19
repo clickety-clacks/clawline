@@ -79,6 +79,18 @@ enum MessageProvenance {
     /// the anti-forgery cross-check: a first line that does not match is left in
     /// place (it is ordinary text), and any `[from ...]` deeper in the body is
     /// quoted text that is never touched.
+    /// True only when the FIRST LINE is exactly `[from <sender>]`. This single
+    /// predicate gates BOTH provenance actions — stripping the stamp and
+    /// rendering the chip — because §T-D couples them: the chip is rendered
+    /// *instead of* a stamp that passed the cross-check. A mismatched stamp
+    /// (forgery) or a missing stamp (inconsistent input) fails here, and the
+    /// message then renders as ordinary text with no chip.
+    static func hasExactProvenanceStamp(in content: String, sender: String) -> Bool {
+        let firstLineEnd = content.firstIndex(of: "\n")
+        let firstLine = firstLineEnd.map { String(content[content.startIndex..<$0]) } ?? content
+        return firstLine == "[from \(sender)]"
+    }
+
     static func strippingProvenanceStamp(from content: String, sender: String) -> String {
         let stamp = "[from \(sender)]"
         let firstLineEnd = content.firstIndex(of: "\n")
@@ -92,8 +104,20 @@ enum MessageProvenance {
 extension Message {
     /// The provenance origin of this message, or `nil` when it should render as a
     /// device-typed message (see `MessageProvenance.origin`).
+    ///
+    /// §T-D couples the two provenance actions: ONLY when the first line exactly
+    /// matches `[from <sender>]` do we strip it AND render the chip instead
+    /// ("never chip a tag that fails the cross-check"). A recognized `sender`
+    /// with a mismatched stamp (forgery) or with no stamp at all is
+    /// inconsistent input: the text is preserved verbatim and no chip renders.
     var provenanceOrigin: MessageProvenanceOrigin? {
-        MessageProvenance.origin(role: role, sender: sender)
+        guard let origin = MessageProvenance.origin(role: role, sender: sender), let sender else {
+            return nil
+        }
+        guard MessageProvenance.hasExactProvenanceStamp(in: content, sender: sender) else {
+            return nil
+        }
+        return origin
     }
 
     /// A copy of this message with the first-line provenance stamp removed.

@@ -10,6 +10,66 @@ import Testing
 import UIKit
 @testable import Clawline
 
+struct MessageProvenanceCoupledStampTests {
+    private func message(sender: String?, content: String, role: Message.Role = .user) -> Message {
+        Message(
+            id: "m_coupled_\(UUID().uuidString.prefix(6))",
+            role: role,
+            content: content,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: sender == nil ? "device-1" : nil,
+            sessionKey: "agent:main:clawline:user:s_coupled",
+            sender: sender
+        )
+    }
+
+    @Test("F2: exact first-line stamp yields a chip and is stripped from the body")
+    func exactStampChipsAndStrips() {
+        let m = message(sender: "user:mike", content: "[from user:mike]\nreal body")
+        #expect(m.provenanceOrigin == .user(id: "mike"))
+        #expect(m.strippingProvenanceStampForDisplay().content == "real body")
+    }
+
+    @Test("F2 regression: MISMATCHED first-line stamp yields NO chip and preserves the text")
+    func mismatchedStampSuppressesChip() {
+        let m = message(sender: "user:mike", content: "[from agent:notetaker]\nforged line above")
+        #expect(m.provenanceOrigin == nil)
+        #expect(m.strippingProvenanceStampForDisplay().content == m.content)
+    }
+
+    @Test("F2 regression: MISSING first-line stamp yields NO chip and preserves the text")
+    func missingStampSuppressesChip() {
+        let m = message(sender: "user:mike", content: "no stamp at all, just body text")
+        #expect(m.provenanceOrigin == nil)
+        #expect(m.strippingProvenanceStampForDisplay().content == m.content)
+    }
+
+    @Test("F2: every origin class couples chip and strip to the exact match")
+    func allOriginClassesCouple() {
+        for sender in ["agent:notetaker", "user:mike", "process:cron"] {
+            let matched = message(sender: sender, content: "[from \(sender)]\nbody")
+            #expect(matched.provenanceOrigin != nil, "exact stamp must chip for \(sender)")
+            #expect(matched.strippingProvenanceStampForDisplay().content == "body")
+
+            let mismatched = message(sender: sender, content: "[from someone:else]\nbody")
+            #expect(mismatched.provenanceOrigin == nil, "mismatched stamp must not chip for \(sender)")
+            #expect(mismatched.strippingProvenanceStampForDisplay().content == mismatched.content)
+
+            let bare = message(sender: sender, content: "body")
+            #expect(bare.provenanceOrigin == nil, "missing stamp must not chip for \(sender)")
+        }
+    }
+
+    @Test("F2: a device-typed message with a stamp-shaped line still never chips")
+    func deviceTypedNeverChips() {
+        let m = message(sender: nil, content: "[from user:mike]\ntyped literally")
+        #expect(m.provenanceOrigin == nil)
+        #expect(m.strippingProvenanceStampForDisplay().content == m.content)
+    }
+}
+
 struct MessageProvenanceOriginTests {
     @Test("agent: sender classifies as a colleague DM")
     func agentSenderClassifies() {

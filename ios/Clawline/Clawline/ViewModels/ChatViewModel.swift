@@ -956,6 +956,23 @@ final class ChatViewModel {
         messageListRevisionBySession[sessionKey] ?? 0
     }
 
+    /// Single entry point for the server feature gate. A cold launch renders
+    /// cached history and the footer BEFORE auth completes, so flipping the
+    /// gate must invalidate what is already on screen — otherwise provenance
+    /// chips and the harness/host footer stay missing for the whole session
+    /// and only appear for content that arrives later.
+    private func applyServerFeatures(_ features: [String]) {
+        let updated = Set(features)
+        guard updated != serverFeatures else { return }
+        serverFeatures = updated
+        presentationCache.removeAll()
+        for key in sessionMessages.keys {
+            armForceReRead(for: key)
+        }
+        armForceReRead(for: uiSelectedSessionKey)
+        loadOrgOptionsIfNeeded()
+    }
+
     private func armForceReRead(for sessionKey: String) {
         guard !sessionKey.isEmpty else { return }
         forceReReadGenerationBySession[sessionKey, default: 0] &+= 1
@@ -4194,8 +4211,7 @@ final class ChatViewModel {
             supportsSessionProvisioning = supported
             attemptPendingProvisionedSendIfPossible()
         case .serverFeatures(let features):
-            serverFeatures = Set(features)
-            loadOrgOptionsIfNeeded()
+            applyServerFeatures(features)
         case .sessionInfo(let info):
             hasResolvedProvisioningCapability = true
             supportsSessionProvisioning = true
@@ -4575,8 +4591,7 @@ final class ChatViewModel {
             // cross-stream ordering, so the event alone can be lost to a late
             // subscription or wiped by a reset that lands after it; the pull
             // makes the gate converge on the service's authoritative value.
-            serverFeatures = Set(chatService.serverFeatures)
-            loadOrgOptionsIfNeeded()
+            applyServerFeatures(chatService.serverFeatures)
             attemptPendingProvisionedSendIfPossible()
             scheduleSessionStatusRefresh(for: uiSelectedSessionKey, reason: "connectionRestored")
         case .connecting, .reconnecting:

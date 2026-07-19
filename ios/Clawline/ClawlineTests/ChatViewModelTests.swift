@@ -1812,6 +1812,65 @@ struct ChatViewModelTests {
         #expect(placement.archetype == "default")
     }
 
+    @Test("Gate regression: flipping the tightbeam gate invalidates already-rendered presentations")
+    @MainActor
+    func gateFlipInvalidatesRenderedPresentations() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.gate.invalidation")
+
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
+        func markdownText(_ presentation: MessagePresentation) -> String {
+            presentation.parts.compactMap { part -> String? in
+                if case let .markdown(text) = part { return text }
+                return nil
+            }.joined(separator: "\n")
+        }
+        let stamped = Message(
+            id: "m_gate_flip",
+            role: .user,
+            content: "[from user:mike]\nbody after the stamp",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: personalSessionKey,
+            sender: "user:mike"
+        )
+
+        // Cold-launch order: cached history renders BEFORE auth completes, so
+        // the first presentation is built with the gate off (stamp visible).
+        let beforeGate = markdownText(viewModel.presentation(for: stamped, metrics: metrics))
+        #expect(beforeGate.contains("[from user:mike]"))
+
+        chatService.serverFeatures = ["tightbeam"]
+        chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))
+        for _ in 0..<50 {
+            if viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.isTightbeamServer)
+
+        // The already-rendered message must re-present stripped; a stale
+        // cached presentation here is the live cold-launch defect.
+        let afterGate = markdownText(viewModel.presentation(for: stamped, metrics: metrics))
+        #expect(afterGate.contains("[from user:mike]") == false)
+        #expect(afterGate.contains("body after the stamp"))
+    }
+
     @Test("Gate regression: tightbeam gate converges from the service's pulled features even when the serverFeatures event is never observed")
     @MainActor
     func tightbeamGateConvergesFromPulledFeatures() async throws {

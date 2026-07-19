@@ -671,6 +671,40 @@ struct ProviderServiceTests {
         #expect(message?.content == "ok")
     }
 
+    @Test("F1 production: an unexpected socket close clears the service's authoritative tightbeam feature set")
+    func socketCloseClearsServerFeatures() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true, "features": ["tightbeam"] }"#)
+        }
+        try await service.connect(token: "jwt", lastMessageId: nil)
+        // Auth established the current-link feature set.
+        for _ in 0..<50 {
+            if service.serverFeatures == ["tightbeam"] { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(service.serverFeatures == ["tightbeam"])
+
+        // Unexpected socket close (stream finishes) drives handleSocketClose; the
+        // authoritative feature set must be cleared so a delayed .serverFeatures
+        // event cannot re-derive a stale ["tightbeam"] and reopen the gate.
+        mockSocket.close(with: .normalClosure)
+        for _ in 0..<50 {
+            if service.serverFeatures.isEmpty { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(service.serverFeatures.isEmpty)
+    }
+
     @Test("B1 regression: under a lifecycle epoch, a history barrier is emitted in-band and NOT duplicated as a service event")
     func historyBarrierIsSingleChannelUnderLifecycle() async throws {
         let mockSocket = MockWebSocketClient()

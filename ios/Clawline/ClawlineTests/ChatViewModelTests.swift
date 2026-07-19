@@ -1715,8 +1715,10 @@ struct ChatViewModelTests {
         }
         #expect(viewModel.isTightbeamServer)
 
-        // Socket closes: the service clears its authoritative feature set. The
-        // gate closes (the last on-link feature snapshot was empty).
+        // Socket closes. In production ProviderChatService.handleSocketClose
+        // clears the authoritative feature set on EVERY close (proven by
+        // ProviderServiceTests.socketCloseClearsServerFeatures); the stub mirrors
+        // that here so the view model re-derives from an empty service set.
         chatService.serverFeatures = []
         chatService.emitConnectionState(.disconnected)
         chatService.emitServiceEvent(.serverFeatures([]))

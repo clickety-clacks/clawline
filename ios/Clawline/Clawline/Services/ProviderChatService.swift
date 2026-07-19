@@ -1466,6 +1466,12 @@ final class ProviderChatService: ChatServicing {
             logger.debug("ignoring stale lifecycle socket close")
             return
         }
+        // The authed link is gone: clear the current-link feature set on EVERY
+        // socket close (expected or not), not just explicit performDisconnect.
+        // Otherwise a delayed `.serverFeatures` event re-derives from a stale
+        // ["tightbeam"] here and reopens the gate with no live authed link. The
+        // gate reopens only when the NEXT auth sets features again.
+        serverFeatures = []
         let rejectionError: Error? = {
             guard let closeInfo else { return nil }
             guard closeInfo.code == 1008 else { return nil }

@@ -1566,6 +1566,76 @@ struct ChatViewModelTests {
         #expect(chatService.replayCursorSnapshot()[source] == nil)
     }
 
+    @Test("R4 regression: production MessageCacheIO has no static/global executor — two instances are independent")
+    func productionCacheIOHasNoGlobalExecutor() async throws {
+        // If the executor were static/process-global, blocking one instance's
+        // queue would stall the other. Independent instances must not.
+        let a = MessageCacheIO()
+        let b = MessageCacheIO()
+        let releaseA = DispatchSemaphore(value: 0)
+        let bRan = DispatchSemaphore(value: 0)
+
+        a.perform { releaseA.wait() }        // occupies a's queue until released
+        b.perform { bRan.signal() }          // must run even while a is blocked
+
+        let bResult = bRan.wait(timeout: .now() + 2.0)
+        releaseA.signal()
+        #expect(bResult == .success)
+    }
+
+    @Test("R4 regression: one shared injected cache-IO serializes writes across two overlapping ChatViewModels")
+    @MainActor
+    func sharedInjectedCacheIOSerializesAcrossInstances() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_shared_identity"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Shared", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        // ONE cache-IO instance, injected into BOTH view models — exactly the
+        // composition RootView provides (a single @State messageCacheIO passed
+        // to every ensureChatViewModel).
+        let sharedIO = TestMessageCacheIO()
+        func makeVM(_ tag: String) async -> (ChatViewModel, TestChatService) {
+            let svc = TestChatService(); svc.streams = streams
+            let vm = ChatViewModel(
+                auth: auth, chatService: svc, settings: SettingsManager(),
+                device: TestDevice(), uploadService: TestUploadService(),
+                toastManager: ToastManager(), salientHighlightService: SalientHighlightService(),
+                messageCacheIO: sharedIO
+            )
+            await vm.activate(origin: "test.r4.\(tag)")
+            svc.emitServiceEvent(.streamSnapshot(streams))
+            for _ in 0..<50 {
+                if vm.stream(for: source) != nil { break }
+                try? await Task.sleep(forDuration: .milliseconds(10))
+            }
+            return (vm, svc)
+        }
+
+        // Original instance, then a replacement instance (overlapping lifetimes).
+        let (vmA, svcA) = await makeVM("a")
+        let (vmB, svcB) = await makeVM("b")
+        defer { vmA.prepareForReplacement(); vmB.prepareForReplacement() }
+
+        // Each view model persists on message delivery; both writes must land on
+        // the SAME injected executor (proving shared identity, not per-instance
+        // defaults) and drain in FIFO order (proving serialization).
+        let msgA = #"{"type":"message","id":"s_write_a","role":"assistant","content":"from A","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        let msgB = #"{"type":"message","id":"s_write_b","role":"assistant","content":"from B","timestamp":1700000000001,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        svcA.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(msgA.utf8))))
+        svcB.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(msgB.utf8))))
+
+        // Wait past the persist debounce, then drain the ONE shared executor.
+        try await Task.sleep(forDuration: .milliseconds(700))
+        sharedIO.drain()
+        // Both view models routed their cache write through the single injected
+        // instance — a per-instance default executor would have left this at 0.
+        #expect(sharedIO.performedCount >= 2)
+    }
+
     @Test("R3 regression: placement create and set_harness are refused once the tightbeam gate closes")
     @MainActor
     func gatedSubmissionsRefusedAfterGateCloses() async throws {

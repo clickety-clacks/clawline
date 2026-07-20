@@ -41,6 +41,44 @@ struct T1645FooterUsageTests {
         #expect(SessionMetadataFooterCell.footerText(for: unavailable)?.hasSuffix("OAUTH  ·  Usage unavailable") == true)
     }
 
+    @Test("T1645 renders recognized singleton windows without inventing a counterpart")
+    func rendersSingletonUsageWindows() throws {
+        let weeklyStatus = try decodedStatus(
+            usageJSON: singletonUsageJSON(label: "Week", remainingPercent: 81, resetAt: 1_784_604_800_000)
+        )
+        let weeklyUsage = try #require(weeklyStatus.display.codexUsage)
+        #expect(weeklyUsage.windows.map(\.label) == [.week])
+        #expect(weeklyUsage.windows.map(\.remainingPercent) == [81])
+        #expect(SessionMetadataFooterCell.footerText(for: weeklyStatus) ==
+            "gpt-5.6  ·  Thinking medium  ·  Fast on  ·  OAUTH  ·  Week 81%")
+
+        for category in [UIContentSizeCategory.large, .accessibilityExtraExtraExtraLarge] {
+            let cell = configuredCell(status: weeklyStatus, width: 320, contentSizeCategory: category)
+            let labels = descendants(of: cell).compactMap { $0 as? UILabel }
+            let buttons = descendants(of: cell).compactMap { $0 as? UIButton }
+            let oauth = try #require(labels.first { $0.text == "OAUTH" })
+            let weekly = try #require(labels.first { $0.text == "Week 81%" })
+            let model = try #require(buttons.first { $0.accessibilityLabel == "gpt-5.6" })
+            let usageRow = try #require(oauth.superview)
+
+            #expect(weekly.superview === usageRow)
+            #expect(model.superview !== usageRow)
+            #expect(abs(usageRow.convert(usageRow.bounds, to: cell).midX - cell.bounds.midX) <= 0.5)
+            #expect(labels.contains { $0.text?.hasPrefix("5h ") == true } == false)
+            #expect(weekly.accessibilityLabel?.hasPrefix(
+                "Weekly Codex usage, 81 percent remaining, resets "
+            ) == true)
+        }
+
+        let fiveHourStatus = try decodedStatus(
+            usageJSON: singletonUsageJSON(label: "5h", remainingPercent: 64, resetAt: 1_784_003_600_000)
+        )
+        let fiveHourUsage = try #require(fiveHourStatus.display.codexUsage)
+        #expect(fiveHourUsage.windows.map(\.label) == [.fiveHour])
+        #expect(SessionMetadataFooterCell.footerText(for: fiveHourStatus) ==
+            "gpt-5.6  ·  Thinking medium  ·  Fast on  ·  OAUTH  ·  5h 64%")
+    }
+
     @Test("T1645 omits usage outside OAuth and against an older provider")
     func omitsUsageOutsideOAuthContract() throws {
         let apiKey = try decodedStatus(authMode: "api_key", usageJSON: freshUsageJSON)
@@ -310,6 +348,19 @@ struct T1645FooterUsageTests {
           "fetchedAt": null,
           "windows": [],
           "unavailableReason": \(reason)
+        }
+        """
+    }
+
+    private func singletonUsageJSON(label: String, remainingPercent: Int, resetAt: Int) -> String {
+        """
+        {
+          "freshness": "fresh",
+          "fetchedAt": 1784000000000,
+          "windows": [
+            {"label": "\(label)", "remainingPercent": \(remainingPercent), "resetAt": \(resetAt)}
+          ],
+          "unavailableReason": null
         }
         """
     }

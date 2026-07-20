@@ -1053,6 +1053,17 @@ final class ProviderChatService: ChatServicing {
             logger.warning("Dropping message payload: decode failed error=\(error.localizedDescription, privacy: .public)")
             return
         }
+        // SECOND suspension-window fence: the payload decode above is a detached
+        // await, so the direct link can retire (and a new link authenticate)
+        // WHILE it runs — a Tightbeam->OpenClaw reconnect being the dangerous case.
+        // Re-check the link token here, after the decode and before we touch the
+        // replay cursor or broadcast, so a resumed retired-link message can never
+        // advance the new link's cursor or leak a stale message into it. (The
+        // pre-decode fence in dispatchDecodedFrame guards the first window.)
+        if let lifecycleConnectionToken, !isCurrentLifecycleConnectionToken(lifecycleConnectionToken) {
+            logger.debug("dropping stale inbound message: link token retired during payload decode")
+            return
+        }
         guard let sessionKey = resolveSessionKey(from: payload) else {
             logger.warning("Dropping message: missing sessionKey id=\(payload.id, privacy: .public)")
             return
@@ -1702,6 +1713,15 @@ final class ProviderChatService: ChatServicing {
             lifecycleEpoch: 1,
             lifecycleConnectionToken: lifecycleConnectionToken
         )
+    }
+
+    /// Drive the DIRECT-link message path (`lifecycleEpoch == nil`) so a test can
+    /// exercise the SECOND suspension window: `handleMessage` awaits the detached
+    /// payload decode, then the post-decode token recheck must drop a message whose
+    /// link retired during that decode before it can touch the cursor or broadcast.
+    func debugHandleDirectMessageAfterDecode(text: String, lifecycleConnectionToken: UUID?) async {
+        guard let data = text.data(using: .utf8) else { return }
+        await handleMessage(data: data, lifecycleEpoch: nil, lifecycleConnectionToken: lifecycleConnectionToken)
     }
 #endif
 }

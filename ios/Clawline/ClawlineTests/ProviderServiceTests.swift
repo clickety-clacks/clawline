@@ -706,6 +706,41 @@ struct ProviderServiceTests {
         #expect(service.serverFeatures == ["tightbeam"])
     }
 
+    @Test("F1 SECOND suspension-window regression (message path): a message frame whose link retired DURING payload decode is dropped — it cannot advance the new link's replay cursor or leak in")
+    func staleMessageAfterTokenRetirementDuringPayloadDecodeIsDropped() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+        let sessionKey = "agent:main:clawline:user:main"
+
+        // Link A read a message frame; the detached payload decode is the SECOND
+        // suspension window. Link A retires and link B authenticates while it runs.
+        let tokenA = service.debugSetActiveLifecycleToken()
+        let tokenB = service.debugSetActiveLifecycleToken()   // retires A -> B
+        #expect(tokenA != tokenB)
+
+        // The stale link-A message resumes AFTER retirement. The post-decode recheck
+        // must drop it BEFORE it advances the new link's replay cursor or broadcasts.
+        await service.debugHandleDirectMessageAfterDecode(
+            text: #"{ "type": "message", "id": "s_stale_A", "role": "assistant", "content": "leak", "timestamp": 1700000000000, "streaming": false, "sessionKey": "\#(sessionKey)", "attachments": [] }"#,
+            lifecycleConnectionToken: tokenA
+        )
+        #expect(service.replayCursorSnapshot()[sessionKey] == nil)
+
+        // Control: a message read on the CURRENT link B is accepted and advances the
+        // cursor — proving the drop is due to the retired token, not a broken path.
+        await service.debugHandleDirectMessageAfterDecode(
+            text: #"{ "type": "message", "id": "s_live_B", "role": "assistant", "content": "ok", "timestamp": 1700000001000, "streaming": false, "sessionKey": "\#(sessionKey)", "attachments": [] }"#,
+            lifecycleConnectionToken: tokenB
+        )
+        #expect(service.replayCursorSnapshot()[sessionKey] != nil)
+    }
+
     @Test("F1 production: an unexpected socket close clears the service's authoritative tightbeam feature set")
     func socketCloseClearsServerFeatures() async throws {
         let mockSocket = MockWebSocketClient()

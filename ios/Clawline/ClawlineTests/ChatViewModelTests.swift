@@ -2354,6 +2354,14 @@ struct ChatViewModelTests {
         defer { viewModel.prepareForReplacement() }
 
         await viewModel.activate(origin: "test.r3.placement")
+        chatService.serverFeatures = ["tightbeam"]
+        chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))
+        for _ in 0..<50 {
+            if viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.isTightbeamServer)
+
         let outcome = await viewModel.createStream(
             displayName: "Placed",
             harness: "claude",

@@ -140,7 +140,7 @@ struct T1750CreationSheetTests {
     private func makeArchetype(name: String, where whereHosts: [String]) throws -> OrgOptions.Archetype {
         let whereData = try JSONSerialization.data(withJSONObject: whereHosts)
         let whereJSON = String(decoding: whereData, as: UTF8.self)
-        let json = "{ \"name\": \"\(name)\", \"where\": \(whereJSON) }"
+        let json = "{ \"name\": \"\(name)\", \"where\": \(whereJSON), \"defaults\": {} }"
         return try JSONDecoder().decode(OrgOptions.Archetype.self, from: Data(json.utf8))
     }
 

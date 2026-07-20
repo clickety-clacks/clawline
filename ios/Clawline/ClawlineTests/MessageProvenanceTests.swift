@@ -252,6 +252,23 @@ struct MessageProvenanceBubbleTests {
         #expect(chip?.textForTests == "⚙ ci")
     }
 
+    @Test("provenance uses the inbound bubble treatment when chrome is on")
+    func provenanceUsesInboundBubbleTreatment() {
+        let message = makeMessage(sender: "agent:atlas", content: "[from agent:atlas]\nDeploy is green.")
+        let gatedBubble = configuredBubble(message: message, showsProvenanceChrome: true)
+        let ungatedBubble = configuredBubble(message: message, showsProvenanceChrome: false)
+        let palette = ChatFlowUIKitTheme.palette(isDark: false)
+
+        #expect(gatedBubble.debugBubbleGradientColorsForTests().elementsEqual(
+            palette.bubbleOtherGradient,
+            by: { $0.isEqual($1) }
+        ))
+        #expect(ungatedBubble.debugBubbleGradientColorsForTests().elementsEqual(
+            palette.bubbleSelfGradient,
+            by: { $0.isEqual($1) }
+        ))
+    }
+
     @Test("chrome off renders exactly as today: no chip, stamp left as text")
     func chromeOffRendersAsToday() {
         let message = makeMessage(sender: "agent:atlas", content: "[from agent:atlas]\nDeploy is green.")

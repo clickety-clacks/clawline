@@ -831,6 +831,12 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     }
 
     private func bubbleGradientColors(for role: Message.Role, palette: ChatFlowUIKitTheme.Palette) -> [UIColor] {
+        // A wake-delivered `role=user` message is inbound to the agent, not text
+        // typed on this device. Keep its user-side placement, but use the inbound
+        // palette so the bubble treatment reinforces the provenance chip.
+        if role == .user, provenanceChipVisible {
+            return palette.bubbleOtherGradient
+        }
         if isCollapsedUserOnlyMode, role == .user {
             return [palette.collapsedUserBubbleGreenTint, palette.collapsedUserBubbleGreenTint]
         }
@@ -2840,6 +2846,10 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             replyIndicatorUncappedTextHeight: replyIndicatorUncappedTextHeightForTests(),
             replyIndicatorChipHeight: replyIndicatorChipView.bounds.height
         )
+    }
+
+    func debugBubbleGradientColorsForTests() -> [UIColor] {
+        (gradientLayer.colors as? [CGColor] ?? []).map(UIColor.init(cgColor:))
     }
 
     private func replyIndicatorUncappedTextHeightForTests() -> CGFloat {

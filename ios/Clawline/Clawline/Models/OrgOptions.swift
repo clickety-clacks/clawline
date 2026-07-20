@@ -48,9 +48,9 @@ struct OrgOptions: Decodable, Equatable {
     struct Archetype: Decodable, Equatable {
         let name: String
         let `where`: [String]
-        let defaults: JSONValue?
+        let defaults: JSONValue
 
-        init(name: String, where whereHosts: [String], defaults: JSONValue?) {
+        init(name: String, where whereHosts: [String], defaults: JSONValue) {
             self.name = name
             self.`where` = whereHosts
             self.defaults = defaults
@@ -66,11 +66,7 @@ struct OrgOptions: Decodable, Equatable {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             name = try container.decode(String.self, forKey: .name)
             `where` = try container.decode([String].self, forKey: .where)
-            // `defaults` is server-applied at spawn; the client never reads it.
-            // It stays optional so an archetype without defaults cannot take
-            // down the whole options fetch over a field we do not consume.
-            // name/where are client-consumed and therefore required.
-            defaults = try container.decodeIfPresent(JSONValue.self, forKey: .defaults)
+            defaults = try container.decode(JSONValue.self, forKey: .defaults)
         }
     }
 }

@@ -123,7 +123,7 @@ struct ScrollToBottomUnreadTests {
         let (controller, viewModel) = try await makeFooterScrollController()
         defer { viewModel.onDisappear() }
 
-        controller.scrollToBottom(animated: false)
+        try await settleProjectionBottom(controller)
 
         #expect(MessageFlowCollectionViewController.hidesFooterAtRestingBottom)
         #expect(controller.footerAlphaForTesting == 0)
@@ -135,7 +135,7 @@ struct ScrollToBottomUnreadTests {
         let (controller, viewModel) = try await makeFooterScrollController()
         defer { viewModel.onDisappear() }
 
-        controller.scrollToBottom(animated: false)
+        try await settleProjectionBottom(controller)
         let chatBubbleBottom = controller.chatBubbleBottomOffsetYForTesting
         controller.setChatScrollOffsetYForTesting(
             chatBubbleBottom + (SessionMetadataFooterCell.fadeRevealRange / 2)
@@ -155,7 +155,7 @@ struct ScrollToBottomUnreadTests {
         defer { viewModel.onDisappear() }
 
         let footerFrame = try #require(controller.footerFrameForTesting)
-        controller.scrollToBottom(animated: false)
+        try await settleProjectionBottom(controller)
         controller.setChatScrollOffsetYForTesting(
             controller.chatBubbleBottomOffsetYForTesting + SessionMetadataFooterCell.fadeRevealRange
         )
@@ -168,7 +168,7 @@ struct ScrollToBottomUnreadTests {
         let (controller, viewModel) = try await makeFooterScrollController(streamSearchQuery: "message 0")
         defer { viewModel.onDisappear() }
 
-        controller.scrollToBottom(animated: false)
+        try await settleProjectionBottom(controller)
 
         #expect(controller.chatBubbleBottomOffsetYForTesting.isFinite)
         #expect(controller.displayedFooterAlphaForTesting == 0)
@@ -197,7 +197,6 @@ struct ScrollToBottomUnreadTests {
         let auth = TestAuthManager()
         auth.storeCredentials(token: "jwt", userId: "user")
         let chatService = TestChatService()
-        _ = chatService.incomingMessages
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
@@ -207,11 +206,10 @@ struct ScrollToBottomUnreadTests {
             toastManager: ToastManager(),
             salientHighlightService: SalientHighlightService()
         )
-        await viewModel.onAppear()
         viewModel.setActiveSessionKeyForTesting(sessionKey)
 
         for index in 0..<12 {
-            chatService.emit(Message(
+            viewModel.debugUpsertMessage(Message(
                 id: "t1662-\(index)",
                 role: index.isMultiple(of: 2) ? .user : .assistant,
                 content: String(repeating: "Footer regression production-path message \(index). ", count: 8),
@@ -220,12 +218,26 @@ struct ScrollToBottomUnreadTests {
                 attachments: [],
                 deviceId: nil,
                 sessionKey: sessionKey
-            ))
-        }
-        for _ in 0..<100 where viewModel.messages(for: sessionKey).count < 12 {
-            try await Task.sleep(for: .milliseconds(10))
+            ), isServer: true)
         }
         #expect(viewModel.messages(for: sessionKey).count == 12)
+        if !streamSearchQuery.isEmpty {
+            viewModel.requestMessageProjection(
+                for: sessionKey,
+                showOnlyUserMessages: false,
+                searchQuery: streamSearchQuery
+            )
+            for _ in 0..<100 {
+                if viewModel.messageProjection(
+                    for: sessionKey,
+                    showOnlyUserMessages: false,
+                    searchQuery: streamSearchQuery
+                ) != nil {
+                    break
+                }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+        }
 
         let controller = MessageFlowCollectionViewController(nibName: nil, bundle: nil)
         controller.loadViewIfNeeded()
@@ -247,8 +259,19 @@ struct ScrollToBottomUnreadTests {
         )
         controller.view.setNeedsLayout()
         controller.view.layoutIfNeeded()
-        try await Task.sleep(for: .milliseconds(20))
+        for _ in 0..<100 where controller.footerFrameForTesting == nil {
+            try await Task.sleep(for: .milliseconds(10))
+            controller.view.layoutIfNeeded()
+        }
         return (controller, viewModel)
+    }
+
+    private func settleProjectionBottom(_ controller: MessageFlowCollectionViewController) async throws {
+        controller.scheduleScrollToBottom(animated: false, attempts: 1)
+        for _ in 0..<100 where controller.displayedFooterAlphaForTesting == nil {
+            try await Task.sleep(for: .milliseconds(10))
+            controller.view.layoutIfNeeded()
+        }
     }
 
     @Test("Bounds-only layout changes skip redundant snapshot update")

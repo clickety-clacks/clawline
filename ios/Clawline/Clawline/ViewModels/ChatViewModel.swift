@@ -841,6 +841,8 @@ final class ChatViewModel {
     private var messageProjectionIndexBySession: [String: MessageProjectionIndex] = [:]
     private var messageSearchProjectionByKey: [MessageSearchProjectionKey: MessageSearchProjection] = [:]
     private var messageSearchProjectionTaskByKey: [MessageSearchProjectionKey: Task<Void, Never>] = [:]
+    private var selectedMessageSearchProjectionKeyBySession: [String: MessageSearchProjectionKey] = [:]
+    private var messageRemovalObservers: [UUID: (String, Set<String>) -> Void] = [:]
     private(set) var messageProjectionPublicationSequence: Int = 0
     private var forceReReadGenerationBySession: [String: Int] = [:]
     private var pendingLocalMessages: [PendingLocalMessage] = []
@@ -927,16 +929,10 @@ final class ChatViewModel {
         searchQuery: String
     ) -> MessageProjectionSnapshot? {
         let base: MessageProjectionBase = showOnlyUserMessages ? .userOnly : .transcript
-        let index: MessageProjectionIndex
-        if let existing = messageProjectionIndexBySession[sessionKey] {
-            index = existing
-        } else {
-            let created = MessageProjectionIndex(
-                messages: sessionMessages[sessionKey] ?? [],
-                revision: messageListRevision(for: sessionKey)
-            )
-            messageProjectionIndexBySession[sessionKey] = created
-            index = created
+        guard let index = messageProjectionIndexBySession[sessionKey] else {
+            let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmedQuery.isEmpty, sessionMessages[sessionKey] == nil else { return nil }
+            return MessageProjectionIndex().snapshot(base: base)
         }
         let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else { return index.snapshot(base: base) }
@@ -956,19 +952,60 @@ final class ChatViewModel {
             )
         }
 
-        if messageSearchProjectionTaskByKey[key] == nil {
-            let input = index.searchInput(base: base)
-            messageSearchProjectionTaskByKey[key] = Task.detached(priority: .userInitiated) { [weak self] in
-                let matches = input.matchingTranscriptIndices(query: trimmedQuery)
-                guard !Task.isCancelled else { return }
-                await self?.publishMessageSearchProjection(
-                    key: key,
-                    revision: input.revision,
-                    transcriptIndices: matches
-                )
-            }
-        }
         return nil
+    }
+
+    func requestMessageProjection(
+        for sessionKey: String,
+        showOnlyUserMessages: Bool,
+        searchQuery: String
+    ) {
+        let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else {
+            if let selectedKey = selectedMessageSearchProjectionKeyBySession.removeValue(forKey: sessionKey) {
+                messageSearchProjectionTaskByKey.removeValue(forKey: selectedKey)?.cancel()
+            }
+            return
+        }
+        let key = MessageSearchProjectionKey(
+            sessionKey: sessionKey,
+            base: showOnlyUserMessages ? .userOnly : .transcript,
+            query: trimmedQuery
+        )
+        if let previousKey = selectedMessageSearchProjectionKeyBySession[sessionKey], previousKey != key {
+            messageSearchProjectionTaskByKey.removeValue(forKey: previousKey)?.cancel()
+        }
+        selectedMessageSearchProjectionKeyBySession[sessionKey] = key
+        startMessageSearchProjectionBuildIfNeeded(key)
+    }
+
+    @discardableResult
+    func registerMessageRemovalObserver(
+        _ observer: @escaping (String, Set<String>) -> Void
+    ) -> UUID {
+        let token = UUID()
+        messageRemovalObservers[token] = observer
+        return token
+    }
+
+    func unregisterMessageRemovalObserver(_ token: UUID) {
+        messageRemovalObservers.removeValue(forKey: token)
+    }
+
+    private func startMessageSearchProjectionBuildIfNeeded(_ key: MessageSearchProjectionKey) {
+        guard let index = messageProjectionIndexBySession[key.sessionKey] else { return }
+        if messageSearchProjectionByKey[key]?.revision == index.revision { return }
+        guard messageSearchProjectionTaskByKey[key] == nil else { return }
+        let input = index.searchInput(base: key.base)
+        messageSearchProjectionTaskByKey[key] = Task.detached(priority: .userInitiated) { [weak self] in
+            let matches = input.matchingTranscriptIndices(query: key.query)
+            guard !Task.isCancelled else { return }
+            await self?.publishMessageSearchProjection(
+                key: key,
+                revision: input.revision,
+                transcriptIndices: matches
+            )
+        }
     }
 
     private func publishMessageSearchProjection(
@@ -983,6 +1020,13 @@ final class ChatViewModel {
             transcriptIndices: transcriptIndices
         )
         messageProjectionPublicationSequence &+= 1
+    }
+
+    private func publishMessageRemovals(sessionKey: String, messageIDs: Set<String>) {
+        guard !messageIDs.isEmpty else { return }
+        for observer in messageRemovalObservers.values {
+            observer(sessionKey, messageIDs)
+        }
     }
 
     private struct MessageSearchProjectionKey: Hashable, Sendable {
@@ -3315,8 +3359,13 @@ final class ChatViewModel {
 
     private func removeSession(sessionKey: String, reason: String) {
         _ = reason
+        publishMessageRemovals(
+            sessionKey: sessionKey,
+            messageIDs: Set(sessionMessages[sessionKey, default: []].map(\.id))
+        )
         sessionMessages.removeValue(forKey: sessionKey)
         messageProjectionIndexBySession.removeValue(forKey: sessionKey)
+        selectedMessageSearchProjectionKeyBySession.removeValue(forKey: sessionKey)
         let removedSearchKeys = messageSearchProjectionByKey.keys.filter { $0.sessionKey == sessionKey }
         removedSearchKeys.forEach { messageSearchProjectionByKey.removeValue(forKey: $0) }
         let removedSearchTaskKeys = messageSearchProjectionTaskByKey.keys.filter { $0.sessionKey == sessionKey }
@@ -3356,6 +3405,12 @@ final class ChatViewModel {
 
     private func clearAllForLogout(reason: String) {
         _ = reason
+        for (sessionKey, sessionMessageList) in sessionMessages {
+            publishMessageRemovals(
+                sessionKey: sessionKey,
+                messageIDs: Set(sessionMessageList.map(\.id))
+            )
+        }
         let sessionKeysToClear = Set(sessionMessages.keys)
             .union(streamsBySessionKey.keys)
             .union(lastReadMessageIdBySession.keys)
@@ -3368,6 +3423,7 @@ final class ChatViewModel {
         sessionMessages.removeAll()
         messageProjectionIndexBySession.removeAll()
         messageSearchProjectionByKey.removeAll()
+        selectedMessageSearchProjectionKeyBySession.removeAll()
         messageSearchProjectionTaskByKey.values.forEach { $0.cancel() }
         messageSearchProjectionTaskByKey.removeAll()
         messageProjectionPublicationSequence &+= 1
@@ -3396,7 +3452,8 @@ final class ChatViewModel {
         for sessionKey: String,
         projectionMutation: MessageProjectionMutation
     ) {
-        let oldCount = sessionMessages[sessionKey]?.count ?? 0
+        let previousMessages = sessionMessages[sessionKey] ?? []
+        let oldCount = previousMessages.count
         sessionMessages[sessionKey] = newMessages
         messageListRevisionBySession[sessionKey, default: 0] &+= 1
         let revision = messageListRevisionBySession[sessionKey] ?? 0
@@ -3432,6 +3489,20 @@ final class ChatViewModel {
         let staleTaskKeys = messageSearchProjectionTaskByKey.keys.filter { $0.sessionKey == sessionKey }
         staleTaskKeys.forEach {
             messageSearchProjectionTaskByKey.removeValue(forKey: $0)?.cancel()
+        }
+        if let selectedKey = selectedMessageSearchProjectionKeyBySession[sessionKey] {
+            startMessageSearchProjectionBuildIfNeeded(selectedKey)
+        }
+        if case .remove = projectionMutation {
+            publishMessageRemovals(
+                sessionKey: sessionKey,
+                messageIDs: Set(previousMessages.map(\.id)).subtracting(newMessages.map(\.id))
+            )
+        } else if case .replaceAll = projectionMutation {
+            publishMessageRemovals(
+                sessionKey: sessionKey,
+                messageIDs: Set(previousMessages.map(\.id)).subtracting(newMessages.map(\.id))
+            )
         }
         messageProjectionPublicationSequence &+= 1
         let newCount = newMessages.count
@@ -5313,6 +5384,11 @@ final class ChatViewModel {
 
     private func ensureStreamEntry(for sessionKey: String) {
         guard !sessionKey.isEmpty else { return }
+        if messageProjectionIndexBySession[sessionKey] == nil {
+            messageProjectionIndexBySession[sessionKey] = MessageProjectionIndex(
+                revision: messageListRevision(for: sessionKey)
+            )
+        }
         guard streamsBySessionKey[sessionKey] == nil else { return }
         let synthesized = StreamSession(
             sessionKey: sessionKey,
@@ -5343,6 +5419,11 @@ final class ChatViewModel {
                 .map(\.sessionKey)
         )
         streamsBySessionKey = byKey
+        for sessionKey in byKey.keys where messageProjectionIndexBySession[sessionKey] == nil {
+            messageProjectionIndexBySession[sessionKey] = MessageProjectionIndex(
+                revision: messageListRevision(for: sessionKey)
+            )
+        }
         let validSessionKeys = Set(byKey.keys)
         let removedSessionKeys = previousSessionKeys.subtracting(validSessionKeys)
         unavailableCrossChatNotificationSourceIds.subtract(validSessionKeys)
@@ -5368,6 +5449,11 @@ final class ChatViewModel {
 
     private func applyStreamUpsert(_ stream: StreamSession) {
         unavailableCrossChatNotificationSourceIds.remove(stream.sessionKey)
+        if messageProjectionIndexBySession[stream.sessionKey] == nil {
+            messageProjectionIndexBySession[stream.sessionKey] = MessageProjectionIndex(
+                revision: messageListRevision(for: stream.sessionKey)
+            )
+        }
         streamsBySessionKey[stream.sessionKey] = stream
         syntheticSessionKeys.remove(stream.sessionKey)
         recalculateOrderedSessionKeys()

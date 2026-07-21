@@ -620,6 +620,24 @@ final class ChatViewModel {
     func setActiveSessionKeyForTesting(_ sessionKey: String) {
         setEngineActiveSessionKey(sessionKey)
     }
+
+    // F2 (sixth-review) deterministic disk-cache fence proof hooks.
+    func triggerHistoryResetForTesting(epoch: Int) {
+        handleHistoryResetRequired(epoch: epoch)
+    }
+
+    func debugBarrierGeneration(for sessionKey: String) -> Int {
+        historyBarrierGenerationBySessionKey[sessionKey, default: 0]
+    }
+
+    func debugCacheFileExists(for sessionKey: String) -> Bool {
+        guard let url = messageCacheURL(for: sessionKey) else { return false }
+        return FileManager.default.fileExists(atPath: url.path)
+    }
+
+    func debugHasPendingPersist(for sessionKey: String) -> Bool {
+        persistDebounceTasks[sessionKey] != nil
+    }
 #endif
 
     private func scheduleDebouncedEngineActivation(target: String, epoch: Int) {
@@ -718,6 +736,14 @@ final class ChatViewModel {
         sessionStatusBySessionKey[sessionStatusAuthorityKey(for: sessionKey)]
     }
 
+    /// Whether a Tightbeam-gated session control may be applied right now. Used
+    /// to keep a pending harness confirmation from driving set_harness after the
+    /// gate closed.
+    func canApplyTightbeamSessionControl(_ action: SessionControlAction) -> Bool {
+        guard action == .setHarness else { return true }
+        return isTightbeamServer
+    }
+
     func applySessionControl(
         sessionKey: String,
         action: SessionControlAction,
@@ -728,6 +754,11 @@ final class ChatViewModel {
         guard !normalizedSessionKey.isEmpty else { return }
         Task { [weak self] in
             guard let self else { return }
+            // Recheck the gate INSIDE the async boundary: the gate can close
+            // between enqueueing this task and its execution (the modal's
+            // synchronous check is not enough), and a Tightbeam-only control
+            // must never post to a link that lost the feature.
+            guard self.canApplyTightbeamSessionControl(action) else { return }
             do {
                 let response = try await self.chatService.applySessionControl(
                     sessionKey: normalizedSessionKey,
@@ -755,6 +786,41 @@ final class ChatViewModel {
             } catch {
                 self.toastManager.show(error.localizedDescription)
                 self.scheduleSessionStatusRefresh(for: normalizedSessionKey, reason: "sessionControlFailed")
+            }
+        }
+    }
+
+    /// On-demand fetch (no caching layer): loads org-options once per tightbeam
+    /// session lifetime so the footer harness picker has its options. Cleared on
+    /// disconnect/logout via `resetSessionProvisioningState`.
+    private var orgOptionsLoadGeneration = 0
+    private var orgOptionsLoadTask: Task<Void, Never>?
+
+    func loadOrgOptionsIfNeeded() {
+        guard isTightbeamServer, orgOptions == nil, !isLoadingOrgOptions else { return }
+        isLoadingOrgOptions = true
+        let generation = orgOptionsLoadGeneration
+        // Explicit cancellable handle: cancelled+niled on disconnect/session reset
+        // and before replacement, so an in-flight fetch cannot repopulate a newer
+        // session's options.
+        orgOptionsLoadTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.orgOptionsLoadGeneration == generation {
+                    self.isLoadingOrgOptions = false
+                    self.orgOptionsLoadTask = nil
+                }
+            }
+            do {
+                let fetched = try await self.chatService.fetchOrgOptions()
+                // Boundary validation: drop if cancelled, if a reset advanced the
+                // session generation, or if the gate closed while in flight.
+                guard !Task.isCancelled,
+                      self.orgOptionsLoadGeneration == generation,
+                      self.isTightbeamServer else { return }
+                self.orgOptions = fetched
+            } catch {
+                self.logger.info("org-options fetch failed error=\(error.localizedDescription, privacy: .public)")
             }
         }
     }
@@ -877,6 +943,26 @@ final class ChatViewModel {
     private var persistDebounceTasks: [String: Task<Void, Never>] = [:]
     private var pendingPersistPayloads: [String: [Message]] = [:]
     private var restoreTaskBySessionKey: [String: Task<Void, Never>] = [:]
+    /// Monotonic per-stream barrier generation. `stream_history_cleared` bumps
+    /// it; every async producer of pre-barrier material (cache restores,
+    /// debounced persist writes) captures the generation when it starts and is
+    /// discarded on completion if the generation moved. This is the structural
+    /// guarantee that a barrier can never be crossed by in-flight work,
+    /// independent of task timing (spec §T-A: post-barrier replay is the only
+    /// truth).
+    private var historyBarrierGenerationBySessionKey: [String: Int] = [:]
+    /// Serial executor for message-cache file mutations. The cache files live at
+    /// one process-wide Application Support path, so ordering must hold ACROSS
+    /// view-model instances (overlapping/replaced ones), not just within one.
+    /// Injected so tests can substitute or drain it deterministically.
+    private let messageCacheIO: any MessageCacheIOServicing
+    /// All message-cache file mutations (writes and deletes) run through the
+    /// injected `messageCacheIO`, so a barrier's cache delete is strictly
+    /// ordered after any previously enqueued write — a detached write can never
+    /// land after the delete and resurrect pre-barrier history on disk. The
+    /// composition root injects ONE shared instance into every view model, so
+    /// ordering holds across overlapping/replaced instances (the cache files are
+    /// a single process-wide resource) without any static/global state.
     private var writerCurrentEpoch: Int?
     private var firstReplayAppliedEpoch: Int?
     private var pendingHistoryResetReplay: PendingHistoryResetReplay?
@@ -897,6 +983,15 @@ final class ChatViewModel {
     private var restoredSessionKeys: Set<String> = []
     private var restoredStreamMetadataForUserId: String?
     private var supportsSessionProvisioning = false
+    /// Feature flags from `auth_result.features`; tightbeam-only affordances gate on this.
+    private(set) var serverFeatures: Set<String> = []
+    var isTightbeamServer: Bool { serverFeatures.contains("tightbeam") }
+    /// Org-level options (harnesses/models/hosts/archetypes) fetched on demand
+    /// from GET /api/org-options when the server is tightbeam. Feeds the footer
+    /// harness picker (T1751); the creation sheet (T1750) will read the rest.
+    private(set) var orgOptions: OrgOptions?
+    private var isLoadingOrgOptions = false
+    var orgOptionsHarnesses: [String] { orgOptions?.harnesses ?? [] }
     private var hasResolvedProvisioningCapability = true
     private var hasReceivedSessionProvisioning = false
     private var hasReceivedExplicitSessionInfo = false
@@ -936,7 +1031,7 @@ final class ChatViewModel {
         let base: MessageProjectionBase = showOnlyUserMessages ? .userOnly : .transcript
         guard let index = messageProjectionIndexBySession[sessionKey] else {
             let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard trimmedQuery.isEmpty, sessionMessages[sessionKey] == nil else { return nil }
+            guard trimmedQuery.isEmpty, !sessionMessages.keys.contains(sessionKey) else { return nil }
             return MessageProjectionIndex().snapshot(base: base)
         }
         let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1053,6 +1148,48 @@ final class ChatViewModel {
     private struct MessageSearchProjection: Sendable {
         let revision: Int
         var transcriptIndices: [Int]
+    }
+
+    /// Single entry point for the server feature gate. A cold launch renders
+    /// cached history and the footer BEFORE auth completes, so flipping the
+    /// gate must invalidate what is already on screen — otherwise provenance
+    /// chips and the harness/host footer stay missing for the whole session
+    /// and only appear for content that arrives later.
+    /// Event-stream entry: a `.serverFeatures` event may be delayed past an
+    /// unexpected socket close or a reconnect, so its PAYLOAD must never be
+    /// trusted to reopen the gate. Explicit current-link fence: the value is
+    /// always re-derived from the service's authoritative feature set, which the
+    /// service sets on auth success and CLEARS on disconnect. That property is a
+    /// per-link invariant — the service only ever holds the current link's
+    /// features — so a delayed pre-disconnect event resolves to the CURRENT
+    /// link's value: empty while disconnected, the new link's features after a
+    /// reconnect. The old gate can never reopen. (Proven by
+    /// `delayedServerFeaturesAfterDisconnectDoesNotReopenGate` across a full
+    /// disconnect -> reconnect-to-openclaw -> delayed-old-event sequence.)
+    private func applyServerFeaturesFromEvent() {
+        applyServerFeatures(chatService.serverFeatures)
+    }
+
+    private func applyServerFeatures(_ features: [String]) {
+        let updated = Set(features)
+        guard updated != serverFeatures else { return }
+        let wasTightbeam = serverFeatures.contains("tightbeam")
+        serverFeatures = updated
+        presentationCache.removeAll()
+        for key in sessionMessages.keys {
+            armForceReRead(for: key)
+        }
+        armForceReRead(for: uiSelectedSessionKey)
+        if wasTightbeam, !isTightbeamServer {
+            // The gate just closed: invalidate any in-flight org-options load and
+            // drop cached options so a stale fetch cannot land in a later session.
+            orgOptionsLoadGeneration &+= 1
+            orgOptionsLoadTask?.cancel()
+            orgOptionsLoadTask = nil
+            isLoadingOrgOptions = false
+            orgOptions = nil
+        }
+        loadOrgOptionsIfNeeded()
     }
 
     private func armForceReRead(for sessionKey: String) {
@@ -1221,6 +1358,7 @@ final class ChatViewModel {
          uploadService: any UploadServicing,
          toastManager: ToastManager,
          salientHighlightService: any SalientHighlightServicing,
+         messageCacheIO: any MessageCacheIOServicing = MessageCacheIO(),
          connectionAlertGracePeriod: Duration = .seconds(2),
          nowProvider: @escaping () -> Date = Date.init,
          assistantIncomingHaptic: @escaping @MainActor () -> Void = {
@@ -1230,6 +1368,7 @@ final class ChatViewModel {
              #endif
          }) {
         logger.info("ChatViewModel init id=\(self.instanceId, privacy: .public)")
+        self.messageCacheIO = messageCacheIO
         self.auth = auth
         self.chatService = chatService
         self.settings = settings
@@ -1556,6 +1695,18 @@ final class ChatViewModel {
         guard !isRetired else { return }
         isRetired = true
         hasActivatedLifecycleOwnership = false
+        // A retired instance must not keep mutating the message cache: every
+        // ChatViewModel writes the SAME Application Support files, so a pending
+        // persist or in-flight restore from this instance could otherwise land
+        // after a replacement instance has applied a history barrier and
+        // resurrect cleared history.
+        persistDebounceTasks.values.forEach { $0.cancel() }
+        persistDebounceTasks.removeAll()
+        pendingPersistPayloads.removeAll()
+        restoreTaskBySessionKey.values.forEach { $0.cancel() }
+        restoreTaskBySessionKey.removeAll()
+        orgOptionsLoadTask?.cancel()
+        orgOptionsLoadTask = nil
         clearSessionStatusRefreshes()
         discardCrossChatNotificationBatches()
         stopObservingLifecycle(origin: "prepareForReplacement")
@@ -2653,36 +2804,128 @@ final class ChatViewModel {
         refreshTrackableSessions(reason: "manualRefresh")
     }
 
+    /// Outcome of a placement-aware create (T-B creation sheet). On failure the
+    /// message is the server's refusal text verbatim so the sheet can surface it
+    /// unchanged; a nil message means there was nothing to surface (empty name).
+    enum StreamCreateOutcome: Equatable {
+        case created
+        case failed(message: String?)
+    }
+
+    private enum StreamCreateResult {
+        case success
+        case emptyName
+        case failure(Swift.Error)
+    }
+
     func createStream(displayName: String) async -> Bool {
+        switch await performStreamCreate(
+            displayName: displayName,
+            harness: nil,
+            model: nil,
+            host: nil,
+            archetype: nil
+        ) {
+        case .success:
+            return true
+        case .emptyName:
+            return false
+        case .failure(let error):
+            toastManager.show(error.localizedDescription)
+            return false
+        }
+    }
+
+    /// T-B: create with optional placement provisioning. Unlike the name-only
+    /// path this returns the refusal message instead of toasting, so the
+    /// creation sheet owns presentation and shows the server's rule verbatim.
+    func createStream(
+        displayName: String,
+        harness: String?,
+        model: String?,
+        host: String?,
+        archetype: String?
+    ) async -> StreamCreateOutcome {
+        // This placement-aware create is the Tightbeam creation SHEET's only
+        // submit path (the legacy openclaw manager uses createStream(displayName:)).
+        // The whole sheet is Tightbeam-gated, so refuse ANY submission — including
+        // name-only — once the gate has closed, not just placement-bearing ones.
+        // Re-checked here at the async submission boundary as defense in depth
+        // behind the modal's onChange dismissal.
+        guard isTightbeamServer else {
+            return .failed(message: "New-chat options are unavailable on this server.")
+        }
+        switch await performStreamCreate(
+            displayName: displayName,
+            harness: harness,
+            model: model,
+            host: host,
+            archetype: archetype
+        ) {
+        case .success:
+            return .created
+        case .emptyName:
+            return .failed(message: nil)
+        case .failure(let error):
+            return .failed(message: error.localizedDescription)
+        }
+    }
+
+    private func performStreamCreate(
+        displayName: String,
+        harness: String?,
+        model: String?,
+        host: String?,
+        archetype: String?
+    ) async -> StreamCreateResult {
         let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
+        guard !trimmed.isEmpty else { return .emptyName }
         let idempotencyKey = Self.makeIdempotencyKey()
         do {
-            let stream = try await chatService.createStream(
+            let stream = try await createStreamRequestingRetry(
                 displayName: trimmed,
-                idempotencyKey: idempotencyKey
+                idempotencyKey: idempotencyKey,
+                harness: harness,
+                model: model,
+                host: host,
+                archetype: archetype
             )
             applyStreamUpsert(stream)
             setEngineActiveSessionKey(stream.sessionKey)
-            return true
+            return .success
         } catch {
-            if shouldRetryCreateOnActiveConnection(after: error) {
-                do {
-                    try await reconnectActiveTransportForControlPlane()
-                    let stream = try await chatService.createStream(
-                        displayName: trimmed,
-                        idempotencyKey: idempotencyKey
-                    )
-                    applyStreamUpsert(stream)
-                    setEngineActiveSessionKey(stream.sessionKey)
-                    return true
-                } catch {
-                    toastManager.show(error.localizedDescription)
-                    return false
-                }
-            }
-            toastManager.show(error.localizedDescription)
-            return false
+            return .failure(error)
+        }
+    }
+
+    private func createStreamRequestingRetry(
+        displayName: String,
+        idempotencyKey: String,
+        harness: String?,
+        model: String?,
+        host: String?,
+        archetype: String?
+    ) async throws -> StreamSession {
+        do {
+            return try await chatService.createStream(
+                displayName: displayName,
+                idempotencyKey: idempotencyKey,
+                harness: harness,
+                model: model,
+                host: host,
+                archetype: archetype
+            )
+        } catch {
+            guard shouldRetryCreateOnActiveConnection(after: error) else { throw error }
+            try await reconnectActiveTransportForControlPlane()
+            return try await chatService.createStream(
+                displayName: displayName,
+                idempotencyKey: idempotencyKey,
+                harness: harness,
+                model: model,
+                host: host,
+                archetype: archetype
+            )
         }
     }
 
@@ -3085,6 +3328,19 @@ final class ChatViewModel {
     private func handleHistoryResetRequired(epoch: Int) {
         restoreTaskBySessionKey.values.forEach { $0.cancel() }
         restoreTaskBySessionKey.removeAll()
+        // Fence the cache the same way a per-stream barrier does: cancel pending
+        // persist debounces, drop their payloads, and advance EVERY known
+        // stream's barrier generation so a debounce that already fired self-
+        // discards instead of re-writing pre-reset history after clearMessageCache.
+        let fencedKeys = Set(sessionMessages.keys)
+            .union(pendingPersistPayloads.keys)
+            .union(persistDebounceTasks.keys)
+        persistDebounceTasks.values.forEach { $0.cancel() }
+        persistDebounceTasks.removeAll()
+        pendingPersistPayloads.removeAll()
+        for key in fencedKeys {
+            historyBarrierGenerationBySessionKey[key, default: 0] += 1
+        }
         pendingLocalMessages.removeAll()
         ackedPendingLocalMessageIDs.removeAll()
         messageFailures.removeAll()
@@ -3372,6 +3628,36 @@ final class ChatViewModel {
         applyMessagesWrite([], for: sessionKey, projectionMutation: .replaceAll)
     }
 
+    /// Server moved the history barrier (harness swap etc.); drop every local
+    /// trace for the stream so the post-barrier replay is the only truth. Do NOT
+    /// remove the stream itself — only its message history/cache (spec §T-A).
+    private func handleStreamHistoryCleared(sessionKey: String) {
+        let runtimeKey = sessionStatusAuthorityKey(for: sessionKey)
+        for key in Set([sessionKey, runtimeKey]) {
+            // Move the barrier FIRST: any in-flight restore or debounced
+            // persist that started before this instant is now stale by
+            // construction and self-discards when it completes.
+            historyBarrierGenerationBySessionKey[key, default: 0] += 1
+            restoreTaskBySessionKey[key]?.cancel()
+            restoreTaskBySessionKey[key] = nil
+            clearSessionMessages(sessionKey: key, reason: "stream_history_cleared")
+            removeCachedMessages(for: key)
+            chatService.setReplayCursor(nil, for: key)
+            // Also purge any pre-barrier messages staged in a pending
+            // history-reset replay for this stream. Without this, a barrier
+            // that lands mid-replay clears the visible store but
+            // applyPendingHistoryResetReplayIfNeeded would reinsert the
+            // pre-barrier messages (and re-seed the cursor) at replayCompleted,
+            // resurrecting cleared history.
+            if pendingHistoryResetReplay?.messagesBySessionKey[key] != nil {
+                let dropped = pendingHistoryResetReplay?.messagesBySessionKey.removeValue(forKey: key) ?? []
+                for message in dropped {
+                    pendingHistoryResetReplay?.notificationSequenceByMessageId.removeValue(forKey: message.id)
+                }
+            }
+        }
+    }
+
     private func removeSession(sessionKey: String, reason: String) {
         _ = reason
         publishMessageRemovals(
@@ -3590,6 +3876,8 @@ final class ChatViewModel {
             beginCrossChatNotificationBatch(epoch: epoch, waitsForTruncationBoundary: replayTruncated)
         case .serverMessage(let epoch, let payload):
             await handleLifecycleServerMessage(epoch: epoch, payload: payload)
+        case .historyCleared(_, let sessionKey):
+            handleStreamHistoryCleared(sessionKey: sessionKey)
         case .replayCompleted(let epoch):
             applyPendingHistoryResetReplayIfNeeded()
             markMissingFinalsAfterReplay()
@@ -4071,7 +4359,16 @@ final class ChatViewModel {
     }
 
     func presentation(for message: Message, metrics: ChatFlowTheme.Metrics) -> MessagePresentation {
-        let key = PresentationCacheKey(messageID: message.id, isCompact: metrics.isCompact)
+        // Provenance messages present (and are therefore measured, sized, and
+        // copied) from the STRIPPED body on tightbeam servers — the same seam
+        // the bubble renders from, so V1/V2 sizing can never classify off the
+        // hidden stamp line (spec §T-D strip rule).
+        let displayMessage = isTightbeamServer ? message.strippingProvenanceStampForDisplay() : message
+        let key = PresentationCacheKey(
+            messageID: message.id,
+            isCompact: metrics.isCompact,
+            stripsProvenance: displayMessage.content != message.content
+        )
         let fingerprint = presentationFingerprint(for: message)
         if let cached = presentationCache[key], cached.fingerprint == fingerprint {
             return cached.presentation
@@ -4079,7 +4376,7 @@ final class ChatViewModel {
 
         var state = tableParseStates[message.id] ?? StreamingTableParseState()
         let presentation = MessagePresentationBuilder.build(
-            from: message,
+            from: displayMessage,
             metrics: metrics,
             streamingState: &state
         )
@@ -4088,7 +4385,7 @@ final class ChatViewModel {
         if !message.streaming, state.isDirty {
             var canonicalState = StreamingTableParseState()
             resolvedPresentation = MessagePresentationBuilder.build(
-                from: message,
+                from: displayMessage,
                 metrics: metrics,
                 streamingState: &canonicalState
             )
@@ -4250,6 +4547,8 @@ final class ChatViewModel {
             refreshStreamsFromProvider(reason: "streamDeleted")
             refreshTrackableSessions(reason: "streamDeleted")
             attemptPendingProvisionedSendIfPossible()
+        case .streamHistoryCleared(let sessionKey):
+            handleStreamHistoryCleared(sessionKey: sessionKey)
         case .streamReadStateSnapshot(let snapshot):
             applyStreamReadStateSnapshot(snapshot)
         case .streamReadStateUpdated(let sessionKey, let lastReadMessageId):
@@ -4262,6 +4561,8 @@ final class ChatViewModel {
             hasResolvedProvisioningCapability = true
             supportsSessionProvisioning = supported
             attemptPendingProvisionedSendIfPossible()
+        case .serverFeatures:
+            applyServerFeaturesFromEvent()
         case .sessionInfo(let info):
             hasResolvedProvisioningCapability = true
             supportsSessionProvisioning = true
@@ -4635,9 +4936,27 @@ final class ChatViewModel {
             clearAllLiveProgress()
             clearAllTypingIndicatorMorphTargets()
             auth.refreshAdminStatusFromToken()
+            // Pull the authed link's feature set from the service on every
+            // connected transition. The `.serverFeatures` service event and
+            // this connectionState stream are separate AsyncStreams with no
+            // cross-stream ordering, so the event alone can be lost to a late
+            // subscription or wiped by a reset that lands after it; the pull
+            // makes the gate converge on the service's authoritative value.
+            applyServerFeatures(chatService.serverFeatures)
             attemptPendingProvisionedSendIfPossible()
             scheduleSessionStatusRefresh(for: uiSelectedSessionKey, reason: "connectionRestored")
         case .connecting, .reconnecting:
+            // No authenticated link exists in any non-live phase the coordinator
+            // collapses into .reconnecting (.connecting/.authenticating/.recovering).
+            // Re-derive the gate from the service's authoritative feature set, which
+            // `handleSocketClose` clears BEFORE it drives this transition, so the
+            // Tightbeam gate closes the instant the link drops instead of lingering
+            // open through reconnect. The service still holds the current link's
+            // features during the authenticated .replaying phase (also mapped to
+            // .reconnecting), so a live replay keeps the gate open with no flicker.
+            // This only touches the feature gate + its org-options; unrelated
+            // session/provisioning state is left intact for the reconnect.
+            applyServerFeatures(chatService.serverFeatures)
             isAssistantTyping = false
             typingSessionKey = nil
             clearAllLiveProgress()
@@ -4658,6 +4977,14 @@ final class ChatViewModel {
 
     private func resetSessionProvisioningState(clearPendingSend: Bool) {
         supportsSessionProvisioning = false
+        serverFeatures.removeAll()
+        orgOptions = nil
+        isLoadingOrgOptions = false
+        // Invalidate AND cancel any in-flight org-options fetch from the prior
+        // session so its result cannot land in the next session's picker.
+        orgOptionsLoadGeneration &+= 1
+        orgOptionsLoadTask?.cancel()
+        orgOptionsLoadTask = nil
         hasResolvedProvisioningCapability = false
         hasReceivedSessionProvisioning = false
         hasReceivedExplicitSessionInfo = false
@@ -4919,6 +5246,7 @@ final class ChatViewModel {
                 fallbackModels: incoming.display.fallbackModels,
                 provider: incoming.display.provider,
                 harness: incoming.display.harness,
+                host: incoming.display.host,
                 authMode: incoming.display.authMode,
                 reasoningLevel: resolvedReasoningLevel,
                 thinkingLevel: resolvedThinkingLevel,
@@ -5197,7 +5525,8 @@ final class ChatViewModel {
         }
         guard let url = messageCacheURL(for: sessionKey) else { return }
         restoreTaskBySessionKey[sessionKey]?.cancel()
-        let restoreTask = Task.detached { [weak self, sessionKey, url] in
+        let barrierGeneration = historyBarrierGenerationBySessionKey[sessionKey, default: 0]
+        let restoreTask = Task.detached { [weak self, sessionKey, url, barrierGeneration] in
             guard let self else { return }
             guard let data = try? Data(contentsOf: url) else {
                 return
@@ -5217,6 +5546,11 @@ final class ChatViewModel {
                 await MainActor.run { [weak self, filtered] in
                     guard let self else { return }
                     guard self.restoreTaskBySessionKey[sessionKey] != nil else { return }
+                    // Barrier guard: a history clear that landed while this
+                    // restore was reading disk moved the generation; applying
+                    // the cached (pre-barrier) messages or re-seeding the
+                    // replay cursor now would resurrect cleared history.
+                    guard self.historyBarrierGenerationBySessionKey[sessionKey, default: 0] == barrierGeneration else { return }
                     if let epoch {
                         guard self.writerCurrentEpoch == epoch else { return }
                         guard self.firstReplayAppliedEpoch != epoch else { return }
@@ -5251,7 +5585,11 @@ final class ChatViewModel {
         persistDebounceTasks[sessionKey]?.cancel()
         persistDebounceTasks[sessionKey] = nil
         pendingPersistPayloads.removeValue(forKey: sessionKey)
-        try? FileManager.default.removeItem(at: url)
+        // Same serial queue as cache writes: this delete is ordered after any
+        // write already enqueued, so pre-barrier payloads cannot land after it.
+        messageCacheIO.perform {
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 
     private func persistMessages(_ messages: [Message], for sessionKey: String) {
@@ -5259,12 +5597,19 @@ final class ChatViewModel {
         let payload = trimMessagesForCache(messages, for: sessionKey)
         pendingPersistPayloads[sessionKey] = payload
         persistDebounceTasks[sessionKey]?.cancel()
-        persistDebounceTasks[sessionKey] = Task { [weak self] in
+        let barrierGeneration = historyBarrierGenerationBySessionKey[sessionKey, default: 0]
+        persistDebounceTasks[sessionKey] = Task { [weak self, barrierGeneration] in
             guard let self else { return }
-            try? await Task.sleep(for: .milliseconds(500))
+            do { try await Task.sleep(for: .milliseconds(500)) } catch is CancellationError { return } catch { return }
+            // Barrier guard: never enqueue a write of material captured before
+            // a history clear (the payload predates the barrier by definition).
+            guard self.historyBarrierGenerationBySessionKey[sessionKey, default: 0] == barrierGeneration else {
+                self.pendingPersistPayloads[sessionKey] = nil
+                return
+            }
             guard let pendingPayload = self.pendingPersistPayloads[sessionKey] else { return }
             self.pendingPersistPayloads[sessionKey] = nil
-            Task.detached { [pendingPayload, url, sessionKey] in
+            messageCacheIO.perform { [pendingPayload, url, sessionKey] in
                 let encoder = JSONEncoder()
                 encoder.dateEncodingStrategy = .iso8601
                 do {
@@ -5317,13 +5662,18 @@ final class ChatViewModel {
     }
 
     private func clearMessageCache() {
-        let fileManager = FileManager.default
         guard let directoryURL = messageCacheDirectoryURL() else { return }
-        guard let contents = try? fileManager.contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: nil) else {
-            return
-        }
-        for fileURL in contents {
-            try? fileManager.removeItem(at: fileURL)
+        // Route deletes through the shared serial executor (same queue as writes)
+        // so a history-reset wipe is strictly ordered after any previously
+        // enqueued persist — a straggler write cannot recreate the files after.
+        messageCacheIO.perform {
+            let fileManager = FileManager.default
+            guard let contents = try? fileManager.contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: nil) else {
+                return
+            }
+            for fileURL in contents {
+                try? fileManager.removeItem(at: fileURL)
+            }
         }
     }
 
@@ -5875,6 +6225,7 @@ final class ChatViewModel {
     private struct PresentationCacheKey: Hashable {
         let messageID: String
         let isCompact: Bool
+        let stripsProvenance: Bool
     }
 
     private struct PresentationCacheEntry {
@@ -6175,6 +6526,18 @@ final class ChatViewModel {
         } else {
             clearLiveProgress(sessionKey: sessionKey, runId: "t1738-debug", messageId: nil)
         }
+    }
+
+    /// Drives the real coordinator-output path so a test can exercise the exact
+    /// production phase mapping (e.g. an unexpected drop's replaying -> recovering,
+    /// which collapses to .reconnecting) without standing up a live socket.
+    func debugDriveLifecyclePhaseForTesting(
+        from: ConnectionLifecyclePhase,
+        to: ConnectionLifecyclePhase,
+        epoch: Int,
+        reason: ConnectionLifecycleReason
+    ) async {
+        await handleLifecycleOutput(.phaseTransition(from: from, to: to, epoch: epoch, reason: reason))
     }
 
     func debugConnectionSnapshot() -> (token: String?, lastMessageId: String?) {

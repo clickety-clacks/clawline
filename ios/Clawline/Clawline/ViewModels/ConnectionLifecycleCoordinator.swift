@@ -51,6 +51,14 @@ struct LifecycleTransportEvent: Equatable, Sendable {
             failureReason: AuthFailureReason?
         )
         case serverMessage(data: Data)
+        /// Gateway history barrier, delivered IN-BAND with `serverMessage` so it
+        /// cannot be reordered against the messages it must separate. The service
+        /// emits the barrier on EXACTLY ONE channel per occurrence — the in-band
+        /// lifecycle event when a lifecycle epoch is active, otherwise the
+        /// `.streamHistoryCleared` service event — never both, because clearing
+        /// is destructive and not idempotent (a duplicate would erase a
+        /// legitimately post-barrier message).
+        case historyCleared(sessionKey: String)
         case syncComplete
         case transportClosed(reason: TransportCloseReason)
         case transportTimeout
@@ -112,6 +120,8 @@ enum ConnectionLifecycleOutput: Equatable, Sendable {
     case historyResetRequired(epoch: Int)
     case replayStarted(epoch: Int, replayCount: Int, replayTruncated: Bool, historyReset: Bool)
     case serverMessage(epoch: Int, payload: Data)
+    /// Gateway history barrier, ordered in-band with `serverMessage`.
+    case historyCleared(epoch: Int, sessionKey: String)
     case replayCompleted(epoch: Int)
     case historyTruncated(epoch: Int)
 }
@@ -175,7 +185,15 @@ actor ConnectionLifecycleCoordinator {
     private var retriedInvalidLastMessageId = false
     private var backgroundedAt: Date?
     private var awaitingHistoryResetAckEpoch: Int?
-    private var bufferedServerMessages: [Data] = []
+    /// Ordered buffer for inbound events held during the history-reset ack
+    /// window. Server messages AND history barriers share one queue so the
+    /// barrier can never overtake a message that arrived before it (spec §T-A
+    /// ordering).
+    private enum BufferedInbound {
+        case message(Data)
+        case historyCleared(sessionKey: String)
+    }
+    private var bufferedInbound: [BufferedInbound] = []
 
     private func coordinatorDiag(_ message: String) {
         print("[T099-COORD] \(Date().ISO8601Format()) coordinator phase=\(String(describing: phase)) epoch=\(currentEpoch) \(message)")
@@ -410,6 +428,8 @@ actor ConnectionLifecycleCoordinator {
             )
         case .serverMessage(let data):
             handleServerMessage(epoch: event.epoch, data: data)
+        case .historyCleared(let sessionKey):
+            handleHistoryCleared(epoch: event.epoch, sessionKey: sessionKey)
         case .syncComplete:
             handleSyncComplete(epoch: event.epoch)
         case .transportClosed:
@@ -514,7 +534,7 @@ actor ConnectionLifecycleCoordinator {
         let shouldResetHistory = historyReset ?? false
         if shouldResetHistory {
             awaitingHistoryResetAckEpoch = epoch
-            bufferedServerMessages.removeAll(keepingCapacity: false)
+            bufferedInbound.removeAll(keepingCapacity: false)
             emit(.historyResetRequired(epoch: epoch))
             historyResetAckTimeoutTask?.cancel()
             historyResetAckTimeoutTask = Task {
@@ -567,14 +587,34 @@ actor ConnectionLifecycleCoordinator {
 
     private func flushBufferedMessagesForEpoch(_ epoch: Int) {
         guard currentEpoch == epoch else { return }
-        let buffered = bufferedServerMessages
-        bufferedServerMessages.removeAll(keepingCapacity: false)
-        for payload in buffered {
-            handleServerMessage(epoch: epoch, data: payload)
+        let buffered = bufferedInbound
+        bufferedInbound.removeAll(keepingCapacity: false)
+        for item in buffered {
+            switch item {
+            case .message(let payload):
+                handleServerMessage(epoch: epoch, data: payload)
+            case .historyCleared(let sessionKey):
+                emit(.historyCleared(epoch: epoch, sessionKey: sessionKey))
+            }
             if phase == .failed || phase == .recovering || phase == .idle {
                 return
             }
         }
+    }
+
+    private func handleHistoryCleared(epoch: Int, sessionKey: String) {
+        guard currentEpoch == epoch else { return }
+        // Buffer the barrier in the SAME ordered queue as server messages while
+        // waiting for the history-reset ack, so it cannot overtake an earlier
+        // buffered message. Outside that window it is emitted immediately.
+        if awaitingHistoryResetAckEpoch == epoch {
+            bufferedInbound.append(.historyCleared(sessionKey: sessionKey))
+            if bufferedInbound.count > 500 {
+                fail(.protocolOverflow)
+            }
+            return
+        }
+        emit(.historyCleared(epoch: epoch, sessionKey: sessionKey))
     }
 
     private func handleReplayTotalTimeout(epoch: Int) {
@@ -604,8 +644,8 @@ actor ConnectionLifecycleCoordinator {
     private func handleServerMessage(epoch: Int, data: Data) {
         guard currentEpoch == epoch else { return }
         if awaitingHistoryResetAckEpoch == epoch {
-            bufferedServerMessages.append(data)
-            if bufferedServerMessages.count > 500 {
+            bufferedInbound.append(.message(data))
+            if bufferedInbound.count > 500 {
                 fail(.protocolOverflow)
             }
             return

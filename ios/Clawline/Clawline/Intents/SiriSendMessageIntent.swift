@@ -315,7 +315,7 @@ private func mapChatServiceError(_ error: ProviderChatService.Error) -> SiriSend
         return .connectionTimeout
     case .policyViolation:
         return .notPaired
-    case .notConnected, .sessionReplaced, .invalidMessageId, .serverError:
+    case .notConnected, .sessionReplaced, .invalidMessageId, .serverError, .tightbeamCapabilityUnavailable:
         return .connectionTimeout
     }
 }

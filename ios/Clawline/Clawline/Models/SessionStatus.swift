@@ -42,6 +42,7 @@ struct SessionStatus: Decodable, Equatable {
         let fallbackModels: [String]?
         let provider: String?
         let harness: String?
+        let host: String?
         let authMode: String?
         let reasoningLevel: String?
         let thinkingLevel: String?
@@ -55,6 +56,7 @@ struct SessionStatus: Decodable, Equatable {
             fallbackModels: [String]?,
             provider: String?,
             harness: String?,
+            host: String? = nil,
             authMode: String? = nil,
             reasoningLevel: String?,
             thinkingLevel: String?,
@@ -67,6 +69,7 @@ struct SessionStatus: Decodable, Equatable {
             self.fallbackModels = fallbackModels
             self.provider = provider
             self.harness = harness
+            self.host = host
             self.authMode = authMode
             self.reasoningLevel = reasoningLevel
             self.thinkingLevel = thinkingLevel
@@ -210,6 +213,7 @@ enum SessionControlAction: String, Encodable, Equatable {
     case setReasoning = "set_reasoning"
     case setFastMode = "set_fast_mode"
     case setMode = "set_mode"
+    case setHarness = "set_harness"
 }
 
 struct SessionControlResponse: Decodable, Equatable {

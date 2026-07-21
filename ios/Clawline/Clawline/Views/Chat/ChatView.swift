@@ -514,6 +514,7 @@ struct ChatView: View {
     @State private var isFileImporterPresented = false
     @State private var isCancelCurrentPromptDialogPresented = false
     @State private var isLogoutConfirmationPresented = false
+    @State private var pendingHarnessChange: PendingHarnessChange?
     @State private var isMissingReplyVisibleIdDialogPresented = false
     @State private var cancelCurrentPromptSessionKey: String?
     @State private var cancelCurrentPromptRequiresVisibleTyping = false
@@ -671,6 +672,11 @@ struct ChatView: View {
         var unreadCount: Int = 0
         var firstUnreadMessageId: String?
         var bounceToken: Int = 0
+    }
+
+    private struct PendingHarnessChange: Equatable {
+        let sessionKey: String
+        let harness: String
     }
 
     private enum ScrollButtonHorizontalDetent: String, CaseIterable {
@@ -1263,6 +1269,35 @@ struct ChatView: View {
                 viewModel.logout()
             }
             Button("Cancel", role: .cancel) {}
+        }
+        // Same gate rule as the creation sheet: a pending harness confirmation
+        // must not survive the Tightbeam gate closing and drive set_harness
+        // against an ungated server.
+        .onChange(of: viewModel.isTightbeamServer) { _, isTightbeam in
+            if !isTightbeam { pendingHarnessChange = nil }
+        }
+        .confirmationDialog(
+            "Switching harnesses will clear this chat.",
+            isPresented: Binding(
+                get: { pendingHarnessChange != nil },
+                set: { presented in if !presented { pendingHarnessChange = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingHarnessChange
+        ) { change in
+            Button("Switch to \(change.harness)", role: .destructive) {
+                if viewModel.canApplyTightbeamSessionControl(.setHarness) {
+                    viewModel.applySessionControl(
+                        sessionKey: change.sessionKey,
+                        action: .setHarness,
+                        value: change.harness
+                    )
+                }
+                pendingHarnessChange = nil
+            }
+            Button("Cancel", role: .cancel) { pendingHarnessChange = nil }
+        } message: { _ in
+            Text("The new engine starts with fresh model context — engines can't read each other's memory.")
         }
         .photosPicker(
             isPresented: $isPhotosPickerPresented,
@@ -2802,6 +2837,11 @@ struct ChatView: View {
                 }
             },
             onSessionControlSelected: { sessionKey, action, value, enabled in
+                if action == .setHarness {
+                    // Confirm before switching engines — the swap clears the chat.
+                    requestHarnessChange(sessionKey: sessionKey, harness: value)
+                    return
+                }
                 viewModel.applySessionControl(
                     sessionKey: sessionKey,
                     action: action,
@@ -3259,6 +3299,14 @@ struct ChatView: View {
         typingActivityResetTask?.cancel()
         typingActivityResetTask = nil
         isTypingActive = false
+    }
+
+    private func requestHarnessChange(sessionKey: String, harness: String?) {
+        guard let harness, !harness.isEmpty else { return }
+        // Selecting the current harness is a no-op; only a real change confirms.
+        let current = viewModel.sessionStatus(for: sessionKey)?.display.harness
+        guard harness != current else { return }
+        pendingHarnessChange = PendingHarnessChange(sessionKey: sessionKey, harness: harness)
     }
 
     private func presentCancelCurrentPromptDialog(sessionKey: String? = nil, anchorFrame: CGRect? = nil) {
@@ -6134,6 +6182,7 @@ private final class PreviewChatService: ChatServicing {
     var incomingMessages: AsyncStream<Message> {
         AsyncStream { _ in }
     }
+    var serverFeatures: [String] { [] }
     var connectionState: AsyncStream<ConnectionState> {
         AsyncStream { continuation in
             continuation.yield(.connected)
@@ -6163,6 +6212,7 @@ private final class PreviewChatService: ChatServicing {
     func publishReadState(sessionKey: String, lastReadMessageId: String) async throws {}
     func fetchStreams() async throws -> [StreamSession] { [] }
     func fetchTrackableSessions() async throws -> [TrackableSession] { [] }
+    func fetchOrgOptions() async throws -> OrgOptions { OrgOptions.empty }
     func fetchSessionStatus(sessionKey: String) async throws -> SessionStatus {
         throw ProviderChatService.Error.notConnected
     }
@@ -6196,6 +6246,17 @@ private final class PreviewChatService: ChatServicing {
             createdAt: Date(),
             updatedAt: Date()
         )
+    }
+    func createStream(
+        displayName: String,
+        idempotencyKey: String,
+        harness: String?,
+        model: String?,
+        host: String?,
+        archetype: String?
+    ) async throws -> StreamSession {
+        // Previews have no gateway; placement params are explicitly ignored here.
+        try await createStream(displayName: displayName, idempotencyKey: idempotencyKey)
     }
     func renameStream(sessionKey: String, displayName: String) async throws -> StreamSession {
         StreamSession(

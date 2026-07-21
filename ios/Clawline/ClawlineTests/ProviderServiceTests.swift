@@ -671,6 +671,351 @@ struct ProviderServiceTests {
         #expect(message?.content == "ok")
     }
 
+    @Test("F1 suspension-window regression: a frame whose link token retired DURING decode is dropped and cannot mutate the new link")
+    func staleFrameAfterTokenRetirementDuringDecodeIsDropped() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+
+        // Link A is active; a frame is read and captures token A. Then the link
+        // retires and reconnects (token B) while the decode await is suspended.
+        let tokenA = service.debugSetActiveLifecycleToken()
+        let tokenB = service.debugSetActiveLifecycleToken()   // retires A -> B
+        #expect(tokenA != tokenB)
+
+        // The stale link-A auth_result (tightbeam) resumes after the retirement.
+        // The post-decode recheck must drop it — it must NOT set serverFeatures
+        // on the new link.
+        await service.debugDispatchFrameAfterDecode(
+            text: #"{ "type": "auth_result", "success": true, "features": ["tightbeam"] }"#,
+            lifecycleConnectionToken: tokenA
+        )
+        #expect(service.serverFeatures.isEmpty)
+
+        // Control: the same frame on the CURRENT token B is accepted (proves the
+        // drop is due to the retired token, not a broken dispatch path).
+        await service.debugDispatchFrameAfterDecode(
+            text: #"{ "type": "auth_result", "success": true, "features": ["tightbeam"] }"#,
+            lifecycleConnectionToken: tokenB
+        )
+        #expect(service.serverFeatures == ["tightbeam"])
+    }
+
+    @Test("F1 SECOND suspension-window regression (message path): a message frame whose link retired DURING payload decode is dropped — it cannot advance the new link's replay cursor or leak in")
+    func staleMessageAfterTokenRetirementDuringPayloadDecodeIsDropped() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+        let sessionKey = "agent:main:clawline:user:main"
+
+        // Link A read a message frame; the detached payload decode is the SECOND
+        // suspension window. Link A retires and link B authenticates while it runs.
+        let tokenA = service.debugSetActiveLifecycleToken()
+        let tokenB = service.debugSetActiveLifecycleToken()   // retires A -> B
+        #expect(tokenA != tokenB)
+
+        // The stale link-A message resumes AFTER retirement. The post-decode recheck
+        // must drop it BEFORE it advances the new link's replay cursor or broadcasts.
+        await service.debugHandleDirectMessageAfterDecode(
+            text: #"{ "type": "message", "id": "s_stale_A", "role": "assistant", "content": "leak", "timestamp": 1700000000000, "streaming": false, "sessionKey": "\#(sessionKey)", "attachments": [] }"#,
+            lifecycleConnectionToken: tokenA
+        )
+        #expect(service.replayCursorSnapshot()[sessionKey] == nil)
+
+        // Control: a message read on the CURRENT link B is accepted and advances the
+        // cursor — proving the drop is due to the retired token, not a broken path.
+        await service.debugHandleDirectMessageAfterDecode(
+            text: #"{ "type": "message", "id": "s_live_B", "role": "assistant", "content": "ok", "timestamp": 1700000001000, "streaming": false, "sessionKey": "\#(sessionKey)", "attachments": [] }"#,
+            lifecycleConnectionToken: tokenB
+        )
+        #expect(service.replayCursorSnapshot()[sessionKey] != nil)
+    }
+
+    @Test("F1 production: an unexpected socket close clears the service's authoritative tightbeam feature set")
+    func socketCloseClearsServerFeatures() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true, "features": ["tightbeam"] }"#)
+        }
+        try await service.connect(token: "jwt", lastMessageId: nil)
+        // Auth established the current-link feature set.
+        for _ in 0..<50 {
+            if service.serverFeatures == ["tightbeam"] { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(service.serverFeatures == ["tightbeam"])
+
+        // Unexpected socket close (stream finishes) drives handleSocketClose; the
+        // authoritative feature set must be cleared so a delayed .serverFeatures
+        // event cannot re-derive a stale ["tightbeam"] and reopen the gate.
+        mockSocket.close(with: .normalClosure)
+        for _ in 0..<50 {
+            if service.serverFeatures.isEmpty { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(service.serverFeatures.isEmpty)
+    }
+
+    /// TB-D5 mutation-boundary fence: helper to bring the service to a connected
+    /// link whose auth advertised the given features.
+    private func makeConnectedService(features: [String]) async throws -> (ProviderChatService, MockWebSocketClient) {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_fence",
+            baseURLProvider: { baseURL }
+        )
+        let featuresJSON = "[" + features.map { "\"\($0)\"" }.joined(separator: ",") + "]"
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true, "features": \#(featuresJSON) }"#)
+        }
+        try await service.connect(token: "jwt", lastMessageId: nil)
+        for _ in 0..<50 {
+            if Set(service.serverFeatures) == Set(features) { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        return (service, mockSocket)
+    }
+
+    @Test("retired-link + fence: a delayed retired-link tightbeam auth_result cannot restore the gate after an OpenClaw reconnect, and queued set_harness/placement-create stay refused by the current-link fence")
+    func retiredLinkCannotRestoreTightbeamAndQueuedControlStaysRefused() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_retired",
+            baseURLProvider: { baseURL }
+        )
+
+        // Link A is the tightbeam link: its auth_result opens the gate.
+        let tokenA = service.debugSetActiveLifecycleToken()
+        await service.debugDispatchFrameAfterDecode(
+            text: #"{ "type": "auth_result", "success": true, "features": ["tightbeam"] }"#,
+            lifecycleConnectionToken: tokenA
+        )
+        #expect(service.serverFeatures == ["tightbeam"])
+
+        // Link A retires and the service reconnects to an OpenClaw link B whose
+        // auth_result advertises NO tightbeam feature — the gate closes.
+        let tokenB = service.debugSetActiveLifecycleToken()   // retires A -> B
+        #expect(tokenA != tokenB)
+        await service.debugDispatchFrameAfterDecode(
+            text: #"{ "type": "auth_result", "success": true, "features": [] }"#,
+            lifecycleConnectionToken: tokenB
+        )
+        #expect(service.serverFeatures.isEmpty)
+
+        // The delayed RETIRED-link (A) tightbeam auth_result now resumes — an
+        // expected-close/retired-lifecycle callback firing late. It must be dropped
+        // by the current-link token guard; it must NOT restore tightbeam onto link B.
+        await service.debugDispatchFrameAfterDecode(
+            text: #"{ "type": "auth_result", "success": true, "features": ["tightbeam"] }"#,
+            lifecycleConnectionToken: tokenA
+        )
+        #expect(service.serverFeatures.contains("tightbeam") == false)
+        #expect(service.serverFeatures.isEmpty)
+
+        // Because the gate stayed closed, a queued Tightbeam-only session control
+        // and a placement-bearing create are still refused by the current-link fence.
+        do {
+            _ = try await service.applySessionControl(
+                sessionKey: "agent:main:clawline:user:main", action: .setHarness, value: "codex", enabled: nil
+            )
+            Issue.record("queued set_harness must stay refused after a retired-link restore attempt")
+        } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
+        } catch { Issue.record("expected tightbeamCapabilityUnavailable, got \(error)") }
+        do {
+            _ = try await service.createStream(
+                displayName: "P", idempotencyKey: "req_retired",
+                harness: "codex", model: nil, host: "eezo", archetype: nil
+            )
+            Issue.record("queued placement create must stay refused after a retired-link restore attempt")
+        } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
+        } catch { Issue.record("expected tightbeamCapabilityUnavailable, got \(error)") }
+    }
+
+    @Test("TB-D5 fence: a placement-bearing create is refused at the service when the current link lacks the tightbeam feature")
+    func placementCreateRefusedWhenLinkLacksTightbeam() async throws {
+        let (service, _) = try await makeConnectedService(features: [])
+        do {
+            _ = try await service.createStream(
+                displayName: "Placement", idempotencyKey: "req_x",
+                harness: "codex", model: nil, host: "eezo", archetype: nil
+            )
+            Issue.record("placement create must be refused on a featureless link")
+        } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
+            // expected
+        } catch {
+            Issue.record("expected tightbeamCapabilityUnavailable, got \(error)")
+        }
+    }
+
+    @Test("TB-D5 fence: set_harness is refused at the service when the current link lacks the tightbeam feature")
+    func setHarnessRefusedWhenLinkLacksTightbeam() async throws {
+        let (service, _) = try await makeConnectedService(features: [])
+        do {
+            _ = try await service.applySessionControl(
+                sessionKey: "agent:main:clawline:user:main", action: .setHarness, value: "codex", enabled: nil
+            )
+            Issue.record("set_harness must be refused on a featureless link")
+        } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
+            // expected
+        } catch {
+            Issue.record("expected tightbeamCapabilityUnavailable, got \(error)")
+        }
+    }
+
+    @Test("TB-D5 fence: a create that began on tightbeam and whose link RETIRED (socket close) is refused on the retry submission — the exact mid-operation gate-retirement hole")
+    func placementCreateRefusedAfterLinkRetiresToFeatureless() async throws {
+        let (service, mockSocket) = try await makeConnectedService(features: ["tightbeam"])
+        #expect(service.serverFeatures == ["tightbeam"])
+        // The link drops mid-operation (as it would between the first notConnected
+        // failure and the VM's post-reconnect retry, if the reconnect landed on a
+        // featureless/OpenClaw link). handleSocketClose clears the authoritative set.
+        mockSocket.close(with: .normalClosure)
+        for _ in 0..<50 {
+            if service.serverFeatures.isEmpty { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(service.serverFeatures.isEmpty)
+        // The retry submission (a second createStream call, exactly what
+        // createStreamRequestingRetry issues) must be refused, not posted.
+        do {
+            _ = try await service.createStream(
+                displayName: "Placement", idempotencyKey: "req_retry",
+                harness: "codex", model: nil, host: "eezo", archetype: nil
+            )
+            Issue.record("retry after link retirement must be refused")
+        } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
+            // expected
+        } catch {
+            Issue.record("expected tightbeamCapabilityUnavailable, got \(error)")
+        }
+    }
+
+    @Test("TB-D5 fence: the legacy name-only create is NOT gated by tightbeam (OpenClaw path stays usable)")
+    func nameOnlyCreateNotGatedByTightbeam() async throws {
+        let (service, _) = try await makeConnectedService(features: [])
+        // All placement fields nil -> the capability fence must NOT fire. It may
+        // fail downstream (no real control-plane), but never with the capability error.
+        do {
+            _ = try await service.createStream(displayName: "Name Only", idempotencyKey: "req_n")
+        } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
+            Issue.record("name-only create must not be gated by the tightbeam capability fence")
+        } catch {
+            // Any other failure (e.g. notConnected/network) is acceptable here.
+        }
+    }
+
+    @Test("TB-D5 fence: placement create and set_harness PASS the capability fence on a tightbeam link (no false refusal)")
+    func placementAndSetHarnessPassFenceOnTightbeamLink() async throws {
+        let (service, _) = try await makeConnectedService(features: ["tightbeam"])
+        for op in ["create", "harness"] {
+            do {
+                if op == "create" {
+                    _ = try await service.createStream(
+                        displayName: "P", idempotencyKey: "req_ok",
+                        harness: "codex", model: nil, host: "eezo", archetype: nil
+                    )
+                } else {
+                    _ = try await service.applySessionControl(
+                        sessionKey: "agent:main:clawline:user:main", action: .setHarness, value: "codex", enabled: nil
+                    )
+                }
+            } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
+                Issue.record("\(op) must pass the capability fence on a tightbeam link")
+            } catch {
+                // Downstream (no real control-plane) failures are fine; the fence passed.
+            }
+        }
+    }
+
+    @Test("B1 regression: under a lifecycle epoch, a history barrier is emitted in-band and NOT duplicated as a service event")
+    func historyBarrierIsSingleChannelUnderLifecycle() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+        let sessionKey = "agent:main:clawline:user:s_barrier"
+
+        final class Collector: @unchecked Sendable {
+            let lock = NSLock()
+            var lifecycleClears: [String] = []
+            var serviceClears: [String] = []
+        }
+        let collector = Collector()
+
+        let lifecycleTask = Task {
+            for await event in service.lifecycleTransportEvents {
+                if case .historyCleared(let key) = event.payload {
+                    collector.lock.lock(); collector.lifecycleClears.append(key); collector.lock.unlock()
+                }
+            }
+        }
+        let serviceTask = Task {
+            for await event in service.serviceEvents {
+                if case .streamHistoryCleared(let key) = event {
+                    collector.lock.lock(); collector.serviceClears.append(key); collector.lock.unlock()
+                }
+            }
+        }
+        defer { lifecycleTask.cancel(); serviceTask.cancel() }
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "stream_history_cleared", "sessionKey": "\#(sessionKey)" }"#)
+        }
+
+        // Managed lifecycle mode: inbound frames carry the lifecycle epoch, so the
+        // barrier must ride the lifecycle stream and the service-event duplicate
+        // must be suppressed (the two emissions are mutually exclusive).
+        service.startConnectionAttempt(epoch: 1, lastMessageId: nil, token: "jwt")
+        for _ in 0..<50 {
+            collector.lock.lock(); let got = !collector.lifecycleClears.isEmpty; collector.lock.unlock()
+            if got { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        // Give any (erroneous) duplicate a chance to arrive before asserting absence.
+        try await Task.sleep(forDuration: .milliseconds(60))
+
+        collector.lock.lock()
+        let lifecycleClears = collector.lifecycleClears
+        let serviceClears = collector.serviceClears
+        collector.lock.unlock()
+
+        #expect(lifecycleClears == [sessionKey])
+        #expect(serviceClears.isEmpty)
+    }
+
     @Test("Malformed ack frame is dropped and valid ack still emits")
     func malformedAckFrameIsDropped() async throws {
         let mockSocket = MockWebSocketClient()
@@ -1881,6 +2226,106 @@ struct ProviderServiceTests {
         let body = try #require(request.httpBody ?? Self.bodyData(from: request.httpBodyStream))
         let payload = try JSONSerialization.jsonObject(with: body) as? [String: String]
         #expect(payload?["idempotencyKey"] == "req_t142_delete")
+    }
+
+    @Test("T1751 org-options fetch decodes the full shape over the device bearer")
+    func orgOptionsFetchDecodesFullShape() async throws {
+        let baseURL = URL(string: "http://127.0.0.1:18800")!
+        final class RequestBox: @unchecked Sendable {
+            var path: String?
+            var authorization: String?
+        }
+        let box = RequestBox()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            box.path = request.url?.path
+            box.authorization = request.value(forHTTPHeaderField: "Authorization")
+            let data = #"""
+            {
+              "harnesses": ["claude", "codex"],
+              "models": {
+                "claude": [{"id": "m1", "ref": "claude-fable-5", "name": "Fable 5", "provider": "anthropic"}],
+                "codex": [{"id": "m2", "ref": "gpt-5.6-sol", "name": "Sol", "provider": "openai"}]
+              },
+              "hosts": ["eezo", "tars"],
+              "archetypes": [{"name": "researcher", "where": ["*"], "defaults": {"harness": "claude"}}]
+            }
+            """#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+
+        let options = try await streamAPIClient.fetchOrgOptions(token: "jwt")
+
+        #expect(box.path == "/api/org-options")
+        #expect(box.authorization == "Bearer jwt")
+        #expect(options.harnesses == ["claude", "codex"])
+        #expect(options.models["codex"]?.first?.ref == "gpt-5.6-sol")
+        #expect(options.hosts == ["eezo", "tars"])
+        #expect(options.archetypes.first?.where == ["*"])
+    }
+
+    @Test("T1751 set_harness session-control carries the harness and omits the model")
+    func setHarnessSessionControlEncodesHarnessWithoutModel() async throws {
+        let baseURL = URL(string: "http://127.0.0.1:18800")!
+        final class RequestBox: @unchecked Sendable {
+            var body: Data?
+            var method: String?
+            var path: String?
+        }
+        let box = RequestBox()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            box.method = request.httpMethod
+            box.path = request.url?.path
+            box.body = request.httpBody ?? Self.bodyData(from: request.httpBodyStream)
+            let data = #"""
+            { "ok": true, "sessionKey": "agent:main:clawline:user:s_harness", "action": "set_harness" }
+            """#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+
+        let response = try await streamAPIClient.applySessionControl(
+            sessionKey: "agent:main:clawline:user:s_harness",
+            action: .setHarness,
+            value: "codex",
+            enabled: nil,
+            token: "jwt"
+        )
+
+        #expect(response.ok)
+        #expect(box.method == "POST")
+        #expect(box.path == "/api/session-control")
+        let body = try #require(box.body)
+        let payload = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        #expect(payload?["action"] as? String == "set_harness")
+        #expect(payload?["harness"] as? String == "codex")
+        #expect(payload?["sessionKey"] as? String == "agent:main:clawline:user:s_harness")
+        // Model omitted (encoded null): the gateway picks the target harness default.
+        #expect((payload?["model"] as? String) == nil)
     }
 
     private static func bodyData(from stream: InputStream?) -> Data? {

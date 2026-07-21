@@ -18,6 +18,10 @@ struct ClawlineApp: App {
     @State private var authManager: AuthManager
     @State private var settingsManager: SettingsManager
     @State private var cartesiaKeyStore: CartesiaKeyStore
+    // Process-wide message-cache serial IO, owned at the app composition root and
+    // injected into every scene's RootView (and thereby every ChatViewModel) so
+    // cache ordering holds across scenes and overlapping view models.
+    @State private var messageCacheIO: any MessageCacheIOServicing = MessageCacheIO()
 
     private let deviceIdentifier: any DeviceIdentifying
     private let connectionService: any ConnectionServicing
@@ -61,7 +65,7 @@ struct ClawlineApp: App {
                 Color.clear
             } else {
                 @Bindable var settingsManager = settingsManager
-                RootView(uploadService: uploadService)
+                RootView(uploadService: uploadService, messageCacheIO: messageCacheIO)
                     .environment(authManager)
                     .environment(\.connectionService, connectionService)
                     .environment(\.deviceIdentifier, deviceIdentifier)

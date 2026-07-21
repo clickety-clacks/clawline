@@ -41,11 +41,19 @@ enum ChatServiceEvent: Equatable {
     case streamCreated(StreamSession)
     case streamUpdated(StreamSession)
     case streamDeleted(sessionKey: String)
+    /// Gateway set a session's history barrier (e.g. after a harness swap) and
+    /// pushed this to every owner device. On receipt, drop the local message
+    /// store/UI and persisted cache for the stream; replay after the barrier
+    /// reconverges all devices (spec §T-A).
+    case streamHistoryCleared(sessionKey: String)
     case streamReadStateSnapshot([String: String])
     case streamReadStateUpdated(sessionKey: String, lastReadMessageId: String)
     case streamTailStateSnapshot([String: StreamTailState])
     case streamTailStateUpdated(sessionKey: String, tailState: StreamTailState)
     case sessionProvisioningAvailable(Bool)
+    /// Feature flags advertised by the server in `auth_result.features`
+    /// (e.g. "tightbeam"). Tightbeam-only affordances gate on this set.
+    case serverFeatures([String])
     /// Server-authoritative session provisioning manifest.
     /// Session keys are the only routing identifiers on the wire (Clawline invariants N3/N7).
     case sessionInfo(SessionInfo)
@@ -64,6 +72,12 @@ protocol ChatServicing: AnyObject {
     var serviceEvents: AsyncStream<ChatServiceEvent> { get }
     var lifecycleTransportEvents: AsyncStream<LifecycleTransportEvent> { get }
     var isTransportReadyForSend: Bool { get }
+    /// The feature set of the CURRENT authed link (`auth_result.features`),
+    /// owned by the service as pull-able truth. The `.serverFeatures` event
+    /// still announces changes, but consumers must be able to read the value
+    /// after the fact — events ride a separate stream from connection state
+    /// and can be lost to late subscription. Empty when not authed.
+    var serverFeatures: [String] { get }
 
     func connect(token: String, lastMessageId: String?) async throws
     func startConnectionAttempt(epoch: Int, lastMessageId: String?, token: String)
@@ -90,6 +104,7 @@ protocol ChatServicing: AnyObject {
 
     func fetchStreams() async throws -> [StreamSession]
     func fetchTrackableSessions() async throws -> [TrackableSession]
+    func fetchOrgOptions() async throws -> OrgOptions
     func fetchSessionStatus(sessionKey: String) async throws -> SessionStatus
     func applySessionControl(
         sessionKey: String,
@@ -99,6 +114,18 @@ protocol ChatServicing: AnyObject {
     ) async throws -> SessionControlResponse
     func adoptStream(sessionKey: String) async throws -> StreamSession
     func createStream(displayName: String, idempotencyKey: String) async throws -> StreamSession
+    /// T-B placement-aware create: optional harness/model/host/archetype ride
+    /// alongside the name-only create. Every conformer implements this
+    /// explicitly — there is deliberately no protocol-level default, so a
+    /// conformer can never silently drop a user's placement choice.
+    func createStream(
+        displayName: String,
+        idempotencyKey: String,
+        harness: String?,
+        model: String?,
+        host: String?,
+        archetype: String?
+    ) async throws -> StreamSession
     func renameStream(sessionKey: String, displayName: String) async throws -> StreamSession
     func deleteStream(sessionKey: String, idempotencyKey: String?) async throws -> String
 }

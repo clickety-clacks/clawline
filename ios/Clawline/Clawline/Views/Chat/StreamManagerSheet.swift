@@ -57,6 +57,7 @@ struct StreamManagerSheet: View {
     @State private var removingSessionKeys: Set<String> = []
     @State private var pendingCreateRows: [PendingCreateRow] = []
     @State private var pendingRemovalStream: StreamSession?
+    @State private var isPresentingCreationSheet = false
     @State private var selectedStreamSessionKey: String?
     @State private var didActivateSelection = false
     @State private var isSearchFieldFocusEnabled = false
@@ -424,6 +425,16 @@ struct StreamManagerSheet: View {
                 Task { await removeStream(stream) }
             }
         }
+        .sheet(isPresented: $isPresentingCreationSheet) {
+            StreamCreationSheet(viewModel: viewModel, defaultName: nextStreamDefaultName)
+        }
+        // The creation sheet is a Tightbeam-only affordance. If the shared gate
+        // closes while it is open (disconnect, or a feature set without
+        // "tightbeam"), it must stop being actionable rather than continue to
+        // offer placement creation against an ungated server.
+        .onChange(of: viewModel.isTightbeamServer) { _, isTightbeam in
+            if !isTightbeam { isPresentingCreationSheet = false }
+        }
     }
 
 
@@ -483,7 +494,7 @@ struct StreamManagerSheet: View {
 
             // Keep add affordance optically centered in a fixed-height toolbar regardless of keyboard changes.
             Button {
-                addStreamDirectly()
+                addStream()
             } label: {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(Color.clear)
@@ -780,9 +791,24 @@ struct StreamManagerSheet: View {
         removingSessionKeys.contains(sessionKey)
     }
 
-    private func addStreamDirectly() {
+    private var nextStreamDefaultName: String {
         let existingCount = streams.count + pendingCreateRows.count
-        let name = "Stream \(existingCount + 1)"
+        return "Stream \(existingCount + 1)"
+    }
+
+    /// Routes the "+" affordance: tightbeam opens the placement creation sheet;
+    /// openclaw keeps the legacy name-only direct create unchanged.
+    private func addStream() {
+        if StreamCreationLaunchPolicy.usesCreationSheet(isTightbeamServer: viewModel.isTightbeamServer) {
+            viewModel.loadOrgOptionsIfNeeded()
+            isPresentingCreationSheet = true
+        } else {
+            addStreamDirectly()
+        }
+    }
+
+    private func addStreamDirectly() {
+        let name = nextStreamDefaultName
         let pendingID = UUID()
         pendingCreateRows.append(PendingCreateRow(id: pendingID, displayName: name))
 

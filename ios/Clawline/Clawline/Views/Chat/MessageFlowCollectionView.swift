@@ -638,6 +638,36 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let layout = collectionView.collectionViewLayout as? MessageFlowLayout
         return (dataSource.snapshot().numberOfItems, layout?.lastPrepareSizeQueryCount ?? 0)
     }
+
+    func debugInsertWebBubbleItems(_ items: [WebBubbleItem]) {
+        items.forEach { webBubbleCoordinator.debugInsertItem($0) }
+        applySnapshotForWebBubbles()
+    }
+
+    func debugSeedAuthoritativeRemovalState(
+        sessionKey: String,
+        messageId: String,
+        callback: @escaping @MainActor () -> Void
+    ) {
+        withBoundSessionKey(sessionKey) {
+            _ = writeMeasuredSize(
+                messageId: messageId,
+                measurement: CGSize(width: 100, height: 40)
+            )
+        }
+        registerOnMessageLoad(sessionKey: sessionKey, messageId: messageId, callback: callback)
+    }
+
+    func debugAuthoritativeRemovalState(
+        sessionKey: String,
+        messageId: String
+    ) -> (hasSize: Bool, callbackCount: Int) {
+        let state = readState(for: sessionKey)
+        return (
+            state.sizeCache[messageId] != nil || state.lastMeasuredSizes[messageId] != nil,
+            state.registeredMessageLoadCallbacksByMessageId[messageId]?.count ?? 0
+        )
+    }
 #endif
 
     private enum MaterializationStage: String {
@@ -677,7 +707,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let materializationRevision: Int
         let restoreGeneration: Int
         let viewportAnchor: BubbleSizingV2ViewportAnchor?
-        let suppressesActivationCompletion: Bool
         let postApplyAction: MaterializationPostApplyAction?
     }
 
@@ -2422,7 +2451,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 materializationRevision: state.revision,
                 restoreGeneration: readState(for: sessionKey).restoreGeneration,
                 viewportAnchor: viewportAnchor,
-                suppressesActivationCompletion: true,
                 postApplyAction: postApplyAction
             )
         } else {
@@ -2910,7 +2938,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             }
             messageRemovalObserverToken = viewModel.registerMessageRemovalObserver { [weak self] sessionKey, messageIds in
                 guard let self else { return }
-                _ = self.invalidateFor(reason: .messagesRemoved(Array(messageIds)))
+                self.withBoundSessionKey(sessionKey) {
+                    _ = self.invalidateFor(reason: .messagesRemoved(Array(messageIds)))
+                }
                 self.expireRegisteredMessageLoadCallbacks(for: sessionKey, messageIds: messageIds)
             }
         }
@@ -3317,6 +3347,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             && wasPinnedToBottomIntent
             && !wasUserInteracting
             && !shouldApplyTypingMorph
+        let shouldAttemptActivationCompletion = isActiveSession
+            && viewModel.isEngineActivationRenderPending(for: effectiveSessionKey)
 
         let revealTargetMessageId = pendingShowOnlyUserMessagesRevealTargetBySessionKey.removeValue(forKey: effectiveSessionKey)
         let materializationEffect = pendingMaterializationEffectBySessionKey[effectiveSessionKey]
@@ -3326,8 +3358,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 && $0.materializationRevision == materializationPlan.revision
                 && $0.restoreGeneration == readState(for: effectiveSessionKey).restoreGeneration
         } ?? false
-        let suppressesActivationCompletion = effectMatchesApply
-            && (materializationEffect?.suppressesActivationCompletion ?? false)
         let afterSnapshotApplied: (() -> Void) = { [weak self] in
             guard let self else { return }
             guard self.callbackSessionKey() == effectiveSessionKey else { return }
@@ -3373,7 +3403,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             // Stream-switch engine activation completion is defined as:
             // first active-page snapshot materialization after engineActiveSessionKey commit.
             // This is the point where ChatView can safely clear the spinner gate.
-            if self.isActiveSession, !suppressesActivationCompletion {
+            if shouldAttemptActivationCompletion {
                 viewModel.markEngineActivationRenderedIfNeeded(for: effectiveSessionKey)
             }
             self.updateVisibleFooterAlpha()

@@ -12,6 +12,30 @@ nonisolated enum MessageProjectionMutation: Sendable {
     case replaceAll
 }
 
+nonisolated struct MessageProjectionBuildOwnership<Key: Hashable & Sendable>: Sendable {
+    private var buildIDByKey: [Key: UUID] = [:]
+
+    mutating func begin(for key: Key) -> UUID {
+        let buildID = UUID()
+        buildIDByKey[key] = buildID
+        return buildID
+    }
+
+    mutating func cancel(for key: Key) {
+        buildIDByKey.removeValue(forKey: key)
+    }
+
+    mutating func finish(for key: Key, buildID: UUID) -> Bool {
+        guard buildIDByKey[key] == buildID else { return false }
+        buildIDByKey.removeValue(forKey: key)
+        return true
+    }
+
+    mutating func cancelAll() {
+        buildIDByKey.removeAll()
+    }
+}
+
 nonisolated struct BoundedMessageWindow: Equatable, Sendable {
     let lowerBound: Int
     let upperBound: Int

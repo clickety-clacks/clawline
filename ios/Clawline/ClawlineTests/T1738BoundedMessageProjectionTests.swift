@@ -14,6 +14,7 @@ private final class T1738UploadService: UploadServicing {
     }
 }
 
+@Suite(.serialized)
 struct T1738BoundedMessageProjectionTests {
     @Test("T1738: window state is bounded for first activation and revisit", arguments: [50, 500, 5_000])
     func windowStateIsBounded(totalCount: Int) {
@@ -82,6 +83,21 @@ struct T1738BoundedMessageProjectionTests {
         #expect(newer.range == 225 ..< 275)
         #expect(target.range.count == 50)
         #expect(target.range.contains(2_345))
+    }
+
+    @Test("T1738: empty and sparse projections clamp every window operation")
+    func emptyAndSparseProjectionWindowsClamp() {
+        let empty = BoundedMessageWindow.tail(totalCount: 0, limit: 50)
+        let sparse = BoundedMessageWindow.tail(totalCount: 3, limit: 50)
+        let sparseOlder = sparse.shifted(older: true, limit: 50)
+        let sparseNewer = sparse.shifted(older: false, limit: 50)
+        let sparseTarget = BoundedMessageWindow.containing(targetIndex: 1, totalCount: 3, limit: 50)
+
+        #expect(empty.range.isEmpty)
+        #expect(sparse.range == 0 ..< 3)
+        #expect(sparseOlder == sparse)
+        #expect(sparseNewer == sparse)
+        #expect(sparseTarget == sparse)
     }
 
     @Test("T1738: transcript switches slice only the fixed message window", arguments: [50, 500, 5_000])
@@ -169,6 +185,20 @@ struct T1738BoundedMessageProjectionTests {
         #expect(userMatches == Array(stride(from: 0, to: 500, by: 50)))
     }
 
+    @Test("T1738: stale search completion cannot retire replacement ownership")
+    func staleSearchCompletionCannotRetireReplacementOwnership() {
+        var ownership = MessageProjectionBuildOwnership<String>()
+        let staleBuildID = ownership.begin(for: "selected-query")
+        let replacementBuildID = ownership.begin(for: "selected-query")
+        let staleFinished = ownership.finish(for: "selected-query", buildID: staleBuildID)
+        let replacementFinished = ownership.finish(for: "selected-query", buildID: replacementBuildID)
+        let replacementFinishedAgain = ownership.finish(for: "selected-query", buildID: replacementBuildID)
+
+        #expect(!staleFinished)
+        #expect(replacementFinished)
+        #expect(!replacementFinishedAgain)
+    }
+
     @Test("T1738: auxiliary snapshot fan-out has a fixed formula")
     func maximumSnapshotCountIsBounded() {
         #expect(MessageFlowCollectionViewController.maximumBoundedSnapshotItemCount(messageWindowCount: 50) == 152)
@@ -179,7 +209,7 @@ struct T1738BoundedMessageProjectionTests {
     @MainActor
     func selectedSearchProjectionBuildIsExplicitAndStable() async throws {
         let viewModel = makeViewModel()
-        defer { viewModel.onDisappear() }
+        defer { viewModel.prepareForReplacement() }
         let sessionKey = "agent:main:clawline:user:t1738-search"
         for index in 0 ..< 200 {
             viewModel.debugUpsertMessage(makeMessage(index: index, sessionKey: sessionKey), isServer: true)
@@ -245,7 +275,7 @@ struct T1738BoundedMessageProjectionTests {
     @MainActor
     func authoritativeRemovalPublishesExactIDs() {
         let viewModel = makeViewModel()
-        defer { viewModel.onDisappear() }
+        defer { viewModel.prepareForReplacement() }
         let sessionKey = "agent:main:clawline:user:t1738-removal"
         viewModel.debugUpsertMessage(makeMessage(index: 1, sessionKey: sessionKey), isServer: true)
         viewModel.debugUpsertMessage(makeMessage(index: 2, sessionKey: sessionKey), isServer: true)
@@ -264,8 +294,8 @@ struct T1738BoundedMessageProjectionTests {
     @MainActor
     func controllerLayoutFanOutIsActuallyBounded() async {
         let viewModel = makeViewModel()
-        defer { viewModel.onDisappear() }
-        let sessionKey = "agent:main:clawline:user:t1738-layout"
+        defer { viewModel.prepareForReplacement() }
+        let sessionKey = "agent:main:main"
         for index in 0 ..< 5_000 {
             viewModel.debugUpsertMessage(makeMessage(index: index, sessionKey: sessionKey), isServer: true)
         }
@@ -288,6 +318,19 @@ struct T1738BoundedMessageProjectionTests {
         )
         await Task.yield()
         controller.view.layoutIfNeeded()
+        controller.debugInsertWebBubbleItems((0 ..< 50).map { index in
+            WebBubbleItem(
+                id: "web_\(index)",
+                createdAt: Date(timeIntervalSince1970: TimeInterval(10_000 + index)),
+                stream: .personal,
+                parentItemId: "m-\(4_950 + index)",
+                initialURL: nil,
+                isPopup: true,
+                title: nil
+            )
+        })
+        await Task.yield()
+        controller.view.layoutIfNeeded()
         let probe = controller.debugBoundedMaterializationProbe()
         let maximum = MessageFlowCollectionViewController.maximumBoundedSnapshotItemCount(
             messageWindowCount: MessageFlowCollectionViewController.stagedMaterializationTailWindowCount
@@ -295,7 +338,66 @@ struct T1738BoundedMessageProjectionTests {
 
         #expect(probe.snapshotItemCount <= maximum)
         #expect(probe.sizeQueryCount <= maximum)
-        #expect(probe.snapshotItemCount >= MessageFlowCollectionViewController.stagedMaterializationTailWindowCount)
+        #expect(probe.snapshotItemCount >= MessageFlowCollectionViewController.stagedMaterializationTailWindowCount * 2)
+    }
+
+    @Test("T1738: true removals invalidate only their session and expire callbacks")
+    @MainActor
+    func authoritativeRemovalInvalidatesExactSessionAndExpiresCallbacks() async {
+        let viewModel = makeViewModel()
+        defer { viewModel.prepareForReplacement() }
+        let activeSessionKey = "agent:main:clawline:user:t1738-removal-active"
+        let inactiveSessionKey = "agent:main:clawline:user:t1738-removal-inactive"
+        for index in 0 ..< 100 {
+            viewModel.debugUpsertMessage(makeMessage(index: index, sessionKey: activeSessionKey), isServer: true)
+            viewModel.debugUpsertMessage(makeMessage(index: index, sessionKey: inactiveSessionKey), isServer: true)
+        }
+        let controller = MessageFlowCollectionViewController()
+        controller.loadViewIfNeeded()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 430, height: 900)
+        update(controller, with: viewModel, sessionKey: activeSessionKey)
+        await Task.yield()
+
+        var firedCallbacks = 0
+        controller.debugSeedAuthoritativeRemovalState(
+            sessionKey: activeSessionKey,
+            messageId: "m-0",
+            callback: { firedCallbacks += 1 }
+        )
+        controller.debugSeedAuthoritativeRemovalState(
+            sessionKey: inactiveSessionKey,
+            messageId: "m-0",
+            callback: { firedCallbacks += 1 }
+        )
+
+        viewModel.debugClearSessionMessages(inactiveSessionKey)
+        #expect(!controller.debugAuthoritativeRemovalState(
+            sessionKey: inactiveSessionKey,
+            messageId: "m-0"
+        ).hasSize)
+        #expect(controller.debugAuthoritativeRemovalState(
+            sessionKey: inactiveSessionKey,
+            messageId: "m-0"
+        ).callbackCount == 0)
+        #expect(controller.debugAuthoritativeRemovalState(
+            sessionKey: activeSessionKey,
+            messageId: "m-0"
+        ).hasSize)
+        #expect(controller.debugAuthoritativeRemovalState(
+            sessionKey: activeSessionKey,
+            messageId: "m-0"
+        ).callbackCount == 1)
+
+        viewModel.debugClearSessionMessages(activeSessionKey)
+        #expect(!controller.debugAuthoritativeRemovalState(
+            sessionKey: activeSessionKey,
+            messageId: "m-0"
+        ).hasSize)
+        #expect(controller.debugAuthoritativeRemovalState(
+            sessionKey: activeSessionKey,
+            messageId: "m-0"
+        ).callbackCount == 0)
+        #expect(firedCallbacks == 0)
     }
 
     @Test("T1738: live web selection includes parentless and is globally newest first")
@@ -370,6 +472,28 @@ struct T1738BoundedMessageProjectionTests {
             streaming: false,
             attachments: [],
             deviceId: nil,
+            sessionKey: sessionKey
+        )
+    }
+
+    @MainActor
+    private func update(
+        _ controller: MessageFlowCollectionViewController,
+        with viewModel: ChatViewModel,
+        sessionKey: String
+    ) {
+        controller.update(
+            viewModel: viewModel,
+            isCompact: true,
+            isActiveSession: true,
+            isRenderPolicyFrozen: false,
+            isInputActive: false,
+            keepsKeyboardPinned: false,
+            isTypingActive: false,
+            topInset: 0,
+            truncationBottomInset: 0,
+            firstUnreadMessageId: nil,
+            unreadCount: 0,
             sessionKey: sessionKey
         )
     }

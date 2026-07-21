@@ -6092,6 +6092,91 @@ final class ChatViewModel {
     }
 
 #if DEBUG
+    struct DebugMessageSearchProjectionBuild {
+        let buildID: UUID
+        let revision: Int
+    }
+
+    func debugBeginMessageSearchProjectionBuild(
+        sessionKey: String,
+        showOnlyUserMessages: Bool,
+        searchQuery: String
+    ) -> DebugMessageSearchProjectionBuild? {
+        let key = MessageSearchProjectionKey(
+            sessionKey: sessionKey,
+            base: showOnlyUserMessages ? .userOnly : .transcript,
+            query: searchQuery
+        )
+        guard let revision = messageProjectionIndexBySession[sessionKey]?.revision else { return nil }
+        selectedMessageSearchProjectionKeyBySession[sessionKey] = key
+        let buildID = messageSearchProjectionBuildOwnership.begin(for: key)
+        messageSearchProjectionTaskByKey[key] = Task {}
+        return DebugMessageSearchProjectionBuild(buildID: buildID, revision: revision)
+    }
+
+    func debugPublishMessageSearchProjection(
+        sessionKey: String,
+        showOnlyUserMessages: Bool,
+        searchQuery: String,
+        build: DebugMessageSearchProjectionBuild,
+        transcriptIndices: [Int]
+    ) {
+        publishMessageSearchProjection(
+            key: MessageSearchProjectionKey(
+                sessionKey: sessionKey,
+                base: showOnlyUserMessages ? .userOnly : .transcript,
+                query: searchQuery
+            ),
+            buildID: build.buildID,
+            revision: build.revision,
+            transcriptIndices: transcriptIndices
+        )
+    }
+
+    func debugSelectMessageSearchProjection(
+        sessionKey: String,
+        showOnlyUserMessages: Bool,
+        searchQuery: String?
+    ) {
+        guard let searchQuery else {
+            selectedMessageSearchProjectionKeyBySession.removeValue(forKey: sessionKey)
+            return
+        }
+        selectedMessageSearchProjectionKeyBySession[sessionKey] = MessageSearchProjectionKey(
+            sessionKey: sessionKey,
+            base: showOnlyUserMessages ? .userOnly : .transcript,
+            query: searchQuery
+        )
+    }
+
+    func debugHasMessageSearchProjectionTask(
+        sessionKey: String,
+        showOnlyUserMessages: Bool,
+        searchQuery: String
+    ) -> Bool {
+        messageSearchProjectionTaskByKey[MessageSearchProjectionKey(
+            sessionKey: sessionKey,
+            base: showOnlyUserMessages ? .userOnly : .transcript,
+            query: searchQuery
+        )] != nil
+    }
+
+    func debugSetPromptStageIndicator(sessionKey: String, visible: Bool) {
+        if visible {
+            recordLiveProgress(
+                sessionKey: sessionKey,
+                runId: "t1738-debug",
+                messageId: nil,
+                seq: nil,
+                stage: .modelActive,
+                summary: "T1738 bounded fan-out probe",
+                isFailure: false
+            )
+        } else {
+            clearLiveProgress(sessionKey: sessionKey, runId: "t1738-debug", messageId: nil)
+        }
+    }
+
     func debugConnectionSnapshot() -> (token: String?, lastMessageId: String?) {
         connectionSnapshot()
     }
@@ -6106,6 +6191,10 @@ final class ChatViewModel {
 
     func debugClearSessionMessages(_ sessionKey: String) {
         clearSessionMessages(sessionKey: sessionKey, reason: "debug")
+    }
+
+    func debugEnsureStreamEntry(_ sessionKey: String) {
+        ensureStreamEntry(for: sessionKey)
     }
 
     func debugRemoveSessionMessages(_ sessionKey: String) {

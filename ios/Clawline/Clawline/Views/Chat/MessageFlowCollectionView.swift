@@ -634,9 +634,224 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
 #if DEBUG
-    func debugBoundedMaterializationProbe() -> (snapshotItemCount: Int, sizeQueryCount: Int) {
+    struct DebugBoundedMaterializationProbe {
+        let snapshotItemCount: Int
+        let sizeQueryCount: Int
+        let messageCount: Int
+        let dateSeparatorCount: Int
+        let webBubbleCount: Int
+        let typingIndicatorCount: Int
+        let footerCount: Int
+    }
+
+    enum DebugMaterializationProjection {
+        case transcript
+        case userOnly
+        case transcriptSearch(String)
+        case userOnlySearch(String)
+    }
+
+    enum DebugMaterializationEvent {
+        case messagesUpdated(totalCount: Int, followsTail: Bool)
+        case messagesUpdatedWithUnread(totalCount: Int, unreadIndex: Int, followsTail: Bool)
+        case shifted(lowerBound: Int, totalCount: Int, anchorMessageID: String?)
+        case edgeShift(older: Bool, residual: CGFloat?)
+        case directTarget(index: Int, totalCount: Int, messageID: String)
+        case projectionEdge(tail: Bool)
+    }
+
+    struct DebugMaterializationState: Equatable {
+        let lowerBound: Int
+        let upperBound: Int
+        let logicalTotalCount: Int
+        let revision: Int
+        let unreadOutsideWindow: Bool
+        let pendingAction: String?
+        let hasViewportAnchor: Bool
+    }
+
+    func debugBoundedMaterializationProbe() -> DebugBoundedMaterializationProbe {
         let layout = collectionView.collectionViewLayout as? MessageFlowLayout
-        return (dataSource.snapshot().numberOfItems, layout?.lastPrepareSizeQueryCount ?? 0)
+        let itemIDs = dataSource.snapshot().itemIdentifiers
+        let dateSeparatorCount = itemIDs.count { $0.hasPrefix(DateSeparatorCell.itemIdPrefix) }
+        let webBubbleCount = itemIDs.count { $0.hasPrefix("web_") }
+        let typingIndicatorCount = itemIDs.count { $0 == TypingIndicatorCell.itemId }
+        let footerCount = itemIDs.count { $0 == SessionMetadataFooterCell.itemId }
+        return DebugBoundedMaterializationProbe(
+            snapshotItemCount: itemIDs.count,
+            sizeQueryCount: layout?.lastPrepareSizeQueryCount ?? 0,
+            messageCount: itemIDs.count - dateSeparatorCount - webBubbleCount - typingIndicatorCount - footerCount,
+            dateSeparatorCount: dateSeparatorCount,
+            webBubbleCount: webBubbleCount,
+            typingIndicatorCount: typingIndicatorCount,
+            footerCount: footerCount
+        )
+    }
+
+    @discardableResult
+    func debugAdvanceMaterialization(
+        sessionKey: String,
+        projection: DebugMaterializationProjection? = nil,
+        event: DebugMaterializationEvent
+    ) -> DebugMaterializationState {
+        if let projection {
+            _ = enqueueMaterializationEvent(
+                sessionKey: sessionKey,
+                event: .projectionSelected(debugProjectionKey(projection))
+            )
+        }
+        let productionEvent: MaterializationEvent = switch event {
+        case let .messagesUpdated(totalCount, followsTail):
+            .messagesUpdated(
+                totalCount: totalCount,
+                firstUnreadProjectedIndex: nil,
+                followsProjectionTail: followsTail
+            )
+        case let .messagesUpdatedWithUnread(totalCount, unreadIndex, followsTail):
+            .messagesUpdated(
+                totalCount: totalCount,
+                firstUnreadProjectedIndex: unreadIndex,
+                followsProjectionTail: followsTail
+            )
+        case let .shifted(lowerBound, totalCount, anchorMessageID):
+            .shifted(
+                windowBounds: WindowBounds(lowerBound: lowerBound, upperBound: totalCount),
+                totalCount: totalCount,
+                viewportAnchor: anchorMessageID.map {
+                    BubbleSizingV2ViewportAnchor(messageId: $0, contentOffsetY: 0, frameMinY: 0)
+                },
+                postApplyAction: nil
+            )
+        case let .edgeShift(older, residual):
+            .edgeShift(
+                direction: older ? .older : .newer,
+                residual: residual,
+                viewportAnchor: nil
+            )
+        case let .directTarget(index, totalCount, messageID):
+            .directTarget(
+                projectedIndex: index,
+                totalCount: totalCount,
+                action: .centerMessage(id: messageID, animated: false, flash: true)
+            )
+        case let .projectionEdge(tail):
+            .projectionEdge(
+                tail: tail,
+                action: .scrollProjectionEdge(tail: tail, animated: false)
+            )
+        }
+        _ = enqueueMaterializationEvent(sessionKey: sessionKey, event: productionEvent)
+        return debugMaterializationState(sessionKey: sessionKey)
+    }
+
+    func debugCurrentMaterializationState(sessionKey: String) -> DebugMaterializationState {
+        debugMaterializationState(sessionKey: sessionKey)
+    }
+
+    func debugRunMaterializationRefreshPass() {
+        runMaterializationRefreshPass()
+    }
+
+    func debugSuppressAutomatedPostApplyScrolling(_ suppressed: Bool) {
+        _debugSuppressAutomatedPostApplyScrolling = suppressed
+    }
+
+    func debugBumpRestoreGeneration(sessionKey: String) {
+        mutateState(for: sessionKey) { $0.restoreGeneration &+= 1 }
+    }
+
+    func debugMaterializationApplyCounts(
+        sessionKey: String
+    ) -> (effectApplyCompletions: Int, compensationAttempts: Int) {
+        (
+            _debugEffectApplyCompletionCountBySessionKey[sessionKey, default: 0],
+            _debugViewportCompensationAttemptCountBySessionKey[sessionKey, default: 0]
+        )
+    }
+
+    func debugPersistMaterializationLocation(
+        sessionKey: String,
+        projection: DebugMaterializationProjection,
+        lowerBound: Int,
+        totalCount: Int,
+        distanceFromBottom: CGFloat
+    ) {
+        _ = debugAdvanceMaterialization(
+            sessionKey: sessionKey,
+            projection: projection,
+            event: .shifted(lowerBound: lowerBound, totalCount: totalCount, anchorMessageID: nil)
+        )
+        persistScrollSnapshot(
+            ScrollSnapshot(
+                atBottom: distanceFromBottom == 0,
+                distanceFromBottom: distanceFromBottom,
+                timestamp: Date().timeIntervalSince1970
+            ),
+            for: sessionKey
+        )
+    }
+
+    func debugLoadPersistedMaterializationLocation(
+        sessionKey: String,
+        projection: DebugMaterializationProjection
+    ) -> (base: String?, query: String?, lowerBound: Int?, distanceFromBottom: Double)? {
+        let key = debugProjectionKey(projection)
+        guard let state = loadPersistedScrollState(
+            for: sessionKey,
+            projectionBase: key.base == .userOnly ? "userOnly" : "transcript",
+            searchQuery: key.searchQuery
+        ) else { return nil }
+        return (state.projectionBase, state.searchQuery, state.projectionLowerBound, state.distanceFromBottom)
+    }
+
+    func debugClearPersistedMaterializationLocations(
+        sessionKey: String,
+        projections: [DebugMaterializationProjection]
+    ) {
+        let defaults = UserDefaults.standard
+        for projection in projections {
+            let key = debugProjectionKey(projection)
+            defaults.removeObject(forKey: scrollStateDefaultsKey(
+                for: sessionKey,
+                projectionBase: key.base == .userOnly ? "userOnly" : "transcript",
+                searchQuery: key.searchQuery
+            ))
+        }
+        defaults.removeObject(forKey: scrollStateDefaultsKey(for: sessionKey))
+    }
+
+    private func debugProjectionKey(_ projection: DebugMaterializationProjection) -> MaterializationProjectionKey {
+        switch projection {
+        case .transcript:
+            MaterializationProjectionKey(base: .transcript, searchQuery: "")
+        case .userOnly:
+            MaterializationProjectionKey(base: .userOnly, searchQuery: "")
+        case let .transcriptSearch(query):
+            MaterializationProjectionKey(base: .transcript, searchQuery: query)
+        case let .userOnlySearch(query):
+            MaterializationProjectionKey(base: .userOnly, searchQuery: query)
+        }
+    }
+
+    private func debugMaterializationState(sessionKey: String) -> DebugMaterializationState {
+        let state = materializationStateBySessionKey[sessionKey]
+        let effect = pendingMaterializationEffectBySessionKey[sessionKey]
+        let pendingAction: String? = switch effect?.postApplyAction {
+        case .scrollProjectionEdge(tail: true, animated: _): "tail"
+        case .scrollProjectionEdge(tail: false, animated: _): "top"
+        case .replayResidual: "residual"
+        case .centerMessage: "center"
+        case nil: nil
+        }
+        return DebugMaterializationState(
+            lowerBound: state?.windowBounds.lowerBound ?? 0,
+            upperBound: state?.windowBounds.upperBound ?? 0,
+            logicalTotalCount: state?.logicalTotalCount ?? 0,
+            revision: state?.revision ?? 0,
+            unreadOutsideWindow: state?.unreadOutsideTailWindow ?? false,
+            pendingAction: pendingAction,
+            hasViewportAnchor: effect?.viewportAnchor != nil
+        )
     }
 
     func debugInsertWebBubbleItems(_ items: [WebBubbleItem]) {
@@ -754,6 +969,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var activeMaterializationProjectionKeyBySessionKey: [String: MaterializationProjectionKey] = [:]
     private var lastAppliedMaterializationRevisionBySessionKey: [String: Int] = [:]
     private var pendingMaterializationEffectBySessionKey: [String: MaterializationEffect] = [:]
+#if DEBUG
+    private var _debugEffectApplyCompletionCountBySessionKey: [String: Int] = [:]
+    private var _debugViewportCompensationAttemptCountBySessionKey: [String: Int] = [:]
+    private var _debugSuppressAutomatedPostApplyScrolling = false
+#endif
     private var materializationEventQueue: [MaterializationEventEnvelope] = []
     private var isMaterializationQueueProcessing = false
     private var lastMaterializationPlanBySessionKey: [String: MaterializationPlan] = [:]
@@ -2360,7 +2580,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             firstUnreadProjectedIndex = nil
             viewportAnchor = anchor
             postApplyAction = action
-            let lower = max(0, min(bounds.lowerBound, max(0, count - 1)))
+            let lower = max(0, min(bounds.lowerBound, max(0, count - windowCount)))
             nextBounds = WindowBounds(lowerBound: lower, upperBound: min(count, lower + windowCount))
         case let .edgeShift(direction, residual, anchor):
             guard let previousMaterializationState else {
@@ -3209,7 +3429,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 followsProjectionTail: followsProjectionTail
             )
         }
-        let materializationPlan = enqueueMaterializationEvent(
+        let pendingSerializedPlan: MaterializationPlan? = {
+            guard let effect = pendingMaterializationEffectBySessionKey[effectiveSessionKey],
+                  effect.projectionKey == projectionKey,
+                  effect.materializationRevision == materializationStateBySessionKey[effectiveSessionKey]?.revision,
+                  effect.materializationRevision != lastAppliedMaterializationRevisionBySessionKey[effectiveSessionKey]
+            else { return nil }
+            return lastMaterializationPlanBySessionKey[effectiveSessionKey]
+        }()
+        let materializationPlan = pendingSerializedPlan ?? enqueueMaterializationEvent(
             sessionKey: effectiveSessionKey,
             event: materializationEvent
         )
@@ -3366,12 +3594,18 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 && currentEffect?.materializationRevision == materializationEffect?.materializationRevision
                 && currentEffect?.projectionKey == materializationEffect?.projectionKey
                 && self.readState(for: effectiveSessionKey).restoreGeneration == materializationEffect?.restoreGeneration
+#if DEBUG
+            if shouldConsumeEffect {
+                self._debugEffectApplyCompletionCountBySessionKey[effectiveSessionKey, default: 0] += 1
+            }
+#endif
             if shouldConsumeEffect {
                 self.pendingMaterializationEffectBySessionKey.removeValue(forKey: effectiveSessionKey)
             }
             let runtimeState = self.readState(for: effectiveSessionKey)
             let hasAuthoritativeRestoreTarget = runtimeState.pendingScrollRestoreState.map { !$0.atBottom } ?? false
-            if Self.shouldScheduleBottomFallbackAfterApply(
+            if self.allowsAutomatedPostApplyScrolling,
+               Self.shouldScheduleBottomFallbackAfterApply(
                 hasAuthoritativeRestoreTarget: hasAuthoritativeRestoreTarget,
                 restorePhaseIsNone: runtimeState.restorePhase == .none,
                 isIncrementalAppend: isIncrementalAppend,
@@ -3416,6 +3650,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 self.performMaterializationPostApplyAction(action, sessionKey: effectiveSessionKey)
             }
             if shouldConsumeEffect {
+#if DEBUG
+                if materializationEffect?.viewportAnchor != nil {
+                    self._debugViewportCompensationAttemptCountBySessionKey[effectiveSessionKey, default: 0] += 1
+                }
+#endif
                 self.scheduleBubbleSizingV2ViewportAnchorCompensation(materializationEffect?.viewportAnchor)
             }
         }
@@ -3569,6 +3808,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         guard !isIncrementalAppend else { return false }
         // Keep the one-time initial bottom placement behavior for first population only.
         return previousLastMessageId == nil
+    }
+
+    private var allowsAutomatedPostApplyScrolling: Bool {
+#if DEBUG
+        !_debugSuppressAutomatedPostApplyScrolling
+#else
+        true
+#endif
     }
 
     static func shouldFallbackToAbsoluteBottom(lastMessageId: String?, hasMessageAnchor: Bool) -> Bool {

@@ -185,18 +185,122 @@ struct T1738BoundedMessageProjectionTests {
         #expect(userMatches == Array(stride(from: 0, to: 500, by: 50)))
     }
 
-    @Test("T1738: stale search completion cannot retire replacement ownership")
-    func staleSearchCompletionCannotRetireReplacementOwnership() {
-        var ownership = MessageProjectionBuildOwnership<String>()
-        let staleBuildID = ownership.begin(for: "selected-query")
-        let replacementBuildID = ownership.begin(for: "selected-query")
-        let staleFinished = ownership.finish(for: "selected-query", buildID: staleBuildID)
-        let replacementFinished = ownership.finish(for: "selected-query", buildID: replacementBuildID)
-        let replacementFinishedAgain = ownership.finish(for: "selected-query", buildID: replacementBuildID)
+    @Test("T1738: stale search publication cannot retire the production replacement task")
+    @MainActor
+    func staleSearchPublicationCannotRetireProductionReplacementTask() throws {
+        let viewModel = makeViewModel()
+        defer { viewModel.prepareForReplacement() }
+        let sessionKey = "agent:main:clawline:user:t1738-search-ownership"
+        for index in 0 ..< 50 {
+            viewModel.debugUpsertMessage(makeMessage(index: index, sessionKey: sessionKey), isServer: true)
+        }
+        let initialSequence = viewModel.messageProjectionPublicationSequence
+        let stale = try #require(viewModel.debugBeginMessageSearchProjectionBuild(
+            sessionKey: sessionKey,
+            showOnlyUserMessages: false,
+            searchQuery: "message 1"
+        ))
+        let replacement = try #require(viewModel.debugBeginMessageSearchProjectionBuild(
+            sessionKey: sessionKey,
+            showOnlyUserMessages: false,
+            searchQuery: "message 1"
+        ))
 
-        #expect(!staleFinished)
-        #expect(replacementFinished)
-        #expect(!replacementFinishedAgain)
+        viewModel.debugPublishMessageSearchProjection(
+            sessionKey: sessionKey,
+            showOnlyUserMessages: false,
+            searchQuery: "message 1",
+            build: stale,
+            transcriptIndices: [1]
+        )
+
+        #expect(viewModel.debugHasMessageSearchProjectionTask(
+            sessionKey: sessionKey,
+            showOnlyUserMessages: false,
+            searchQuery: "message 1"
+        ))
+        #expect(viewModel.messageProjectionPublicationSequence == initialSequence)
+        #expect(viewModel.messageProjection(
+            for: sessionKey,
+            showOnlyUserMessages: false,
+            searchQuery: "message 1"
+        ) == nil)
+
+        viewModel.debugPublishMessageSearchProjection(
+            sessionKey: sessionKey,
+            showOnlyUserMessages: false,
+            searchQuery: "message 1",
+            build: replacement,
+            transcriptIndices: [1, 10, 11]
+        )
+
+        #expect(!viewModel.debugHasMessageSearchProjectionTask(
+            sessionKey: sessionKey,
+            showOnlyUserMessages: false,
+            searchQuery: "message 1"
+        ))
+        #expect(viewModel.messageProjectionPublicationSequence == initialSequence + 1)
+        let replacementProjection = viewModel.messageProjection(
+            for: sessionKey,
+            showOnlyUserMessages: false,
+            searchQuery: "message 1"
+        )
+        #expect(replacementProjection?.messages(in: 0 ..< (replacementProjection?.count ?? 0)).map(\.id) == [
+            "m-1", "m-10", "m-11"
+        ])
+    }
+
+    @Test("T1738: production search publication enforces selected key and transcript revision")
+    @MainActor
+    func searchPublicationEnforcesSelectedKeyAndRevision() throws {
+        let viewModel = makeViewModel()
+        defer { viewModel.prepareForReplacement() }
+        let sessionKey = "agent:main:clawline:user:t1738-search-gates"
+        for index in 0 ..< 20 {
+            viewModel.debugUpsertMessage(makeMessage(index: index, sessionKey: sessionKey), isServer: true)
+        }
+        let initialSequence = viewModel.messageProjectionPublicationSequence
+        let deselected = try #require(viewModel.debugBeginMessageSearchProjectionBuild(
+            sessionKey: sessionKey,
+            showOnlyUserMessages: false,
+            searchQuery: "message 1"
+        ))
+        viewModel.debugSelectMessageSearchProjection(
+            sessionKey: sessionKey,
+            showOnlyUserMessages: false,
+            searchQuery: nil
+        )
+        viewModel.debugPublishMessageSearchProjection(
+            sessionKey: sessionKey,
+            showOnlyUserMessages: false,
+            searchQuery: "message 1",
+            build: deselected,
+            transcriptIndices: [1]
+        )
+        #expect(viewModel.messageProjectionPublicationSequence == initialSequence)
+
+        let current = try #require(viewModel.debugBeginMessageSearchProjectionBuild(
+            sessionKey: sessionKey,
+            showOnlyUserMessages: false,
+            searchQuery: "message 2"
+        ))
+        let staleRevision = ChatViewModel.DebugMessageSearchProjectionBuild(
+            buildID: current.buildID,
+            revision: current.revision - 1
+        )
+        viewModel.debugPublishMessageSearchProjection(
+            sessionKey: sessionKey,
+            showOnlyUserMessages: false,
+            searchQuery: "message 2",
+            build: staleRevision,
+            transcriptIndices: [2]
+        )
+        #expect(viewModel.messageProjectionPublicationSequence == initialSequence)
+        #expect(viewModel.messageProjection(
+            for: sessionKey,
+            showOnlyUserMessages: false,
+            searchQuery: "message 2"
+        ) == nil)
     }
 
     @Test("T1738: auxiliary snapshot fan-out has a fixed formula")
@@ -297,8 +401,16 @@ struct T1738BoundedMessageProjectionTests {
         defer { viewModel.prepareForReplacement() }
         let sessionKey = "agent:main:main"
         for index in 0 ..< 5_000 {
-            viewModel.debugUpsertMessage(makeMessage(index: index, sessionKey: sessionKey), isServer: true)
+            viewModel.debugUpsertMessage(
+                makeMessage(
+                    index: index,
+                    sessionKey: sessionKey,
+                    timestamp: Date(timeIntervalSince1970: TimeInterval(index * 172_800))
+                ),
+                isServer: true
+            )
         }
+        viewModel.debugSetPromptStageIndicator(sessionKey: sessionKey, visible: true)
         let controller = MessageFlowCollectionViewController()
         controller.loadViewIfNeeded()
         controller.view.frame = CGRect(x: 0, y: 0, width: 430, height: 900)
@@ -338,7 +450,309 @@ struct T1738BoundedMessageProjectionTests {
 
         #expect(probe.snapshotItemCount <= maximum)
         #expect(probe.sizeQueryCount <= maximum)
-        #expect(probe.snapshotItemCount >= MessageFlowCollectionViewController.stagedMaterializationTailWindowCount * 2)
+        #expect(probe.messageCount == 50)
+        #expect(probe.dateSeparatorCount == 49)
+        #expect(probe.webBubbleCount == 50)
+        #expect(probe.typingIndicatorCount == 1)
+        #expect(probe.footerCount == 1)
+        #expect(probe.snapshotItemCount == 151)
+    }
+
+    @Test("T1738: serialized materialization seam retains independent projection windows")
+    @MainActor
+    func serializedMaterializationRetainsIndependentProjectionWindows() {
+        let controller = MessageFlowCollectionViewController()
+        let sessionKey = "agent:main:clawline:user:t1738-projection-state"
+
+        let transcript = controller.debugAdvanceMaterialization(
+            sessionKey: sessionKey,
+            projection: .transcript,
+            event: .shifted(lowerBound: 200, totalCount: 500, anchorMessageID: nil)
+        )
+        let users = controller.debugAdvanceMaterialization(
+            sessionKey: sessionKey,
+            projection: .userOnly,
+            event: .shifted(lowerBound: 75, totalCount: 250, anchorMessageID: nil)
+        )
+        let search = controller.debugAdvanceMaterialization(
+            sessionKey: sessionKey,
+            projection: .transcriptSearch("needle"),
+            event: .shifted(lowerBound: 25, totalCount: 80, anchorMessageID: nil)
+        )
+        let restoredTranscript = controller.debugAdvanceMaterialization(
+            sessionKey: sessionKey,
+            projection: .transcript,
+            event: .messagesUpdated(totalCount: 500, followsTail: false)
+        )
+        let restoredUsers = controller.debugAdvanceMaterialization(
+            sessionKey: sessionKey,
+            projection: .userOnly,
+            event: .messagesUpdated(totalCount: 250, followsTail: false)
+        )
+        let restoredSearch = controller.debugAdvanceMaterialization(
+            sessionKey: sessionKey,
+            projection: .transcriptSearch("needle"),
+            event: .messagesUpdated(totalCount: 80, followsTail: false)
+        )
+
+        #expect(transcript.lowerBound == 200 && transcript.upperBound == 250)
+        #expect(users.lowerBound == 75 && users.upperBound == 175)
+        #expect(search.lowerBound == 25 && search.upperBound == 75)
+        #expect(restoredTranscript.lowerBound == 200 && restoredTranscript.upperBound == 250)
+        #expect(restoredUsers.lowerBound == 75 && restoredUsers.upperBound == 175)
+        #expect(restoredSearch.lowerBound == 25 && restoredSearch.upperBound == 75)
+    }
+
+    @Test("T1738: serialized commands preserve residuals and clamp sparse projection changes")
+    @MainActor
+    func serializedCommandsPreserveResidualsAndClampSparseChanges() {
+        let controller = MessageFlowCollectionViewController()
+        let sessionKey = "agent:main:clawline:user:t1738-commands"
+        _ = controller.debugAdvanceMaterialization(
+            sessionKey: sessionKey,
+            projection: .transcript,
+            event: .shifted(lowerBound: 200, totalCount: 500, anchorMessageID: nil)
+        )
+        let older = controller.debugAdvanceMaterialization(
+            sessionKey: sessionKey,
+            event: .edgeShift(older: true, residual: -320)
+        )
+        let newer = controller.debugAdvanceMaterialization(
+            sessionKey: sessionKey,
+            event: .edgeShift(older: false, residual: 240)
+        )
+        let direct = controller.debugAdvanceMaterialization(
+            sessionKey: sessionKey,
+            event: .directTarget(index: 401, totalCount: 500, messageID: "m-401")
+        )
+        let top = controller.debugAdvanceMaterialization(
+            sessionKey: sessionKey,
+            event: .projectionEdge(tail: false)
+        )
+        let tail = controller.debugAdvanceMaterialization(
+            sessionKey: sessionKey,
+            event: .projectionEdge(tail: true)
+        )
+        let shrunk = controller.debugAdvanceMaterialization(
+            sessionKey: sessionKey,
+            event: .shifted(lowerBound: 450, totalCount: 25, anchorMessageID: nil)
+        )
+        let empty = controller.debugAdvanceMaterialization(
+            sessionKey: sessionKey,
+            event: .messagesUpdated(totalCount: 0, followsTail: false)
+        )
+
+        #expect(older.lowerBound == 175 && older.pendingAction == "residual")
+        #expect(newer.lowerBound == 200 && newer.pendingAction == "residual")
+        #expect((direct.lowerBound ..< direct.upperBound).contains(401))
+        #expect(direct.pendingAction == "center")
+        #expect(top.lowerBound == 0 && top.pendingAction == "top")
+        #expect(tail.lowerBound == 450 && tail.pendingAction == "tail")
+        #expect(shrunk.lowerBound == 0 && shrunk.upperBound == 25)
+        #expect(empty.lowerBound == 0 && empty.upperBound == 0)
+    }
+
+    @Test("T1738: one shifted apply attempts one compensation and rejects stale work")
+    @MainActor
+    func shiftedApplyCompensatesOnceAndRejectsStaleWork() async {
+        let viewModel = makeViewModel()
+        defer { viewModel.prepareForReplacement() }
+        let activeSessionKey = "agent:main:clawline:user:t1738-effect-active"
+        let inactiveSessionKey = "agent:main:clawline:user:t1738-effect-inactive"
+        viewModel.debugEnsureStreamEntry(activeSessionKey)
+        viewModel.setActiveSessionKeyForTesting(activeSessionKey)
+        for index in 0 ..< 200 {
+            viewModel.debugUpsertMessage(makeMessage(index: index, sessionKey: activeSessionKey), isServer: true)
+        }
+        #expect(viewModel.orderedSessionKeys.contains(activeSessionKey), "ordered: \(viewModel.orderedSessionKeys)")
+        let controller = MessageFlowCollectionViewController()
+        controller.loadViewIfNeeded()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 430, height: 900)
+        controller.debugSuppressAutomatedPostApplyScrolling(true)
+        update(controller, with: viewModel, sessionKey: activeSessionKey)
+        await settleMainActor()
+        let initialCounts = controller.debugMaterializationApplyCounts(sessionKey: activeSessionKey)
+
+        let shifted = controller.debugAdvanceMaterialization(
+            sessionKey: activeSessionKey,
+            event: .shifted(lowerBound: 125, totalCount: 200, anchorMessageID: "m-150")
+        )
+        #expect(shifted.hasViewportAnchor)
+        controller.debugRunMaterializationRefreshPass()
+        await settleMainActor()
+        let shiftedCounts = controller.debugMaterializationApplyCounts(sessionKey: activeSessionKey)
+        #expect(shiftedCounts.effectApplyCompletions == initialCounts.effectApplyCompletions + 1)
+        #expect(shiftedCounts.compensationAttempts == initialCounts.compensationAttempts + 1)
+
+        _ = controller.debugAdvanceMaterialization(
+            sessionKey: activeSessionKey,
+            event: .shifted(lowerBound: 100, totalCount: 200, anchorMessageID: "m-125")
+        )
+        controller.debugBumpRestoreGeneration(sessionKey: activeSessionKey)
+        controller.debugRunMaterializationRefreshPass()
+        await settleMainActor()
+        let staleGenerationCounts = controller.debugMaterializationApplyCounts(sessionKey: activeSessionKey)
+        #expect(staleGenerationCounts.effectApplyCompletions == shiftedCounts.effectApplyCompletions)
+        #expect(staleGenerationCounts.compensationAttempts == shiftedCounts.compensationAttempts)
+        #expect(controller.debugCurrentMaterializationState(sessionKey: activeSessionKey).hasViewportAnchor)
+
+        let inactive = controller.debugAdvanceMaterialization(
+            sessionKey: inactiveSessionKey,
+            projection: .transcript,
+            event: .shifted(lowerBound: 50, totalCount: 200, anchorMessageID: "inactive-anchor")
+        )
+        controller.debugRunMaterializationRefreshPass()
+        await settleMainActor()
+        #expect(inactive.hasViewportAnchor)
+        #expect(controller.debugMaterializationApplyCounts(sessionKey: inactiveSessionKey).effectApplyCompletions == 0)
+        #expect(controller.debugMaterializationApplyCounts(sessionKey: inactiveSessionKey).compensationAttempts == 0)
+        #expect(!controller.debugCurrentMaterializationState(sessionKey: inactiveSessionKey).hasViewportAnchor)
+    }
+
+    @Test("T1738: off-window unread stays logical and direct navigation clears projections in order")
+    @MainActor
+    func offWindowUnreadAndDirectNavigationUseProductionSeam() async throws {
+        let viewModel = makeViewModel()
+        defer { viewModel.prepareForReplacement() }
+        let sessionKey = "agent:main:clawline:user:t1738-direct"
+        viewModel.debugEnsureStreamEntry(sessionKey)
+        viewModel.setActiveSessionKeyForTesting(sessionKey)
+        for index in 0 ..< 200 {
+            viewModel.debugUpsertMessage(makeMessage(index: index, sessionKey: sessionKey), isServer: true)
+        }
+        #expect(viewModel.orderedSessionKeys.contains(sessionKey), "ordered: \(viewModel.orderedSessionKeys)")
+        viewModel.requestMessageProjection(
+            for: sessionKey,
+            showOnlyUserMessages: false,
+            searchQuery: "message 18"
+        )
+        _ = try await waitForProjection(
+            viewModel: viewModel,
+            sessionKey: sessionKey,
+            query: "message 18"
+        )
+
+        let controller = MessageFlowCollectionViewController()
+        controller.loadViewIfNeeded()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 430, height: 900)
+        var searchChanges: [String] = []
+        var userOnlyChanges: [Bool] = []
+        func render(searchQuery: String) {
+            controller.update(
+                viewModel: viewModel,
+                isCompact: true,
+                isActiveSession: true,
+                isRenderPolicyFrozen: false,
+                isInputActive: false,
+                keepsKeyboardPinned: false,
+                isTypingActive: false,
+                topInset: 0,
+                truncationBottomInset: 0,
+                firstUnreadMessageId: "m-10",
+                unreadCount: 1,
+                sessionKey: sessionKey,
+                streamSearchQuery: searchQuery,
+                onShowOnlyUserMessagesModeChanged: { _, enabled in
+                    userOnlyChanges.append(enabled)
+                },
+                onStreamSearchQueryChanged: { _, query in searchChanges.append(query) }
+            )
+        }
+
+        render(searchQuery: "message 18")
+        await settleMainActor()
+        controller.toggleShowOnlyUserMessagesMode()
+        await settleMainActor()
+        viewModel.requestMessageProjection(
+            for: sessionKey,
+            showOnlyUserMessages: true,
+            searchQuery: "message 18"
+        )
+        _ = try await waitForProjection(
+            viewModel: viewModel,
+            sessionKey: sessionKey,
+            query: "message 18",
+            showOnlyUserMessages: true
+        )
+        render(searchQuery: "message 18")
+        await settleMainActor()
+
+        controller.scrollToMessageCentered(messageId: "m-1", animated: false)
+        #expect(searchChanges == [""])
+        #expect(userOnlyChanges == [true])
+        render(searchQuery: "")
+        await settleMainActor()
+        render(searchQuery: "")
+        await settleMainActor()
+        #expect(userOnlyChanges == [true, false])
+        await settleMainActor()
+        let directState = controller.debugCurrentMaterializationState(sessionKey: sessionKey)
+        #expect((directState.lowerBound ..< directState.upperBound).contains(1))
+
+        let unreadState = controller.debugAdvanceMaterialization(
+            sessionKey: sessionKey,
+            projection: .transcript,
+            event: .messagesUpdatedWithUnread(totalCount: 200, unreadIndex: 10, followsTail: true)
+        )
+        #expect(unreadState.unreadOutsideWindow)
+    }
+
+    @Test("T1738: persisted locations are self-identifying and projection-relative")
+    @MainActor
+    func persistedLocationsAreSelfIdentifyingAndProjectionRelative() throws {
+        let controller = MessageFlowCollectionViewController()
+        let sessionKey = "agent:main:clawline:user:t1738-persistence-\(UUID().uuidString)"
+        defer {
+            controller.debugClearPersistedMaterializationLocations(
+                sessionKey: sessionKey,
+                projections: [.transcript, .userOnly, .transcriptSearch("needle")]
+            )
+        }
+
+        controller.debugPersistMaterializationLocation(
+            sessionKey: sessionKey,
+            projection: .transcript,
+            lowerBound: 200,
+            totalCount: 500,
+            distanceFromBottom: 1_200
+        )
+        controller.debugPersistMaterializationLocation(
+            sessionKey: sessionKey,
+            projection: .userOnly,
+            lowerBound: 75,
+            totalCount: 250,
+            distanceFromBottom: 600
+        )
+        controller.debugPersistMaterializationLocation(
+            sessionKey: sessionKey,
+            projection: .transcriptSearch("needle"),
+            lowerBound: 25,
+            totalCount: 80,
+            distanceFromBottom: 300
+        )
+
+        let transcript = try #require(controller.debugLoadPersistedMaterializationLocation(
+            sessionKey: sessionKey,
+            projection: .transcript
+        ))
+        let users = try #require(controller.debugLoadPersistedMaterializationLocation(
+            sessionKey: sessionKey,
+            projection: .userOnly
+        ))
+        let search = try #require(controller.debugLoadPersistedMaterializationLocation(
+            sessionKey: sessionKey,
+            projection: .transcriptSearch("needle")
+        ))
+        let inactiveQuery = controller.debugLoadPersistedMaterializationLocation(
+            sessionKey: sessionKey,
+            projection: .transcriptSearch("inactive")
+        )
+
+        #expect(transcript.base == "transcript" && transcript.query == "" && transcript.lowerBound == 200)
+        #expect(users.base == "userOnly" && users.query == "" && users.lowerBound == 75)
+        #expect(search.base == "transcript" && search.query == "needle" && search.lowerBound == 25)
+        #expect(search.distanceFromBottom == 300)
+        #expect(inactiveQuery == nil)
     }
 
     @Test("T1738: true removals invalidate only their session and expire callbacks")
@@ -463,12 +877,16 @@ struct T1738BoundedMessageProjectionTests {
         (0 ..< count).map { makeMessage(index: $0) }
     }
 
-    private func makeMessage(index: Int, sessionKey: String = "T1738") -> Message {
+    private func makeMessage(
+        index: Int,
+        sessionKey: String = "T1738",
+        timestamp: Date? = nil
+    ) -> Message {
         Message(
             id: "m-\(index)",
             role: index.isMultiple(of: 2) ? .user : .assistant,
             content: "message \(index)",
-            timestamp: Date(timeIntervalSince1970: TimeInterval(index)),
+            timestamp: timestamp ?? Date(timeIntervalSince1970: TimeInterval(index)),
             streaming: false,
             attachments: [],
             deviceId: nil,
@@ -517,12 +935,13 @@ struct T1738BoundedMessageProjectionTests {
     private func waitForProjection(
         viewModel: ChatViewModel,
         sessionKey: String,
-        query: String
+        query: String,
+        showOnlyUserMessages: Bool = false
     ) async throws -> MessageProjectionSnapshot {
         for _ in 0 ..< 100 {
             if let projection = viewModel.messageProjection(
                 for: sessionKey,
-                showOnlyUserMessages: false,
+                showOnlyUserMessages: showOnlyUserMessages,
                 searchQuery: query
             ) {
                 return projection
@@ -531,5 +950,12 @@ struct T1738BoundedMessageProjectionTests {
         }
         Issue.record("Timed out waiting for selected projection")
         return MessageProjectionIndex().snapshot(base: .transcript)
+    }
+
+    @MainActor
+    private func settleMainActor() async {
+        for _ in 0 ..< 200 {
+            await Task.yield()
+        }
     }
 }

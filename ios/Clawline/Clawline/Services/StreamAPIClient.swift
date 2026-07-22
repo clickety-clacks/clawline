@@ -365,9 +365,11 @@ final class StreamAPIClient {
         guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
             return nil
         }
-        let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
+        let basePath = components.percentEncodedPath.hasSuffix("/")
+            ? String(components.percentEncodedPath.dropLast())
+            : components.percentEncodedPath
         let suffix = path.hasPrefix("/") ? path : "/\(path)"
-        components.path = basePath + suffix
+        components.percentEncodedPath = basePath + suffix
         if !queryItems.isEmpty {
             components.queryItems = queryItems
         }

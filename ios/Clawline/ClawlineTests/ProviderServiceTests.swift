@@ -2174,6 +2174,80 @@ struct ProviderServiceTests {
         #expect(emittedKey == deletedKey)
     }
 
+    @Test("T1758: Rename and delete capture single-encoded production request paths")
+    func streamMutationsEncodeSessionKeyExactlyOnce() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let sessionKey = "agent:main:clawline:flynn:main s_request_path"
+        var capturedRequests: [URLRequest] = []
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            capturedRequests.append(request)
+            let body: String
+            if request.httpMethod == "PATCH" {
+                body = #"{"stream":{"sessionKey":"agent:main:clawline:flynn:main s_request_path","displayName":"Renamed","kind":"custom","orderIndex":2,"isBuiltIn":false,"createdAt":1700000000000,"updatedAt":1700000000001,"adopted":false}}"#
+            } else {
+                body = #"{"deletedSessionKey":"agent:main:clawline:flynn:main s_request_path"}"#
+            }
+            let data = body.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL },
+            authTokenProvider: { "jwt" },
+            streamAPIClient: streamAPIClient
+        )
+
+        _ = try await service.renameStream(sessionKey: sessionKey, displayName: "Renamed")
+        _ = try await service.deleteStream(
+            sessionKey: sessionKey,
+            idempotencyKey: "req_t1758_delete"
+        )
+
+        #expect(capturedRequests.map(\.httpMethod) == ["PATCH", "DELETE"])
+        for request in capturedRequests {
+            let components = try #require(
+                request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }
+            )
+            #expect(
+                components.percentEncodedPath
+                    == "/api/streams/agent%3Amain%3Aclawline%3Aflynn%3Amain%20s_request_path"
+            )
+            #expect(!components.percentEncodedPath.contains("%253A"))
+            #expect(!components.percentEncodedPath.contains("%2520"))
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer jwt")
+        }
+
+        let renameBody = try #require(
+            capturedRequests[0].httpBody ?? Self.bodyData(from: capturedRequests[0].httpBodyStream)
+        )
+        let renamePayload = try JSONSerialization.jsonObject(with: renameBody) as? [String: String]
+        #expect(renamePayload?["displayName"] == "Renamed")
+
+        let deleteBody = try #require(
+            capturedRequests[1].httpBody ?? Self.bodyData(from: capturedRequests[1].httpBodyStream)
+        )
+        let deletePayload = try JSONSerialization.jsonObject(with: deleteBody) as? [String: String]
+        #expect(deletePayload?["idempotencyKey"] == "req_t1758_delete")
+        #expect(connector.connectedURL == nil)
+        #expect(mockSocket.sentTexts.isEmpty)
+    }
+
     @Test("T142: Delete stream uses HTTP control plane without target WebSocket")
     func deleteStreamUsesControlPlaneWithoutTargetWebSocket() async throws {
         let mockSocket = MockWebSocketClient()
@@ -2221,7 +2295,13 @@ struct ProviderServiceTests {
         #expect(connector.connectedURL == nil)
         #expect(mockSocket.sentTexts.isEmpty)
         #expect(request.httpMethod == "DELETE")
-        #expect(request.url?.path == "/api/streams/agent%3Amain%3Aopenclaw%3Auser%3As_inactive_delete")
+        let components = try #require(
+            request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }
+        )
+        #expect(
+            components.percentEncodedPath
+                == "/api/streams/agent%3Amain%3Aopenclaw%3Auser%3As_inactive_delete"
+        )
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer jwt")
         let body = try #require(request.httpBody ?? Self.bodyData(from: request.httpBodyStream))
         let payload = try JSONSerialization.jsonObject(with: body) as? [String: String]

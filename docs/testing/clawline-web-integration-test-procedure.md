@@ -9,6 +9,37 @@ Validate Clawline Web as a parity client for the current Clawline iOS behavior a
 
 This document is source material only. It does not authorize product-code changes.
 
+## Tightbeam is real in integration/e2e tests — NEVER mocked (Flynn directive, 2026-07-24)
+
+An integration/e2e test exists to prove Clawline works against the real backend. Standing
+up an in-process `new WebSocketServer` that fakes `pair_request`/`pair_result`/stream frames
+and pointing the client at `ws://127.0.0.1:<port>/ws` is FORBIDDEN for any test that claims
+to cover pairing, auth, connection lifecycle, send/receive, or transcript — a mocked wire
+proves the frontend renders against a fixture, never that the product path works. A green
+test built on a mocked tightbeam is false confidence, which is worse than no test.
+
+- Integration/e2e tests connect to a REAL tightbeam gateway. The model is
+  `playwright/tests/shrdlu-tightbeam-pairing.spec.ts`: it targets shrdlu's live gateway
+  (`http://100.98.120.22:11373`, wire `ws://100.98.120.22:11373/ws`), pairs, waits for real
+  operator/device approval, and asserts the real connected chat surface.
+- shrdlu is the tightbeam automated/e2e test server; the sim runs on eezo. Do not point an
+  integration test at a local fake wire.
+- Pure frontend-RENDERING tests (bubble layout, virtualization, markdown) may feed
+  controlled input, but they are rendering coverage ONLY and must not be counted or
+  described as pairing/auth/connection/integration coverage. `phase1-pairing-and-chat.spec.ts`
+  currently mocks tightbeam while claiming pair/auth/send coverage — it must be rewired to
+  the real gateway (per the shrdlu model) or reclassified as rendering-only; the real
+  integration coverage is `shrdlu-tightbeam-pairing.spec.ts`.
+
+## Logging in and out against shrdlu (test-account flow)
+
+- **Log out:** type `/logout` in the prompt composer. This logs Clawline out (clears the
+  paired session), returning the client to the pairing/login surface.
+- **Log in:** pair/log in against shrdlu's tightbeam (`ws://100.98.120.22:11373/ws`) using
+  the shrdlu test account. After operator/device approval the client routes to the chat
+  surface. This is the flow an e2e run uses to reach a real connected session before
+  driving a turn.
+
 ## Source Baseline
 
 Use these sources when updating the suite:

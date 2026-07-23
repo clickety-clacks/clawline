@@ -81,5 +81,9 @@ export async function pairAndApprove(page: Page, name = "e2e browser"): Promise<
   await page.getByRole("button", { name: "Retry pairing" }).click();
   await expect(page).toHaveURL(/\/chat(?:\/|$)/);
   await expect(page.getByLabel("Message")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send" })).toHaveAttribute(
+    "data-connection-state",
+    "live"
+  );
   return deviceId;
 }

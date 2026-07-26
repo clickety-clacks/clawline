@@ -85,6 +85,28 @@ find ~/Library/Developer/Xcode/DerivedData/Clawline-*/Build/Products/Debug-iphon
 3. **Only use Combine** for multicast, complex operators, or backpressure
 4. **Be consistent** - don't mix paradigms (no AsyncStream + @Published)
 
+### Wire Decoding: resilient with explicit defaults, never silent
+
+Models decoded off the gateway wire (`SessionStatus`, and anything shaped like
+it) must **not** rely on the synthesized all-or-nothing `Decodable`. It is
+all-or-nothing: one renamed or flag-gated field throws the whole decode, the
+view model's value stays nil, and the UI renders an empty state against a 200
+response that is well-formed by the server's own contract — invisible from both
+sides. That exact failure emptied the model footer once.
+
+The rule, in two halves that must travel together:
+
+1. A section that is missing or undecodable falls back to an explicit empty
+   value of its own type, so a partial payload still yields a usable model.
+2. Every fallback is LOGGED with the field that caused it. A silently defaulted
+   field is the same invisible failure wearing a different hat (see also Swift
+   Safety Rule 5 in `.claude/CLAUDE.md`).
+
+Fields that identify or address something — a session key, an id used as the
+target of a subsequent request — stay strict. Defaulting those builds controls
+that act on nothing, which is worse than a decode failure the caller already
+surfaces. `SessionStatus.init(from:)` is the reference implementation.
+
 ### Core Protocols
 
 | Protocol | Purpose |

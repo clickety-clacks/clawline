@@ -7621,6 +7621,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         let textColor: UIColor?
         let row: Row
         let accessibilityLabel: String?
+        let accessibilityIdentifier: String?
         let isStaticLabel: Bool
         let allowsTruncation: Bool
         let allowsWrapping: Bool
@@ -7633,6 +7634,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             textColor: UIColor?,
             row: Row = .primary,
             accessibilityLabel: String? = nil,
+            accessibilityIdentifier: String? = nil,
             isStaticLabel: Bool = false,
             allowsTruncation: Bool = false,
             allowsWrapping: Bool = false
@@ -7644,6 +7646,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             self.textColor = textColor
             self.row = row
             self.accessibilityLabel = accessibilityLabel
+            self.accessibilityIdentifier = accessibilityIdentifier
             self.isStaticLabel = isStaticLabel
             self.allowsTruncation = allowsTruncation
             self.allowsWrapping = allowsWrapping
@@ -7932,7 +7935,26 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         configureSearchField(query: searchQuery, textColor: textColor, isDark: isDark, isSpatial: isSpatial)
         isAccessibilityElement = false
         accessibilityLabel = nil
+        // The footer's composed text, addressable by the client-e2e driver
+        // (SMOKE §6 step 13): the assertion is that the model actually shows
+        // after a real model change, which no raw-JSON check can make — a
+        // strict decode failure leaves this reading "Model loading" against a
+        // perfectly valid 200.
+        accessibilityIdentifier = Self.footerAccessibilityIdentifier
+        accessibilityValue = Self.footerText(
+            for: status,
+            isUnavailable: statusUnavailable,
+            isTightbeam: isTightbeam,
+            harnessOptions: harnessOptions
+        )
     }
+
+    /// The footer container: read its `accessibilityValue` for the composed
+    /// footer text.
+    static let footerAccessibilityIdentifier = "chat_footer_label"
+
+    /// The model control: the picker entry a driver taps to change the model.
+    static let modelPickerAccessibilityIdentifier = "chat_footer_model_picker"
 
     static func height(
         for status: SessionStatus?,
@@ -8059,6 +8081,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                 options: modelOptions(display: display, catalog: status.modelCatalog),
                 unsupportedReason: modelCapability.reason ?? "model_catalog_control_not_available",
                 textColor: nil,
+                accessibilityIdentifier: modelPickerAccessibilityIdentifier,
                 allowsTruncation: true
             ),
             FooterItem(
@@ -8160,7 +8183,8 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                 action: nil,
                 options: [],
                 unsupportedReason: reason,
-                textColor: nil
+                textColor: nil,
+                accessibilityIdentifier: modelPickerAccessibilityIdentifier
             ),
             FooterItem(
                 text: "Thinking \(state)",
@@ -8196,6 +8220,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             label.textAlignment = .center
             label.isAccessibilityElement = true
             label.accessibilityLabel = item.accessibilityLabel ?? item.text
+            label.accessibilityIdentifier = item.accessibilityIdentifier
             label.accessibilityTraits = .staticText
             label.setContentHuggingPriority(.required, for: .horizontal)
             label.setContentCompressionResistancePriority(
@@ -8232,6 +8257,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         button.isEnabled = item.action != nil && !item.options.isEmpty
         button.showsMenuAsPrimaryAction = button.isEnabled
         button.accessibilityLabel = item.accessibilityLabel ?? item.text
+        button.accessibilityIdentifier = item.accessibilityIdentifier
         if !button.isEnabled, let reason = item.unsupportedReason {
             button.accessibilityHint = reason
         }

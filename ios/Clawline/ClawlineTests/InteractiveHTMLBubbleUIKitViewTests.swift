@@ -388,24 +388,24 @@ private func loadInteractiveBubblePair(
     )
 
     try await waitFor(timeout: .seconds(3), poll: .milliseconds(25)) {
-        guard let firstWebView = firstWebView(in: pair.firstBubble),
-              let secondWebView = firstWebView(in: pair.secondBubble)
+        guard let firstCandidate = firstWebView(in: pair.firstBubble),
+              let secondCandidate = firstWebView(in: pair.secondBubble)
         else {
             return false
         }
-        return firstWebView.alpha >= 0.99
-            && secondWebView.alpha >= 0.99
-            && heightConstraintConstant(for: firstWebView) > 100
-            && heightConstraintConstant(for: secondWebView) > 100
+        return firstCandidate.alpha >= 0.99
+            && secondCandidate.alpha >= 0.99
+            && heightConstraintConstant(for: firstCandidate) > 100
+            && heightConstraintConstant(for: secondCandidate) > 100
     }
 
-    guard let firstWebView = firstWebView(in: pair.firstBubble),
-          let secondWebView = firstWebView(in: pair.secondBubble)
+    guard let firstCandidate = firstWebView(in: pair.firstBubble),
+          let secondCandidate = firstWebView(in: pair.secondBubble)
     else {
         Issue.record("Expected two WKWebViews before shared process termination")
         return nil
     }
-    return (firstWebView, secondWebView)
+    return (firstCandidate, secondCandidate)
 }
 
 @MainActor
@@ -414,26 +414,26 @@ private func waitForInteractiveBubblePair(
     replacing previous: (first: WKWebView, second: WKWebView)
 ) async throws -> (first: WKWebView, second: WKWebView)? {
     try await waitFor(timeout: .seconds(3), poll: .milliseconds(25)) {
-        guard let firstWebView = firstWebView(in: pair.firstBubble),
-              let secondWebView = firstWebView(in: pair.secondBubble)
+        guard let firstCandidate = firstWebView(in: pair.firstBubble),
+              let secondCandidate = firstWebView(in: pair.secondBubble)
         else {
             return false
         }
-        return firstWebView !== previous.first
-            && secondWebView !== previous.second
-            && firstWebView.alpha >= 0.99
-            && secondWebView.alpha >= 0.99
-            && heightConstraintConstant(for: firstWebView) > 100
-            && heightConstraintConstant(for: secondWebView) > 100
+        return firstCandidate !== previous.first
+            && secondCandidate !== previous.second
+            && firstCandidate.alpha >= 0.99
+            && secondCandidate.alpha >= 0.99
+            && heightConstraintConstant(for: firstCandidate) > 100
+            && heightConstraintConstant(for: secondCandidate) > 100
     }
 
-    guard let firstWebView = firstWebView(in: pair.firstBubble),
-          let secondWebView = firstWebView(in: pair.secondBubble)
+    guard let firstCandidate = firstWebView(in: pair.firstBubble),
+          let secondCandidate = firstWebView(in: pair.secondBubble)
     else {
         Issue.record("Expected two replacement WKWebViews after process termination")
         return nil
     }
-    return (firstWebView, secondWebView)
+    return (firstCandidate, secondCandidate)
 }
 
 @MainActor

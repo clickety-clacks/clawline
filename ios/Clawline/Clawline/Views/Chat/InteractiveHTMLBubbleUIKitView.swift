@@ -331,6 +331,9 @@ private final class InteractiveHTMLWebKit: NSObject {
 
     private func makeWebView(ruleList: WKContentRuleList?, handler: WKScriptMessageHandler) -> WKWebView {
         let configuration = WKWebViewConfiguration()
+        // WebKit owns the shared web-content process pool on supported OS versions; selecting a
+        // client-created pool is deprecated and has no effect. Keep every interactive bubble on
+        // this coordinator while preserving per-bubble storage and script-handler isolation.
         configuration.websiteDataStore = .nonPersistent()
 
         let userContent = WKUserContentController()

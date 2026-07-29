@@ -454,4 +454,24 @@ struct ChatLayoutCoordinatorTests {
 
         #expect(hidden != visible)
     }
+
+    @Test("T1377: presentation capacity cannot drive app-wide keyboard geometry refresh")
+    func keyboardGeometryRefreshUsesRawNotificationCount() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Clawline/Views/Chat/ChatView.swift")
+        let contents = try String(contentsOf: sourceURL, encoding: .utf8)
+        let lines = contents.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+
+        guard let keyStart = lines.firstIndex(where: { $0.contains("let keyboardGeometryRefreshKey = ChatKeyboardGeometryRefreshKey") }),
+              let keyEnd = lines[keyStart...].firstIndex(where: { $0.contains("let streamSelectorSpacingFromMessageBarTop") }) else {
+            Issue.record("Unable to locate the keyboard geometry refresh key wiring.")
+            return
+        }
+        let keyWiring = lines[keyStart..<keyEnd].joined(separator: "\n")
+
+        #expect(keyWiring.contains("notificationVisibleCount: viewModel.crossChatNotificationBubbles.count"))
+        #expect(!keyWiring.contains("crossChatNotificationObservation.visibleCount"))
+    }
 }

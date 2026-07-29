@@ -7,7 +7,7 @@
 
 import Foundation
 
-enum ChatStream: String, Codable, CaseIterable, Equatable {
+nonisolated enum ChatStream: String, Codable, CaseIterable, Equatable, Sendable {
     case personal
     case admin
 
@@ -21,12 +21,12 @@ enum ChatStream: String, Codable, CaseIterable, Equatable {
     }
 }
 
-struct ChatUserInfo: Equatable {
+nonisolated struct ChatUserInfo: Equatable, Sendable {
     let userId: String
     let isAdmin: Bool
 }
 
-struct Message: Identifiable, Equatable, Codable {
+nonisolated struct Message: Identifiable, Equatable, Codable, Sendable {
     let id: String
     let llmVisibleMessageId: String?
     let role: Role
@@ -72,10 +72,6 @@ struct Message: Identifiable, Equatable, Codable {
         self.deliveryState = deliveryState
     }
 
-    var stream: ChatStream {
-        SessionKey.stream(for: sessionKey)
-    }
-
     var hasStableReferenceIdentity: Bool {
         llmVisibleMessageId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }
@@ -97,12 +93,12 @@ struct Message: Identifiable, Equatable, Codable {
         }
     }
 
-    enum Role: String, Codable {
+    enum Role: String, Codable, Sendable {
         case user
         case assistant
     }
 
-    enum DeliveryState: String, Codable {
+    enum DeliveryState: String, Codable, Sendable {
         case normal
         case canceled
     }

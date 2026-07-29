@@ -529,7 +529,13 @@ enum KeyboardCommandBridge {
         guard notificationVisibleCount > 0 else {
             return textInputGlobalNavigationSpecs + transcriptScrollSpecs
         }
-        return textInputGlobalNavigationSpecs + transcriptScrollSpecs + notificationNumberSpecs(visibleCount: notificationVisibleCount)
+        let notificationStackSpecs = notificationScrollSpecs.filter {
+            $0.intent == .notificationDismissAll || $0.intent == .notificationToggleDock
+        }
+        return textInputGlobalNavigationSpecs
+            + transcriptScrollSpecs
+            + notificationStackSpecs
+            + notificationNumberSpecs(visibleCount: notificationVisibleCount)
     }
 
     static func hiddenNotificationSwiftUIFallbackSpecs(visibleNotificationCount: Int) -> [SwiftUIShortcutSpec] {

@@ -328,34 +328,8 @@ struct ProviderServiceTests {
     @Test("Chat connect reports adopted session keys during auth")
     @MainActor
     func chatConnectReportsAdoptedSessionKeysDuringAuth() async throws {
-        SessionRegistry.shared.replace(with: [])
-        defer { SessionRegistry.shared.replace(with: []) }
-
         let adoptedKey = "agent:main:openclaw:user:s_trackme"
-        SessionRegistry.shared.upsert(
-            StreamSession(
-                sessionKey: adoptedKey,
-                displayName: "Tracked Session",
-                kind: "custom",
-                orderIndex: 1,
-                isBuiltIn: false,
-                createdAt: Date(),
-                updatedAt: Date(),
-                trackingMode: .adopted
-            )
-        )
-        SessionRegistry.shared.upsert(
-            StreamSession(
-                sessionKey: "agent:main:clawline:user:main",
-                displayName: "Personal",
-                kind: "main",
-                orderIndex: 0,
-                isBuiltIn: true,
-                createdAt: Date(),
-                updatedAt: Date(),
-                trackingMode: .serverManaged
-            )
-        )
+        let adoptedSessionKeys = [adoptedKey]
 
         let mockSocket = MockWebSocketClient()
         let connector = MockWebSocketConnector(client: mockSocket)
@@ -364,7 +338,7 @@ struct ProviderServiceTests {
             connector: connector,
             deviceId: "device_123",
             baseURLProvider: { baseURL },
-            adoptedSessionKeysProvider: { SessionRegistry.shared.adoptedSessionKeys() }
+            adoptedSessionKeysProvider: { adoptedSessionKeys }
         )
 
         Task {
@@ -697,6 +671,351 @@ struct ProviderServiceTests {
         #expect(message?.content == "ok")
     }
 
+    @Test("F1 suspension-window regression: a frame whose link token retired DURING decode is dropped and cannot mutate the new link")
+    func staleFrameAfterTokenRetirementDuringDecodeIsDropped() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+
+        // Link A is active; a frame is read and captures token A. Then the link
+        // retires and reconnects (token B) while the decode await is suspended.
+        let tokenA = service.debugSetActiveLifecycleToken()
+        let tokenB = service.debugSetActiveLifecycleToken()   // retires A -> B
+        #expect(tokenA != tokenB)
+
+        // The stale link-A auth_result (tightbeam) resumes after the retirement.
+        // The post-decode recheck must drop it — it must NOT set serverFeatures
+        // on the new link.
+        await service.debugDispatchFrameAfterDecode(
+            text: #"{ "type": "auth_result", "success": true, "features": ["tightbeam"] }"#,
+            lifecycleConnectionToken: tokenA
+        )
+        #expect(service.serverFeatures.isEmpty)
+
+        // Control: the same frame on the CURRENT token B is accepted (proves the
+        // drop is due to the retired token, not a broken dispatch path).
+        await service.debugDispatchFrameAfterDecode(
+            text: #"{ "type": "auth_result", "success": true, "features": ["tightbeam"] }"#,
+            lifecycleConnectionToken: tokenB
+        )
+        #expect(service.serverFeatures == ["tightbeam"])
+    }
+
+    @Test("F1 SECOND suspension-window regression (message path): a message frame whose link retired DURING payload decode is dropped — it cannot advance the new link's replay cursor or leak in")
+    func staleMessageAfterTokenRetirementDuringPayloadDecodeIsDropped() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+        let sessionKey = "agent:main:clawline:user:main"
+
+        // Link A read a message frame; the detached payload decode is the SECOND
+        // suspension window. Link A retires and link B authenticates while it runs.
+        let tokenA = service.debugSetActiveLifecycleToken()
+        let tokenB = service.debugSetActiveLifecycleToken()   // retires A -> B
+        #expect(tokenA != tokenB)
+
+        // The stale link-A message resumes AFTER retirement. The post-decode recheck
+        // must drop it BEFORE it advances the new link's replay cursor or broadcasts.
+        await service.debugHandleDirectMessageAfterDecode(
+            text: #"{ "type": "message", "id": "s_stale_A", "role": "assistant", "content": "leak", "timestamp": 1700000000000, "streaming": false, "sessionKey": "\#(sessionKey)", "attachments": [] }"#,
+            lifecycleConnectionToken: tokenA
+        )
+        #expect(service.replayCursorSnapshot()[sessionKey] == nil)
+
+        // Control: a message read on the CURRENT link B is accepted and advances the
+        // cursor — proving the drop is due to the retired token, not a broken path.
+        await service.debugHandleDirectMessageAfterDecode(
+            text: #"{ "type": "message", "id": "s_live_B", "role": "assistant", "content": "ok", "timestamp": 1700000001000, "streaming": false, "sessionKey": "\#(sessionKey)", "attachments": [] }"#,
+            lifecycleConnectionToken: tokenB
+        )
+        #expect(service.replayCursorSnapshot()[sessionKey] != nil)
+    }
+
+    @Test("F1 production: an unexpected socket close clears the service's authoritative tightbeam feature set")
+    func socketCloseClearsServerFeatures() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true, "features": ["tightbeam"] }"#)
+        }
+        try await service.connect(token: "jwt", lastMessageId: nil)
+        // Auth established the current-link feature set.
+        for _ in 0..<50 {
+            if service.serverFeatures == ["tightbeam"] { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(service.serverFeatures == ["tightbeam"])
+
+        // Unexpected socket close (stream finishes) drives handleSocketClose; the
+        // authoritative feature set must be cleared so a delayed .serverFeatures
+        // event cannot re-derive a stale ["tightbeam"] and reopen the gate.
+        mockSocket.close(with: .normalClosure)
+        for _ in 0..<50 {
+            if service.serverFeatures.isEmpty { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(service.serverFeatures.isEmpty)
+    }
+
+    /// TB-D5 mutation-boundary fence: helper to bring the service to a connected
+    /// link whose auth advertised the given features.
+    private func makeConnectedService(features: [String]) async throws -> (ProviderChatService, MockWebSocketClient) {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_fence",
+            baseURLProvider: { baseURL }
+        )
+        let featuresJSON = "[" + features.map { "\"\($0)\"" }.joined(separator: ",") + "]"
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true, "features": \#(featuresJSON) }"#)
+        }
+        try await service.connect(token: "jwt", lastMessageId: nil)
+        for _ in 0..<50 {
+            if Set(service.serverFeatures) == Set(features) { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        return (service, mockSocket)
+    }
+
+    @Test("retired-link + fence: a delayed retired-link tightbeam auth_result cannot restore the gate after an OpenClaw reconnect, and queued set_harness/placement-create stay refused by the current-link fence")
+    func retiredLinkCannotRestoreTightbeamAndQueuedControlStaysRefused() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_retired",
+            baseURLProvider: { baseURL }
+        )
+
+        // Link A is the tightbeam link: its auth_result opens the gate.
+        let tokenA = service.debugSetActiveLifecycleToken()
+        await service.debugDispatchFrameAfterDecode(
+            text: #"{ "type": "auth_result", "success": true, "features": ["tightbeam"] }"#,
+            lifecycleConnectionToken: tokenA
+        )
+        #expect(service.serverFeatures == ["tightbeam"])
+
+        // Link A retires and the service reconnects to an OpenClaw link B whose
+        // auth_result advertises NO tightbeam feature — the gate closes.
+        let tokenB = service.debugSetActiveLifecycleToken()   // retires A -> B
+        #expect(tokenA != tokenB)
+        await service.debugDispatchFrameAfterDecode(
+            text: #"{ "type": "auth_result", "success": true, "features": [] }"#,
+            lifecycleConnectionToken: tokenB
+        )
+        #expect(service.serverFeatures.isEmpty)
+
+        // The delayed RETIRED-link (A) tightbeam auth_result now resumes — an
+        // expected-close/retired-lifecycle callback firing late. It must be dropped
+        // by the current-link token guard; it must NOT restore tightbeam onto link B.
+        await service.debugDispatchFrameAfterDecode(
+            text: #"{ "type": "auth_result", "success": true, "features": ["tightbeam"] }"#,
+            lifecycleConnectionToken: tokenA
+        )
+        #expect(service.serverFeatures.contains("tightbeam") == false)
+        #expect(service.serverFeatures.isEmpty)
+
+        // Because the gate stayed closed, a queued Tightbeam-only session control
+        // and a placement-bearing create are still refused by the current-link fence.
+        do {
+            _ = try await service.applySessionControl(
+                sessionKey: "agent:main:clawline:user:main", action: .setHarness, value: "codex", enabled: nil
+            )
+            Issue.record("queued set_harness must stay refused after a retired-link restore attempt")
+        } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
+        } catch { Issue.record("expected tightbeamCapabilityUnavailable, got \(error)") }
+        do {
+            _ = try await service.createStream(
+                displayName: "P", idempotencyKey: "req_retired",
+                harness: "codex", model: nil, host: "eezo", archetype: nil
+            )
+            Issue.record("queued placement create must stay refused after a retired-link restore attempt")
+        } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
+        } catch { Issue.record("expected tightbeamCapabilityUnavailable, got \(error)") }
+    }
+
+    @Test("TB-D5 fence: a placement-bearing create is refused at the service when the current link lacks the tightbeam feature")
+    func placementCreateRefusedWhenLinkLacksTightbeam() async throws {
+        let (service, _) = try await makeConnectedService(features: [])
+        do {
+            _ = try await service.createStream(
+                displayName: "Placement", idempotencyKey: "req_x",
+                harness: "codex", model: nil, host: "eezo", archetype: nil
+            )
+            Issue.record("placement create must be refused on a featureless link")
+        } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
+            // expected
+        } catch {
+            Issue.record("expected tightbeamCapabilityUnavailable, got \(error)")
+        }
+    }
+
+    @Test("TB-D5 fence: set_harness is refused at the service when the current link lacks the tightbeam feature")
+    func setHarnessRefusedWhenLinkLacksTightbeam() async throws {
+        let (service, _) = try await makeConnectedService(features: [])
+        do {
+            _ = try await service.applySessionControl(
+                sessionKey: "agent:main:clawline:user:main", action: .setHarness, value: "codex", enabled: nil
+            )
+            Issue.record("set_harness must be refused on a featureless link")
+        } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
+            // expected
+        } catch {
+            Issue.record("expected tightbeamCapabilityUnavailable, got \(error)")
+        }
+    }
+
+    @Test("TB-D5 fence: a create that began on tightbeam and whose link RETIRED (socket close) is refused on the retry submission — the exact mid-operation gate-retirement hole")
+    func placementCreateRefusedAfterLinkRetiresToFeatureless() async throws {
+        let (service, mockSocket) = try await makeConnectedService(features: ["tightbeam"])
+        #expect(service.serverFeatures == ["tightbeam"])
+        // The link drops mid-operation (as it would between the first notConnected
+        // failure and the VM's post-reconnect retry, if the reconnect landed on a
+        // featureless/OpenClaw link). handleSocketClose clears the authoritative set.
+        mockSocket.close(with: .normalClosure)
+        for _ in 0..<50 {
+            if service.serverFeatures.isEmpty { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(service.serverFeatures.isEmpty)
+        // The retry submission (a second createStream call, exactly what
+        // createStreamRequestingRetry issues) must be refused, not posted.
+        do {
+            _ = try await service.createStream(
+                displayName: "Placement", idempotencyKey: "req_retry",
+                harness: "codex", model: nil, host: "eezo", archetype: nil
+            )
+            Issue.record("retry after link retirement must be refused")
+        } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
+            // expected
+        } catch {
+            Issue.record("expected tightbeamCapabilityUnavailable, got \(error)")
+        }
+    }
+
+    @Test("TB-D5 fence: the legacy name-only create is NOT gated by tightbeam (OpenClaw path stays usable)")
+    func nameOnlyCreateNotGatedByTightbeam() async throws {
+        let (service, _) = try await makeConnectedService(features: [])
+        // All placement fields nil -> the capability fence must NOT fire. It may
+        // fail downstream (no real control-plane), but never with the capability error.
+        do {
+            _ = try await service.createStream(displayName: "Name Only", idempotencyKey: "req_n")
+        } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
+            Issue.record("name-only create must not be gated by the tightbeam capability fence")
+        } catch {
+            // Any other failure (e.g. notConnected/network) is acceptable here.
+        }
+    }
+
+    @Test("TB-D5 fence: placement create and set_harness PASS the capability fence on a tightbeam link (no false refusal)")
+    func placementAndSetHarnessPassFenceOnTightbeamLink() async throws {
+        let (service, _) = try await makeConnectedService(features: ["tightbeam"])
+        for op in ["create", "harness"] {
+            do {
+                if op == "create" {
+                    _ = try await service.createStream(
+                        displayName: "P", idempotencyKey: "req_ok",
+                        harness: "codex", model: nil, host: "eezo", archetype: nil
+                    )
+                } else {
+                    _ = try await service.applySessionControl(
+                        sessionKey: "agent:main:clawline:user:main", action: .setHarness, value: "codex", enabled: nil
+                    )
+                }
+            } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
+                Issue.record("\(op) must pass the capability fence on a tightbeam link")
+            } catch {
+                // Downstream (no real control-plane) failures are fine; the fence passed.
+            }
+        }
+    }
+
+    @Test("B1 regression: under a lifecycle epoch, a history barrier is emitted in-band and NOT duplicated as a service event")
+    func historyBarrierIsSingleChannelUnderLifecycle() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+        let sessionKey = "agent:main:clawline:user:s_barrier"
+
+        final class Collector: @unchecked Sendable {
+            let lock = NSLock()
+            var lifecycleClears: [String] = []
+            var serviceClears: [String] = []
+        }
+        let collector = Collector()
+
+        let lifecycleTask = Task {
+            for await event in service.lifecycleTransportEvents {
+                if case .historyCleared(let key) = event.payload {
+                    collector.lock.lock(); collector.lifecycleClears.append(key); collector.lock.unlock()
+                }
+            }
+        }
+        let serviceTask = Task {
+            for await event in service.serviceEvents {
+                if case .streamHistoryCleared(let key) = event {
+                    collector.lock.lock(); collector.serviceClears.append(key); collector.lock.unlock()
+                }
+            }
+        }
+        defer { lifecycleTask.cancel(); serviceTask.cancel() }
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "stream_history_cleared", "sessionKey": "\#(sessionKey)" }"#)
+        }
+
+        // Managed lifecycle mode: inbound frames carry the lifecycle epoch, so the
+        // barrier must ride the lifecycle stream and the service-event duplicate
+        // must be suppressed (the two emissions are mutually exclusive).
+        service.startConnectionAttempt(epoch: 1, lastMessageId: nil, token: "jwt")
+        for _ in 0..<50 {
+            collector.lock.lock(); let got = !collector.lifecycleClears.isEmpty; collector.lock.unlock()
+            if got { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        // Give any (erroneous) duplicate a chance to arrive before asserting absence.
+        try await Task.sleep(forDuration: .milliseconds(60))
+
+        collector.lock.lock()
+        let lifecycleClears = collector.lifecycleClears
+        let serviceClears = collector.serviceClears
+        collector.lock.unlock()
+
+        #expect(lifecycleClears == [sessionKey])
+        #expect(serviceClears.isEmpty)
+    }
+
     @Test("Malformed ack frame is dropped and valid ack still emits")
     func malformedAckFrameIsDropped() async throws {
         let mockSocket = MockWebSocketClient()
@@ -905,6 +1224,452 @@ struct ProviderServiceTests {
         #expect(sessions.map(\.sessionKey) == ["agent:main:clawline:user:s_trackable"])
     }
 
+    @Test("Trackable sessions fetch uses HTTPS provider API URL for non-local HTTP base")
+    func trackableSessionsFetchUsesHTTPSProviderAPIURLForNonLocalHTTPBase() async throws {
+        let baseURL = URL(string: "http://100.85.66.60:18800")!
+        final class RequestBox: @unchecked Sendable {
+            var url: URL?
+            var authorization: String?
+        }
+        let requestBox = RequestBox()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            requestBox.url = request.url
+            requestBox.authorization = request.value(forHTTPHeaderField: "Authorization")
+            let data = #"""
+            {
+              "sessions": [
+                {
+                  "sessionKey": "agent:heimdal:main",
+                  "displayName": "Heimdal Main",
+                  "updatedAt": 1700000000000
+                }
+              ]
+            }
+            """#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+
+        let sessions = try await streamAPIClient.fetchTrackableSessions(token: "jwt")
+
+        #expect(sessions.map(\.sessionKey) == ["agent:heimdal:main"])
+        #expect(requestBox.url?.absoluteString == "https://tars.tail4105e8.ts.net:19443/api/trackable-sessions")
+        #expect(requestBox.authorization == "Bearer jwt")
+    }
+
+    @Test("Trackable sessions fetch preserves local HTTP provider API URL")
+    func trackableSessionsFetchPreservesLocalHTTPProviderAPIURL() async throws {
+        let baseURL = URL(string: "http://127.0.0.1:18800")!
+        final class RequestBox: @unchecked Sendable {
+            var url: URL?
+        }
+        let requestBox = RequestBox()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            requestBox.url = request.url
+            let data = #"{ "sessions": [] }"#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+
+        let sessions = try await streamAPIClient.fetchTrackableSessions(token: nil)
+
+        #expect(sessions.isEmpty)
+        #expect(requestBox.url?.absoluteString == "http://127.0.0.1:18800/api/trackable-sessions")
+    }
+
+    @MainActor
+    @Test("Upload uses HTTPS provider API URL for non-local HTTP base")
+    func uploadUsesHTTPSProviderAPIURLForNonLocalHTTPBase() async throws {
+        let baseURL = URL(string: "http://100.85.66.60:18800")!
+        final class RequestBox: @unchecked Sendable {
+            var url: URL?
+            var authorization: String?
+        }
+        let auth = ProviderServiceTestAuthManager(token: "jwt")
+        let requestBox = RequestBox()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            requestBox.url = request.url
+            requestBox.authorization = request.value(forHTTPHeaderField: "Authorization")
+            let data = #"{ "assetId": "asset_1", "mimeType": "image/png" }"#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(url: request.url ?? baseURL, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let service = UploadService(
+            auth: auth,
+            baseURLProvider: { baseURL },
+            session: URLSession(configuration: configuration)
+        )
+
+        let assetId = try await service.upload(data: Data([0x01]), mimeType: "image/png", filename: "probe.png")
+
+        #expect(assetId == "asset_1")
+        #expect(requestBox.url?.absoluteString == "https://tars.tail4105e8.ts.net:19443/upload")
+        #expect(requestBox.authorization == "Bearer jwt")
+    }
+
+    @MainActor
+    @Test("Download uses HTTPS provider API URL for non-local HTTP base")
+    func downloadUsesHTTPSProviderAPIURLForNonLocalHTTPBase() async throws {
+        let baseURL = URL(string: "http://100.85.66.60:18800")!
+        final class RequestBox: @unchecked Sendable {
+            var url: URL?
+            var authorization: String?
+        }
+        let auth = ProviderServiceTestAuthManager(token: "jwt")
+        let requestBox = RequestBox()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            requestBox.url = request.url
+            requestBox.authorization = request.value(forHTTPHeaderField: "Authorization")
+            return (
+                HTTPURLResponse(url: request.url ?? baseURL, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                Data([0x02])
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let service = UploadService(
+            auth: auth,
+            baseURLProvider: { baseURL },
+            session: URLSession(configuration: configuration)
+        )
+
+        let data = try await service.download(assetId: "asset/with space")
+
+        #expect(data == Data([0x02]))
+        #expect(requestBox.url?.absoluteString == "https://tars.tail4105e8.ts.net:19443/download/asset%2Fwith%20space")
+        #expect(requestBox.authorization == "Bearer jwt")
+    }
+
+    @Test("API base URL candidates prefer HTTPS front then direct HTTP")
+    func apiBaseURLCandidatesPreferHTTPSFrontThenDirectHTTP() {
+        let baseURL = URL(string: "http://100.85.66.60:18800")!
+        let candidates = ProviderHTTPURLResolver.apiBaseURLCandidates(from: baseURL)
+        #expect(candidates.map(\.absoluteString) == [
+            "https://tars.tail4105e8.ts.net:19443",
+            "http://100.85.66.60:18800"
+        ])
+
+        let localBase = URL(string: "http://127.0.0.1:18800")!
+        #expect(ProviderHTTPURLResolver.apiBaseURLCandidates(from: localBase) == [localBase])
+    }
+
+    @Test("Transport gap classification separates front gaps from provider errors")
+    func transportGapClassificationSeparatesFrontGapsFromProviderErrors() {
+        let plainNotFound = Data("not found".utf8)
+        let providerEnvelope = Data(#"{"error":{"code":"stream_not_found","message":"Stream not found"}}"#.utf8)
+        let uploadEnvelope = Data(#"{"type":"error","code":"auth_failed","message":"Missing authorization"}"#.utf8)
+
+        #expect(ProviderHTTPURLResolver.isTransportGapResponse(statusCode: 404, data: plainNotFound))
+        #expect(ProviderHTTPURLResolver.isTransportGapResponse(statusCode: 404, data: Data()))
+        #expect(ProviderHTTPURLResolver.isTransportGapResponse(statusCode: 502, data: providerEnvelope))
+        #expect(!ProviderHTTPURLResolver.isTransportGapResponse(statusCode: 404, data: providerEnvelope))
+        #expect(!ProviderHTTPURLResolver.isTransportGapResponse(statusCode: 404, data: uploadEnvelope))
+        #expect(!ProviderHTTPURLResolver.isTransportGapResponse(statusCode: 401, data: plainNotFound))
+        #expect(!ProviderHTTPURLResolver.isTransportGapResponse(statusCode: 200, data: plainNotFound))
+    }
+
+    @MainActor
+    @Test("Stream request falls back to direct HTTP when the HTTPS front omits the route")
+    func streamRequestFallsBackToDirectHTTPWhenFrontOmitsRoute() async throws {
+        let baseURL = URL(string: "http://100.85.66.60:18800")!
+        final class RequestBox: @unchecked Sendable {
+            var urls: [String] = []
+        }
+        let requestBox = RequestBox()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        let streamsJSON = #"""
+        {
+          "streams": [
+            {
+              "sessionKey": "agent:main:clawline:flynn:s_direct",
+              "displayName": "Direct",
+              "kind": "main",
+              "orderIndex": 0,
+              "isBuiltIn": true,
+              "createdAt": 1700000000000,
+              "updatedAt": 1700000000000
+            }
+          ]
+        }
+        """#.data(using: .utf8) ?? Data()
+        HTTPStubURLProtocol.requestHandler = { request in
+            let urlString = request.url?.absoluteString ?? ""
+            requestBox.urls.append(urlString)
+            if urlString.hasPrefix("https://tars.tail4105e8.ts.net:19443") {
+                return (
+                    HTTPURLResponse(
+                        url: request.url ?? baseURL,
+                        statusCode: 404,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "text/plain"]
+                    )!,
+                    Data("not found".utf8)
+                )
+            }
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                streamsJSON
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let client = StreamAPIClient(baseURLProvider: { baseURL }, session: URLSession(configuration: configuration))
+
+        let streams = try await client.fetchStreams(token: "jwt")
+
+        #expect(streams.map(\.sessionKey) == ["agent:main:clawline:flynn:s_direct"])
+        #expect(requestBox.urls == [
+            "https://tars.tail4105e8.ts.net:19443/api/streams",
+            "http://100.85.66.60:18800/api/streams"
+        ])
+
+        // Sticky: the next request should try the proven direct base first.
+        let sessions = try await client.fetchStreams(token: "jwt")
+        #expect(sessions.count == 1)
+        #expect(requestBox.urls.count == 3)
+        #expect(requestBox.urls[2] == "http://100.85.66.60:18800/api/streams")
+    }
+
+    @MainActor
+    @Test("Sticky base does not pin the client to a base that goes bad")
+    func stickyBaseDoesNotPinClientToBadBase() async throws {
+        let baseURL = URL(string: "http://100.85.66.60:18800")!
+        final class StubState: @unchecked Sendable {
+            var urls: [String] = []
+            var directIsHealthy = true
+        }
+        let state = StubState()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        let streamsJSON = #"""
+        {
+          "streams": [
+            {
+              "sessionKey": "agent:main:clawline:flynn:s_recovery",
+              "displayName": "Recovery",
+              "kind": "main",
+              "orderIndex": 0,
+              "isBuiltIn": true,
+              "createdAt": 1700000000000,
+              "updatedAt": 1700000000000
+            }
+          ]
+        }
+        """#.data(using: .utf8) ?? Data()
+        HTTPStubURLProtocol.requestHandler = { request in
+            let urlString = request.url?.absoluteString ?? ""
+            state.urls.append(urlString)
+            let isDirect = urlString.hasPrefix("http://100.85.66.60:18800")
+            let healthy = isDirect ? state.directIsHealthy : !state.directIsHealthy
+            if healthy {
+                return (
+                    HTTPURLResponse(
+                        url: request.url ?? baseURL,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )!,
+                    streamsJSON
+                )
+            }
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "text/plain"]
+                )!,
+                Data("not found".utf8)
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let client = StreamAPIClient(baseURLProvider: { baseURL }, session: URLSession(configuration: configuration))
+
+        // Phase 1: HTTPS front is gapped, direct is healthy -> falls back, sticks direct.
+        _ = try await client.fetchStreams(token: "jwt")
+        #expect(state.urls.count == 2)
+
+        // Phase 2: direct goes bad, HTTPS front recovers -> ladder must recover, not pin.
+        state.directIsHealthy = false
+        let streams = try await client.fetchStreams(token: "jwt")
+        #expect(streams.count == 1)
+        #expect(state.urls.count == 4)
+        #expect(state.urls[2] == "http://100.85.66.60:18800/api/streams")
+        #expect(state.urls[3] == "https://tars.tail4105e8.ts.net:19443/api/streams")
+
+        // Phase 3: sticky updated to the recovered HTTPS front.
+        let again = try await client.fetchStreams(token: "jwt")
+        #expect(again.count == 1)
+        #expect(state.urls.count == 5)
+        #expect(state.urls[4] == "https://tars.tail4105e8.ts.net:19443/api/streams")
+    }
+
+    @MainActor
+    @Test("Download falls back to direct HTTP when the HTTPS front omits the route")
+    func downloadFallsBackToDirectHTTPWhenFrontOmitsRoute() async throws {
+        let baseURL = URL(string: "http://100.85.66.60:18800")!
+        final class RequestBox: @unchecked Sendable {
+            var urls: [String] = []
+        }
+        let requestBox = RequestBox()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            let urlString = request.url?.absoluteString ?? ""
+            requestBox.urls.append(urlString)
+            if urlString.hasPrefix("https://tars.tail4105e8.ts.net:19443") {
+                return (
+                    HTTPURLResponse(
+                        url: request.url ?? baseURL,
+                        statusCode: 404,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "text/plain"]
+                    )!,
+                    Data("not found".utf8)
+                )
+            }
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/octet-stream"]
+                )!,
+                Data([0xAB, 0xCD])
+            )
+        }
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let service = UploadService(
+            auth: auth,
+            baseURLProvider: { baseURL },
+            session: URLSession(configuration: configuration)
+        )
+
+        let data = try await service.download(assetId: "asset1")
+
+        #expect(data == Data([0xAB, 0xCD]))
+        #expect(requestBox.urls == [
+            "https://tars.tail4105e8.ts.net:19443/download/asset1",
+            "http://100.85.66.60:18800/download/asset1"
+        ])
+    }
+
+    @MainActor
+    @Test("Provider error envelopes do not trigger direct HTTP fallback")
+    func providerErrorEnvelopesDoNotTriggerDirectHTTPFallback() async throws {
+        let baseURL = URL(string: "http://100.85.66.60:18800")!
+        final class RequestBox: @unchecked Sendable {
+            var urls: [String] = []
+        }
+        let requestBox = RequestBox()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            requestBox.urls.append(request.url?.absoluteString ?? "")
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(#"{"error":{"code":"stream_not_found","message":"Stream not found"}}"#.utf8)
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let client = StreamAPIClient(baseURLProvider: { baseURL }, session: URLSession(configuration: configuration))
+
+        do {
+            _ = try await client.deleteStream(sessionKey: "agent:x", idempotencyKey: nil, token: "jwt")
+            #expect(Bool(false), "Expected StreamAPIError")
+        } catch let error as StreamAPIError {
+            #expect(error.code == "stream_not_found")
+            #expect(error.statusCode == 404)
+        }
+        #expect(requestBox.urls.count == 1)
+        #expect(requestBox.urls[0].hasPrefix("https://tars.tail4105e8.ts.net:19443"))
+    }
+
+    @MainActor
+    @Test("Upload and download preserve localhost HTTP provider base")
+    func uploadAndDownloadPreserveLocalhostHTTPProviderBase() async throws {
+        let baseURL = URL(string: "http://localhost:18800")!
+        final class RequestBox: @unchecked Sendable {
+            var urls: [URL?] = []
+        }
+        let auth = ProviderServiceTestAuthManager(token: "jwt")
+        let requestBox = RequestBox()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            requestBox.urls.append(request.url)
+            if request.httpMethod == "POST" {
+                let data = #"{ "assetId": "local_asset", "mimeType": "image/png" }"#.data(using: .utf8) ?? Data()
+                return (
+                    HTTPURLResponse(url: request.url ?? baseURL, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    data
+                )
+            }
+            return (
+                HTTPURLResponse(url: request.url ?? baseURL, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                Data([0x03])
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let service = UploadService(
+            auth: auth,
+            baseURLProvider: { baseURL },
+            session: URLSession(configuration: configuration)
+        )
+
+        let assetId = try await service.upload(data: Data([0x01]), mimeType: "image/png", filename: nil)
+        let data = try await service.download(assetId: "local_asset")
+
+        #expect(assetId == "local_asset")
+        #expect(data == Data([0x03]))
+        #expect(requestBox.urls.map { $0?.absoluteString } == [
+            "http://localhost:18800/upload",
+            "http://localhost:18800/download/local_asset"
+        ])
+    }
+
     @Test("Fetch streams decodes adopted flag and defaults missing field to false")
     func fetchStreamsDecodesAdoptedFlag() async throws {
         let mockSocket = MockWebSocketClient()
@@ -983,17 +1748,27 @@ struct ProviderServiceTests {
             let data = #"""
             {
               "sessionKey": "agent:main:clawline:user:s_status",
+              "metadataContextGeneration": "generation-status-a",
               "display": {
-                "model": "claude-sonnet-4.6",
+                "model": "gpt-5.6",
                 "fallbackModels": null,
-                "provider": "anthropic",
-                "harness": null,
+                "provider": "openai",
+                "harness": "codex",
                 "authMode": "oauth",
                 "reasoningLevel": null,
                 "thinkingLevel": "high",
                 "fastMode": true,
                 "mode": null,
-                "verbosity": null
+                "verbosity": null,
+                "codexUsage": {
+                  "freshness": "fresh",
+                  "fetchedAt": 1784000000000,
+                  "windows": [
+                    { "label": "5h", "remainingPercent": 64, "resetAt": 1784003600000 },
+                    { "label": "Week", "remainingPercent": 28, "resetAt": 1784604800000 }
+                  ],
+                  "unavailableReason": null
+                }
               },
               "run": {
                 "state": "running",
@@ -1062,11 +1837,15 @@ struct ProviderServiceTests {
         let status = try await service.fetchSessionStatus(sessionKey: sessionKey)
 
         #expect(status.sessionKey == sessionKey)
-        #expect(status.display.provider == "anthropic")
-        #expect(status.display.model == "claude-sonnet-4.6")
+        #expect(status.metadataContextGeneration == "generation-status-a")
+        #expect(status.display.provider == "openai")
+        #expect(status.display.model == "gpt-5.6")
         #expect(status.display.authMode == "oauth")
         #expect(status.display.thinkingLevel == "high")
         #expect(status.display.fastMode == true)
+        #expect(status.display.codexUsage?.freshness == .fresh)
+        #expect(status.display.codexUsage?.windows.map(\.label) == [.fiveHour, .week])
+        #expect(status.display.codexUsage?.windows.map(\.remainingPercent) == [64, 28])
         #expect(status.run.state == .running)
         #expect(status.run.queueDepth == 2)
         #expect(status.capabilities.cancelCurrentRun?.supported == false)
@@ -1395,6 +2174,259 @@ struct ProviderServiceTests {
         #expect(emittedKey == deletedKey)
     }
 
+    @Test("T1758: Rename and delete capture single-encoded production request paths")
+    func streamMutationsEncodeSessionKeyExactlyOnce() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let sessionKey = "agent:main:clawline:flynn:main s_request_path"
+        var capturedRequests: [URLRequest] = []
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            capturedRequests.append(request)
+            let body: String
+            if request.httpMethod == "PATCH" {
+                body = #"{"stream":{"sessionKey":"agent:main:clawline:flynn:main s_request_path","displayName":"Renamed","kind":"custom","orderIndex":2,"isBuiltIn":false,"createdAt":1700000000000,"updatedAt":1700000000001,"adopted":false}}"#
+            } else {
+                body = #"{"deletedSessionKey":"agent:main:clawline:flynn:main s_request_path"}"#
+            }
+            let data = body.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL },
+            authTokenProvider: { "jwt" },
+            streamAPIClient: streamAPIClient
+        )
+
+        _ = try await service.renameStream(sessionKey: sessionKey, displayName: "Renamed")
+        _ = try await service.deleteStream(
+            sessionKey: sessionKey,
+            idempotencyKey: "req_t1758_delete"
+        )
+
+        #expect(capturedRequests.map(\.httpMethod) == ["PATCH", "DELETE"])
+        for request in capturedRequests {
+            let components = try #require(
+                request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }
+            )
+            #expect(
+                components.percentEncodedPath
+                    == "/api/streams/agent%3Amain%3Aclawline%3Aflynn%3Amain%20s_request_path"
+            )
+            #expect(!components.percentEncodedPath.contains("%253A"))
+            #expect(!components.percentEncodedPath.contains("%2520"))
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer jwt")
+        }
+
+        let renameBody = try #require(
+            capturedRequests[0].httpBody ?? Self.bodyData(from: capturedRequests[0].httpBodyStream)
+        )
+        let renamePayload = try JSONSerialization.jsonObject(with: renameBody) as? [String: String]
+        #expect(renamePayload?["displayName"] == "Renamed")
+
+        let deleteBody = try #require(
+            capturedRequests[1].httpBody ?? Self.bodyData(from: capturedRequests[1].httpBodyStream)
+        )
+        let deletePayload = try JSONSerialization.jsonObject(with: deleteBody) as? [String: String]
+        #expect(deletePayload?["idempotencyKey"] == "req_t1758_delete")
+        #expect(connector.connectedURL == nil)
+        #expect(mockSocket.sentTexts.isEmpty)
+    }
+
+    @Test("T142: Delete stream uses HTTP control plane without target WebSocket")
+    func deleteStreamUsesControlPlaneWithoutTargetWebSocket() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let inactiveSessionKey = "agent:main:openclaw:user:s_inactive_delete"
+        var capturedRequest: URLRequest?
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            capturedRequest = request
+            let data = #"""
+            {
+              "deletedSessionKey": "agent:main:openclaw:user:s_inactive_delete"
+            }
+            """#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL },
+            authTokenProvider: { "jwt" },
+            streamAPIClient: streamAPIClient
+        )
+
+        let deletedKey = try await service.deleteStream(
+            sessionKey: inactiveSessionKey,
+            idempotencyKey: "req_t142_delete"
+        )
+
+        let request = try #require(capturedRequest)
+        #expect(deletedKey == inactiveSessionKey)
+        #expect(connector.connectedURL == nil)
+        #expect(mockSocket.sentTexts.isEmpty)
+        #expect(request.httpMethod == "DELETE")
+        let components = try #require(
+            request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }
+        )
+        #expect(
+            components.percentEncodedPath
+                == "/api/streams/agent%3Amain%3Aopenclaw%3Auser%3As_inactive_delete"
+        )
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer jwt")
+        let body = try #require(request.httpBody ?? Self.bodyData(from: request.httpBodyStream))
+        let payload = try JSONSerialization.jsonObject(with: body) as? [String: String]
+        #expect(payload?["idempotencyKey"] == "req_t142_delete")
+    }
+
+    @Test("T1751 org-options fetch decodes the full shape over the device bearer")
+    func orgOptionsFetchDecodesFullShape() async throws {
+        let baseURL = URL(string: "http://127.0.0.1:18800")!
+        final class RequestBox: @unchecked Sendable {
+            var path: String?
+            var authorization: String?
+        }
+        let box = RequestBox()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            box.path = request.url?.path
+            box.authorization = request.value(forHTTPHeaderField: "Authorization")
+            let data = #"""
+            {
+              "harnesses": ["claude", "codex"],
+              "models": {
+                "claude": [{"id": "m1", "ref": "claude-fable-5", "name": "Fable 5", "provider": "anthropic"}],
+                "codex": [{"id": "m2", "ref": "gpt-5.6-sol", "name": "Sol", "provider": "openai"}]
+              },
+              "hosts": ["eezo", "tars"],
+              "archetypes": [{"name": "researcher", "where": ["*"], "defaults": {"harness": "claude"}}]
+            }
+            """#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+
+        let options = try await streamAPIClient.fetchOrgOptions(token: "jwt")
+
+        #expect(box.path == "/api/org-options")
+        #expect(box.authorization == "Bearer jwt")
+        #expect(options.harnesses == ["claude", "codex"])
+        #expect(options.models["codex"]?.first?.ref == "gpt-5.6-sol")
+        #expect(options.hosts == ["eezo", "tars"])
+        #expect(options.archetypes.first?.where == ["*"])
+    }
+
+    @Test("T1751 set_harness session-control carries the harness and omits the model")
+    func setHarnessSessionControlEncodesHarnessWithoutModel() async throws {
+        let baseURL = URL(string: "http://127.0.0.1:18800")!
+        final class RequestBox: @unchecked Sendable {
+            var body: Data?
+            var method: String?
+            var path: String?
+        }
+        let box = RequestBox()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            box.method = request.httpMethod
+            box.path = request.url?.path
+            box.body = request.httpBody ?? Self.bodyData(from: request.httpBodyStream)
+            let data = #"""
+            { "ok": true, "sessionKey": "agent:main:clawline:user:s_harness", "action": "set_harness" }
+            """#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+
+        let response = try await streamAPIClient.applySessionControl(
+            sessionKey: "agent:main:clawline:user:s_harness",
+            action: .setHarness,
+            value: "codex",
+            enabled: nil,
+            token: "jwt"
+        )
+
+        #expect(response.ok)
+        #expect(box.method == "POST")
+        #expect(box.path == "/api/session-control")
+        let body = try #require(box.body)
+        let payload = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        #expect(payload?["action"] as? String == "set_harness")
+        #expect(payload?["harness"] as? String == "codex")
+        #expect(payload?["sessionKey"] as? String == "agent:main:clawline:user:s_harness")
+        // Model omitted (encoded null): the gateway picks the target harness default.
+        #expect((payload?["model"] as? String) == nil)
+    }
+
+    private static func bodyData(from stream: InputStream?) -> Data? {
+        guard let stream else { return nil }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 1024)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count < 0 {
+                return nil
+            }
+            if count == 0 {
+                break
+            }
+            data.append(buffer, count: count)
+        }
+        return data
+    }
+
     @Test("Chat service emits incremental read-state updates")
     func chatIncrementalReadStateEvents() async throws {
         let mockSocket = MockWebSocketClient()
@@ -1529,6 +2561,39 @@ private final class MockWebSocketConnector: WebSocketConnecting {
     func connect(to url: URL) async throws -> any WebSocketClient {
         connectedURL = url
         return client
+    }
+}
+
+@MainActor
+private final class ProviderServiceTestAuthManager: AuthManaging {
+    var isAuthenticated: Bool
+    var currentUserId: String?
+    var token: String?
+    var isAdmin: Bool = false
+
+    init(token: String? = nil, userId: String? = "user_1") {
+        self.token = token
+        self.currentUserId = userId
+        isAuthenticated = token != nil
+    }
+
+    func storeCredentials(token: String, userId: String) {
+        self.token = token
+        currentUserId = userId
+        isAuthenticated = true
+    }
+
+    func updateAdminStatus(_ isAdmin: Bool) {
+        self.isAdmin = isAdmin
+    }
+
+    func refreshAdminStatusFromToken() {}
+
+    func clearCredentials() {
+        token = nil
+        currentUserId = nil
+        isAuthenticated = false
+        isAdmin = false
     }
 }
 

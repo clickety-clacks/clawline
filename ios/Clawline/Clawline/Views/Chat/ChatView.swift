@@ -40,6 +40,46 @@ enum CrossChatShortcutLabelAvailability {
     }
 }
 
+enum CrossChatNotificationShortcutIndicatorAvailability {
+    static var current: Bool {
+#if (os(iOS) || os(visionOS)) && canImport(GameController)
+        current(coalescedKeyboardPresent: GCKeyboard.coalesced != nil)
+#else
+        false
+#endif
+    }
+
+    static func current(coalescedKeyboardPresent: Bool) -> Bool {
+#if (os(iOS) || os(visionOS)) && canImport(GameController)
+        coalescedKeyboardPresent
+#else
+        false
+#endif
+    }
+}
+
+enum HardwareKeyboardAvailability {
+    static var current: Bool {
+#if targetEnvironment(macCatalyst)
+        true
+#elseif (os(iOS) || os(visionOS)) && canImport(GameController)
+        current(coalescedKeyboardPresent: GCKeyboard.coalesced != nil)
+#else
+        false
+#endif
+    }
+
+    static func current(coalescedKeyboardPresent: Bool) -> Bool {
+#if targetEnvironment(macCatalyst)
+        true
+#elseif (os(iOS) || os(visionOS)) && canImport(GameController)
+        coalescedKeyboardPresent
+#else
+        false
+#endif
+    }
+}
+
 #if DEBUG
 @MainActor
 private final class T099OnDisappearProbeStore {
@@ -136,7 +176,7 @@ enum StreamPopupSearchFocus: Equatable {
 
 enum StreamPopupRoute: Equatable {
     case closed
-    case popup(searchFocus: StreamPopupSearchFocus)
+    case popup(presentationID: Int, searchFocus: StreamPopupSearchFocus)
     case trackPicker
 }
 
@@ -244,6 +284,8 @@ enum CrossChatNotificationNavigationDockPolicy {
 final class StreamPopupRouteController {
     private(set) var route: StreamPopupRoute = .closed
     private var searchFocusRequestID = 0
+    private var popupPresentationID = 0
+    private var closingPresentationID: Int?
 
     var isPopupPresented: Bool {
         if case .popup = route {
@@ -256,25 +298,51 @@ final class StreamPopupRouteController {
         route == .trackPicker
     }
 
+    var currentPopupPresentationID: Int? {
+        guard case .popup(let presentationID, _) = route else { return nil }
+        return presentationID
+    }
+
     var popupSearchFocusRequestID: Int? {
-        guard case .popup(.request(let id)) = route else { return nil }
+        guard case .popup(_, .request(let id)) = route else { return nil }
         return id
     }
 
+    var isSuppressingReopenFromClosingPresentation: Bool {
+        closingPresentationID != nil
+    }
+
     func openPopup(focusSearch: Bool) {
+        closingPresentationID = nil
+        popupPresentationID &+= 1
         if focusSearch {
             searchFocusRequestID &+= 1
-            route = .popup(searchFocus: .request(id: searchFocusRequestID))
+            route = .popup(presentationID: popupPresentationID, searchFocus: .request(id: searchFocusRequestID))
         } else {
-            route = .popup(searchFocus: .none)
+            route = .popup(presentationID: popupPresentationID, searchFocus: .none)
         }
     }
 
     func closePopup() {
+        guard let presentationID = currentPopupPresentationID else {
+            route = .closed
+            return
+        }
+        closingPresentationID = presentationID
         route = .closed
     }
 
+    func finishClosingSuppression(for presentationID: Int?) {
+        guard closingPresentationID == presentationID else { return }
+        closingPresentationID = nil
+    }
+
+    func clearClosingSuppression() {
+        closingPresentationID = nil
+    }
+
     func presentTrackPicker() {
+        closingPresentationID = nil
         route = .trackPicker
     }
 
@@ -284,54 +352,39 @@ final class StreamPopupRouteController {
 
     func consumeSearchFocusRequest() {
         guard popupSearchFocusRequestID != nil else { return }
-        route = .popup(searchFocus: .none)
+        guard let presentationID = currentPopupPresentationID else { return }
+        route = .popup(presentationID: presentationID, searchFocus: .none)
     }
 }
 
 enum StreamPopupFocusHandoff {
-    enum CloseAction: Equatable {
-        case requestComposerFocusBeforeDismissal
-        case closePopup
-        case requestComposerFocusAfterDismissal
-    }
-
-    static func shouldFocusSearchOnOpen(isSoftwareKeyboardVisible: Bool) -> Bool {
-        isSoftwareKeyboardVisible
+    static func shouldFocusSearchOnOpen(
+        isSoftwareKeyboardVisible: Bool,
+        isHardwareKeyboardAttached: Bool
+    ) -> Bool {
+        StreamPopupFocusPolicy.shouldFocusSearchOnOpen(
+            isSoftwareKeyboardVisible: isSoftwareKeyboardVisible,
+            isHardwareKeyboardAvailable: isHardwareKeyboardAttached
+        )
     }
 
     static func isSoftwareKeyboardVisible(keyboardHeight: CGFloat, safeAreaBottom: CGFloat) -> Bool {
         max(0, keyboardHeight - safeAreaBottom) > 0.5
     }
 
-    static func shouldRestoreComposerOnClose(
-        didDisplaceComposerFocus: Bool,
-        isSoftwareKeyboardVisible: Bool
-    ) -> Bool {
-        didDisplaceComposerFocus && isSoftwareKeyboardVisible
+    static func shouldOpenFromDotsTap(isSuppressingReopenFromClosingPresentation: Bool) -> Bool {
+        !isSuppressingReopenFromClosingPresentation
+    }
+}
+
+enum AttachmentMenuPresentationPolicy {
+    enum Action: Equatable {
+        case present
+        case resetThenPresent
     }
 
-    static func shouldRestoreComposerOnCloseAfterTrackedKeyboardState(
-        didDisplaceComposerFocus: Bool,
-        isSoftwareKeyboardVisible: Bool
-    ) -> Bool {
-        shouldRestoreComposerOnClose(
-            didDisplaceComposerFocus: didDisplaceComposerFocus,
-            isSoftwareKeyboardVisible: isSoftwareKeyboardVisible
-        )
-    }
-
-    static func closeActions(
-        shouldRestoreComposerFocus: Bool,
-        preserveComposerFocusDuringDismissal: Bool = false
-    ) -> [CloseAction] {
-        guard shouldRestoreComposerFocus else { return [.closePopup] }
-        return preserveComposerFocusDuringDismissal
-            ? [.requestComposerFocusBeforeDismissal, .closePopup]
-            : [.closePopup, .requestComposerFocusAfterDismissal]
-    }
-
-    static func shouldClosePopupForComposerFocusRequest(isStreamPopupPresented: Bool) -> Bool {
-        isStreamPopupPresented
+    static func action(isCurrentlyPresented: Bool) -> Action {
+        isCurrentlyPresented ? .resetThenPresent : .present
     }
 }
 
@@ -348,6 +401,76 @@ enum StreamPagerKeyboardDismissPolicy {
 #if !os(visionOS)
         scrollView.keyboardDismissMode = .none
 #endif
+    }
+}
+
+
+struct CrossChatNotificationObservation: Equatable {
+    struct SourceState: Equatable, Hashable {
+        let sourceChatId: String
+        let isReplying: Bool
+    }
+
+    let visibleSourceStates: [SourceState]
+    let transcriptTrailingClearance: CGFloat
+
+    var visibleSourceChatIds: [String] { visibleSourceStates.map(\.sourceChatId) }
+    var visibleReplySourceChatIds: [String] { visibleSourceStates.filter(\.isReplying).map(\.sourceChatId) }
+    var visibleCount: Int { visibleSourceStates.count }
+
+    static let empty = CrossChatNotificationObservation(
+        visibleSourceStates: [],
+        transcriptTrailingClearance: 0
+    )
+}
+
+private struct CrossChatNotificationObservationHost: View {
+    @Bindable var viewModel: ChatViewModel
+    let maxContainerHeight: CGFloat
+    let replyPinSlotsBySourceChatId: [String: Int]
+    let measuredHeightsBySourceChatId: [String: CGFloat]
+    let isCompactLandscape: Bool
+    let isNotificationDocked: Bool
+    let onObservationChange: (CrossChatNotificationObservation) -> Void
+
+    private var observation: CrossChatNotificationObservation {
+        let visibleBubbles = CrossChatNotificationOverlay.visibleBubbles(
+            maxContainerHeight: maxContainerHeight,
+            bubbles: viewModel.crossChatNotificationBubbles,
+            replyPinSlotsBySourceChatId: replyPinSlotsBySourceChatId,
+            measuredHeightsBySourceChatId: measuredHeightsBySourceChatId
+        )
+        let visibleSourceStates = visibleBubbles.map {
+            CrossChatNotificationObservation.SourceState(
+                sourceChatId: $0.sourceChatId,
+                isReplying: $0.isReplying
+            )
+        }
+#if os(iOS) && !targetEnvironment(macCatalyst)
+        let clearance = CrossChatNotificationGeometry.transcriptTrailingClearance(
+            isCompactLandscape: isCompactLandscape,
+            isNotificationDocked: isNotificationDocked,
+            visibleNotificationCount: visibleSourceStates.count
+        )
+#else
+        let clearance: CGFloat = 0
+#endif
+        return CrossChatNotificationObservation(
+            visibleSourceStates: visibleSourceStates,
+            transcriptTrailingClearance: clearance
+        )
+    }
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .onAppear {
+                onObservationChange(observation)
+            }
+            .onChange(of: observation) { _, observation in
+                onObservationChange(observation)
+            }
     }
 }
 
@@ -391,6 +514,7 @@ struct ChatView: View {
     @State private var isFileImporterPresented = false
     @State private var isCancelCurrentPromptDialogPresented = false
     @State private var isLogoutConfirmationPresented = false
+    @State private var pendingHarnessChange: PendingHarnessChange?
     @State private var isMissingReplyVisibleIdDialogPresented = false
     @State private var cancelCurrentPromptSessionKey: String?
     @State private var cancelCurrentPromptRequiresVisibleTyping = false
@@ -402,9 +526,9 @@ struct ChatView: View {
     @State private var spatialPromptFocusShortcutTargetLeaseExpiresAt: Date?
 #endif
     @State private var shouldRestoreFocusAfterPicker = false
-    @State private var shouldRestoreFocusAfterStreamPopup = false
-    @State private var streamPopupKeyboardDismissalTask: Task<Void, Never>?
-    @State private var streamPopupComposerFocusTask: Task<Void, Never>?
+    @State private var streamPopupFocusCoordinator = StreamPopupFocusCoordinator()
+    @State private var streamPopupClosingSuppressionTask: Task<Void, Never>?
+    @State private var attachmentMenuPresentationTask: Task<Void, Never>?
     @State private var streamSwitchComposerFocusRestore: StreamSwitchComposerFocusRestore?
     @State private var streamSwitchComposerFocusRestoreToken = 0
     @State private var scrollButtonStateBySessionKey: [String: ScrollButtonState] = [:]
@@ -443,6 +567,7 @@ struct ChatView: View {
     @State private var isCrossChatNotificationStackDocked = false
     @State private var crossChatNotificationReplyPinSlotsBySourceChatId: [String: Int] = [:]
     @State private var crossChatNotificationMeasuredHeightsBySourceChatId: [String: CGFloat] = [:]
+    @State private var crossChatNotificationObservation = CrossChatNotificationObservation.empty
     @State private var crossChatNotificationActionMenuSourceChatId: String?
     @State private var crossChatNotificationFocusedSourceChatId: String?
     @State private var crossChatNotificationFocusedReplySourceChatId: String?
@@ -520,6 +645,10 @@ struct ChatView: View {
         )
     }
 
+    private var currentHardwareKeyboardAvailability: Bool {
+        HardwareKeyboardAvailability.current
+    }
+
     private var fontScaleChangeSequence: Int {
         settings.fontScaleChangeSequence
     }
@@ -543,6 +672,11 @@ struct ChatView: View {
         var unreadCount: Int = 0
         var firstUnreadMessageId: String?
         var bounceToken: Int = 0
+    }
+
+    private struct PendingHarnessChange: Equatable {
+        let sessionKey: String
+        let harness: String
     }
 
     private enum ScrollButtonHorizontalDetent: String, CaseIterable {
@@ -610,10 +744,7 @@ struct ChatView: View {
 #endif
 
     private func currentMentionPickerQuery() -> String? {
-        CrossChatMentionPickerLogic.query(
-            inputText: viewModel.inputContent.string,
-            resolvedMention: resolvedCrossChatMention
-        )
+        resolvedCrossChatMention == nil ? viewModel.inputMentionQuery : nil
     }
 
     private func resolveCrossChatMention(_ stream: StreamSession) {
@@ -1051,9 +1182,8 @@ struct ChatView: View {
             )
             viewModel.onDisappear(origin: "ChatView.onDisappear[\(chatViewTraceId)] scene=\(String(describing: scenePhase))")
             resetScrollButtonInteractionState()
-            closeStreamPopup(restoreComposerFocusIfNeeded: false)
-            streamPopupComposerFocusTask?.cancel()
-            streamPopupComposerFocusTask = nil
+            closeStreamPopup(reason: .programmaticClear)
+            streamPopupFocusCoordinator.cancelPendingComposerRestore()
 #if DEBUG
             lifecycleDebugOverlayDismissTask?.cancel()
             lifecycleDebugOverlayDismissTask = nil
@@ -1139,6 +1269,35 @@ struct ChatView: View {
                 viewModel.logout()
             }
             Button("Cancel", role: .cancel) {}
+        }
+        // Same gate rule as the creation sheet: a pending harness confirmation
+        // must not survive the Tightbeam gate closing and drive set_harness
+        // against an ungated server.
+        .onChange(of: viewModel.isTightbeamServer) { _, isTightbeam in
+            if !isTightbeam { pendingHarnessChange = nil }
+        }
+        .confirmationDialog(
+            "Switching harnesses will clear this chat.",
+            isPresented: Binding(
+                get: { pendingHarnessChange != nil },
+                set: { presented in if !presented { pendingHarnessChange = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingHarnessChange
+        ) { change in
+            Button("Switch to \(change.harness)", role: .destructive) {
+                if viewModel.canApplyTightbeamSessionControl(.setHarness) {
+                    viewModel.applySessionControl(
+                        sessionKey: change.sessionKey,
+                        action: .setHarness,
+                        value: change.harness
+                    )
+                }
+                pendingHarnessChange = nil
+            }
+            Button("Cancel", role: .cancel) { pendingHarnessChange = nil }
+        } message: { _ in
+            Text("The new engine starts with fresh model context — engines can't read each other's memory.")
         }
         .photosPicker(
             isPresented: $isPhotosPickerPresented,
@@ -1316,10 +1475,7 @@ struct ChatView: View {
 #else
         let promptFocusShortcutHasTargetOwnership = true
 #endif
-        let mentionQuery = CrossChatMentionPickerLogic.query(
-            inputText: viewModel.inputContent.string,
-            resolvedMention: resolvedCrossChatMention
-        )
+        let mentionQuery = currentMentionPickerQuery()
         let mentionCurrentSessionKey = viewModel.uiSelectedSessionKey.isEmpty
             ? viewModel.engineActiveSessionKey
             : viewModel.uiSelectedSessionKey
@@ -1380,28 +1536,10 @@ struct ChatView: View {
             resolvedContainerWidth: notificationOverlayMaxWidth
         )
 #endif
-        let keyboardVisibleNotificationBubbles = CrossChatNotificationOverlay.visibleBubbles(
-            maxContainerHeight: notificationOverlayMaxHeight,
-            bubbles: viewModel.crossChatNotificationBubbles,
-            replyPinSlotsBySourceChatId: crossChatNotificationReplyPinSlotsBySourceChatId,
-            measuredHeightsBySourceChatId: crossChatNotificationMeasuredHeightsBySourceChatId
-        )
-        let keyboardVisibleNotificationSourceChatIds = keyboardVisibleNotificationBubbles.map(\.sourceChatId)
-        let keyboardVisibleReplySourceChatIds = keyboardVisibleNotificationBubbles
-            .filter(\.isReplying)
-            .map(\.sourceChatId)
-        let notificationShortcutVisibleCount = keyboardVisibleNotificationSourceChatIds.count
-        let transcriptTrailingNotificationClearance: CGFloat = {
-#if os(iOS) && !targetEnvironment(macCatalyst)
-            return CrossChatNotificationGeometry.transcriptTrailingClearance(
-                isCompactLandscape: isCompactLandscape,
-                isNotificationDocked: isCrossChatNotificationStackDocked,
-                visibleNotificationCount: notificationShortcutVisibleCount
-            )
-#else
-            return 0
-#endif
-        }()
+        let keyboardVisibleNotificationSourceChatIds = crossChatNotificationObservation.visibleSourceChatIds
+        let keyboardVisibleReplySourceChatIds = crossChatNotificationObservation.visibleReplySourceChatIds
+        let notificationShortcutVisibleCount = crossChatNotificationObservation.visibleCount
+        let transcriptTrailingNotificationClearance = crossChatNotificationObservation.transcriptTrailingClearance
         let keyboardOwnershipStore = KeyboardOwnershipSceneFactory.chatScene(
             visibleNotificationSourceChatIds: keyboardVisibleNotificationSourceChatIds,
             visibleChatSelectorSessionKeys: streamSelectorShortcutSessionKeys,
@@ -1471,6 +1609,21 @@ struct ChatView: View {
                 )
                 .offset(x: notificationOverlayHorizontalCorrection)
             }
+            .background {
+                CrossChatNotificationObservationHost(
+                    viewModel: viewModel,
+                    maxContainerHeight: notificationOverlayMaxHeight,
+                    replyPinSlotsBySourceChatId: crossChatNotificationReplyPinSlotsBySourceChatId,
+                    measuredHeightsBySourceChatId: crossChatNotificationMeasuredHeightsBySourceChatId,
+                    isCompactLandscape: isCompactLandscape,
+                    isNotificationDocked: isCrossChatNotificationStackDocked,
+                    onObservationChange: { observation in
+                        if crossChatNotificationObservation != observation {
+                            crossChatNotificationObservation = observation
+                        }
+                    }
+                )
+            }
             .overlay(alignment: .topTrailing) {
                 if isCrossChatNotificationStackDocked && notificationShortcutVisibleCount > 0 {
                     NotificationDockedHitTargetView(
@@ -1496,9 +1649,7 @@ struct ChatView: View {
             }
             .overlay(alignment: .topTrailing) {
                 notificationKeyboardShortcutView(
-                    viewModel: viewModel,
-                    maxContainerHeight: notificationOverlayMaxHeight,
-                    measuredHeightsBySourceChatId: crossChatNotificationMeasuredHeightsBySourceChatId,
+                    visibleSourceStates: crossChatNotificationObservation.visibleSourceStates,
                     keyboardOwnershipStore: keyboardOwnershipStore,
                     selectedSessionKey: viewModel.uiSelectedSessionKey,
                     streamPopupRoute: streamPopupRouteController.route
@@ -1543,10 +1694,7 @@ struct ChatView: View {
             )
         )
         let notificationCommand = crossChatNotificationCommand(
-            viewModel: viewModel,
-            maxContainerHeight: notificationOverlayMaxHeight,
-            replyPinSlotsBySourceChatId: crossChatNotificationReplyPinSlotsBySourceChatId,
-            measuredHeightsBySourceChatId: crossChatNotificationMeasuredHeightsBySourceChatId,
+            visibleSourceChatIds: crossChatNotificationObservation.visibleSourceChatIds,
             keyboardOwnershipStore: keyboardOwnershipStore
         )
         let showOnlyUserMessagesCommand = ShowOnlyUserMessagesCommand(
@@ -1637,7 +1785,9 @@ struct ChatView: View {
         }
         .onChange(of: keyboardHeight) { _, height in
             layoutRevision &+= 1
-            reconcileStreamPopupKeyboardVisibility(isVisible: currentSoftwareKeyboardVisibility)
+            streamPopupFocusCoordinator.reconcileKeyboardVisibilityDuringPresentation(
+                isVisible: currentSoftwareKeyboardVisibility
+            )
         }
         .onChange(of: keyboardAnimationDuration) { _, _ in layoutRevision &+= 1 }
         .onChange(of: keyboardAnimationCurve) { _, _ in layoutRevision &+= 1 }
@@ -1651,6 +1801,9 @@ struct ChatView: View {
         }
 
         .onChange(of: keyboardGeometryRefreshKey) { _, _ in
+            logger.debug(
+                "T1377_PROFILE global_refresh raw_notification_count=\(viewModel.crossChatNotificationBubbles.count) presentation_visible_count=\(crossChatNotificationObservation.visibleCount)"
+            )
             layoutRevision &+= 1
             keyboardRefreshToken &+= 1
         }
@@ -2116,32 +2269,22 @@ struct ChatView: View {
     }
 
     private func crossChatNotificationCommand(
-        viewModel: ChatViewModel,
-        maxContainerHeight: CGFloat,
-        replyPinSlotsBySourceChatId: [String: Int],
-        measuredHeightsBySourceChatId: [String: CGFloat],
+        visibleSourceChatIds: [String],
         keyboardOwnershipStore: KeyboardOwnershipStore
     ) -> CrossChatNotificationCommand? {
-        let allBubbles = viewModel.crossChatNotificationBubbles
-        let bubbles = CrossChatNotificationOverlay.visibleBubbles(
-            maxContainerHeight: maxContainerHeight,
-            bubbles: allBubbles,
-            replyPinSlotsBySourceChatId: replyPinSlotsBySourceChatId,
-            measuredHeightsBySourceChatId: measuredHeightsBySourceChatId
-        )
         let selectorShortcutSlots = Set(keyboardOwnershipStore.chatSelectorShortcutMap.keys)
         let hasActiveChatSelectorShortcuts = !selectorShortcutSlots.isEmpty
         guard CrossChatNotificationCommandAvailability.shouldInstallCommand(
-            visibleNotificationCount: bubbles.count,
+            visibleNotificationCount: visibleSourceChatIds.count,
             selectorShortcutSlots: selectorShortcutSlots
         ) else { return nil }
         return CrossChatNotificationCommand(
-            hasVisibleNotifications: !bubbles.isEmpty,
-            visibleCount: bubbles.count,
+            hasVisibleNotifications: !visibleSourceChatIds.isEmpty,
+            visibleCount: visibleSourceChatIds.count,
             hasActiveChatSelectorShortcuts: hasActiveChatSelectorShortcuts,
             keyboardOwnershipStore: keyboardOwnershipStore,
             openActionMenu: { index in
-                guard bubbles.indices.contains(index),
+                guard visibleSourceChatIds.indices.contains(index),
                       case .handled(.notificationBubble(_)) = KeyboardCommandRouter
                         .route(intent: .notificationAssignedOpen(index), store: keyboardOwnershipStore)
                         .outcome else { return }
@@ -2151,7 +2294,7 @@ struct ChatView: View {
                 )
             },
             dismiss: { index in
-                guard bubbles.indices.contains(index),
+                guard visibleSourceChatIds.indices.contains(index),
                       case .handled(.notificationBubble(_)) = KeyboardCommandRouter
                         .route(intent: .notificationAssignedDismiss(index), store: keyboardOwnershipStore)
                         .outcome else { return }
@@ -2161,7 +2304,7 @@ struct ChatView: View {
                 )
             },
             reply: { index in
-                guard bubbles.indices.contains(index),
+                guard visibleSourceChatIds.indices.contains(index),
                       case .handled(.notificationBubble(_)) = KeyboardCommandRouter
                         .route(intent: .notificationAssignedReply(index), store: keyboardOwnershipStore)
                         .outcome else { return }
@@ -2195,10 +2338,9 @@ struct ChatView: View {
         keyboardOwnershipStore: KeyboardOwnershipStore
     ) {
         grantSpatialPromptFocusShortcutTargetLease()
-        if case .handled(.chatSelectorRow(let sessionKey)) = KeyboardCommandRouter
-            .route(intent: intent, store: keyboardOwnershipStore)
-            .outcome {
-            closeStreamPopup()
+        let route = KeyboardCommandRouter.route(intent: intent, store: keyboardOwnershipStore)
+        if case .handled(.chatSelectorRow(let sessionKey)) = route.outcome {
+            closeStreamPopup(reason: .rowSelection)
             selectStream(sessionKey, source: .programmatic)
             return
         }
@@ -2212,19 +2354,14 @@ struct ChatView: View {
     }
 
     private func notificationKeyboardShortcutView(
-        viewModel: ChatViewModel,
-        maxContainerHeight: CGFloat,
-        measuredHeightsBySourceChatId: [String: CGFloat],
+        visibleSourceStates: [CrossChatNotificationObservation.SourceState],
         keyboardOwnershipStore: KeyboardOwnershipStore,
         selectedSessionKey: String,
         streamPopupRoute: StreamPopupRoute
     ) -> AnyView {
         AnyView(
             CrossChatNotificationKeyboardShortcuts(
-                bubbles: viewModel.crossChatNotificationBubbles,
-                maxContainerHeight: maxContainerHeight,
-                replyPinSlotsBySourceChatId: crossChatNotificationReplyPinSlotsBySourceChatId,
-                measuredHeightsBySourceChatId: measuredHeightsBySourceChatId,
+                visibleSourceStates: visibleSourceStates,
                 keyboardOwnershipStore: keyboardOwnershipStore,
                 selectedSessionKey: selectedSessionKey,
                 streamPopupRoute: streamPopupRoute,
@@ -2416,7 +2553,7 @@ struct ChatView: View {
                 onCancel: { viewModel.cancelSend() },
                 onReconnect: { viewModel.reconnect() },
                 onAdd: {
-                    isAttachmentMenuPresented = true
+                    presentAttachmentMenu()
                 },
                 attachmentMenuContent: {
                     AnyView(
@@ -2445,8 +2582,19 @@ struct ChatView: View {
                     scheduleInputFocusChange(focused)
                 },
                 onRequestFocus: {
-                    if StreamPopupFocusHandoff.shouldClosePopupForComposerFocusRequest(isStreamPopupPresented: streamPopupRouteController.isPopupPresented) {
-                        closeStreamPopup(preserveComposerFocusDuringDismissal: true)
+                    // R1136-ARCH-02: break the reentrant close path. If the popup is
+                    // already dismissing for the current presentation, do not re-enter
+                    // closeStreamPopup; just grant composer focus. If the popup is
+                    // presented and not yet dismissing, begin dismissal now (this is
+                    // the original composer-focus-request-closes-popup behavior).
+                    if streamPopupFocusCoordinator.isDismissalInProgress {
+                        grantSpatialPromptFocusShortcutTargetLease()
+                        focusRequestID &+= 1
+                    } else if streamPopupRouteController.isPopupPresented {
+                        closeStreamPopup(
+                            reason: .unspecified,
+                            preserveComposerFocusDuringDismissal: true
+                        )
                     } else {
                         grantSpatialPromptFocusShortcutTargetLease()
                         focusRequestID &+= 1
@@ -2671,7 +2819,9 @@ struct ChatView: View {
             layoutCoordinator: layoutCoordinator,
             sessionKey: sessionKey,
             sessionStatus: viewModel.sessionStatus(for: sessionKey),
+            sessionStatusUnavailable: viewModel.isSessionStatusUnavailable(for: sessionKey),
             streamSearchQuery: streamSearchQueryBySessionKey[sessionKey] ?? "",
+            messageProjectionPublicationSequence: viewModel.messageProjectionPublicationSequence,
             forceReReadGeneration: viewModel.forceReReadGeneration(for: sessionKey),
             sendIndicatorRevision: viewModel.sendIndicatorRevision,
             fontScaleChangeSequence: fontScaleChangeSequence,
@@ -2687,6 +2837,11 @@ struct ChatView: View {
                 }
             },
             onSessionControlSelected: { sessionKey, action, value, enabled in
+                if action == .setHarness {
+                    // Confirm before switching engines — the swap clears the chat.
+                    requestHarnessChange(sessionKey: sessionKey, harness: value)
+                    return
+                }
                 viewModel.applySessionControl(
                     sessionKey: sessionKey,
                     action: action,
@@ -2860,6 +3015,8 @@ struct ChatView: View {
                 shouldRegisterWithLayoutCoordinator: false,
                 sessionKey: sessionKey,
                 sessionStatus: viewModel.sessionStatus(for: sessionKey),
+                sessionStatusUnavailable: viewModel.isSessionStatusUnavailable(for: sessionKey),
+                messageProjectionPublicationSequence: viewModel.messageProjectionPublicationSequence,
                 forceReReadGeneration: viewModel.forceReReadGeneration(for: sessionKey),
                 sendIndicatorRevision: viewModel.sendIndicatorRevision,
                 fontScaleChangeSequence: fontScaleChangeSequence,
@@ -2941,6 +3098,8 @@ struct ChatView: View {
             maxWidth: pageDotsMaxWidth,
             maxAvailableHeight: streamSelectorMaxHeight,
             maxAvailableWidth: containerWidth,
+            presentationID: streamPopupFocusCoordinator.presentationID,
+            isShortcutOwnershipActive: streamPopupFocusCoordinator.isShortcutOwnershipActive,
             onSelectStream: { sessionKey in
                 selectStream(sessionKey, source: .programmatic)
             },
@@ -2954,13 +3113,18 @@ struct ChatView: View {
                 streamToastManager.hide()
             },
             onOpenPopup: {
+                // R1136-ARCH-03: a dismissal that just ended for the prior
+                // presentation suppresses reopen for one leaked anchor tap.
+                if streamPopupFocusCoordinator.consumeReopenSuppressionIfActive() {
+                    return
+                }
                 openStreamPopupForCurrentKeyboardState()
             },
             onClosePopup: {
-                closeStreamPopup()
+                closeStreamPopup(reason: .outsideTap)
             },
             onClosePopupFromDotsIndicator: {
-                closeStreamPopup(preserveComposerFocusDuringDismissal: true)
+                closeStreamPopup(reason: .dotsToggleClose, preserveComposerFocusDuringDismissal: true)
             },
             onTrackPickerDismiss: {
                 restoreFocusIfNeeded()
@@ -2968,6 +3132,15 @@ struct ChatView: View {
             onRequestTrackPicker: presentTrackPickerFromStreamPopup,
             onShortcutOwnershipChange: { sessionKeys in
                 streamSelectorShortcutSessionKeys = sessionKeys
+            },
+            onSearchFocusApplied: { presentationID in
+                streamPopupFocusCoordinator.acknowledgeSearchFocusApplied(presentationID: presentationID)
+            },
+            onSearchFocusResigned: { presentationID in
+                streamPopupFocusCoordinator.acknowledgeSearchFocusResigned(presentationID: presentationID)
+            },
+            onPopupPresentationEnded: { presentationID in
+                streamPopupFocusCoordinator.clearActivePresentation(presentationID: presentationID)
             }
         )
     }
@@ -3004,7 +3177,7 @@ struct ChatView: View {
         if CrossChatNotificationNavigationDockPolicy.shouldDock(
             origin: .notificationNavigation,
             isSwitchingChats: viewModel.uiSelectedSessionKey != sourceChatId,
-            hasNotifications: !viewModel.crossChatNotificationBubbles.isEmpty
+            hasNotifications: crossChatNotificationObservation.visibleCount > 0
         ) {
             isCrossChatNotificationStackDocked = true
         }
@@ -3126,6 +3299,14 @@ struct ChatView: View {
         typingActivityResetTask?.cancel()
         typingActivityResetTask = nil
         isTypingActive = false
+    }
+
+    private func requestHarnessChange(sessionKey: String, harness: String?) {
+        guard let harness, !harness.isEmpty else { return }
+        // Selecting the current harness is a no-op; only a real change confirms.
+        let current = viewModel.sessionStatus(for: sessionKey)?.display.harness
+        guard harness != current else { return }
+        pendingHarnessChange = PendingHarnessChange(sessionKey: sessionKey, harness: harness)
     }
 
     private func presentCancelCurrentPromptDialog(sessionKey: String? = nil, anchorFrame: CGRect? = nil) {
@@ -3267,11 +3448,11 @@ struct ChatView: View {
 
     @MainActor
     private func openStreamPopupForCurrentKeyboardState() {
-        openStreamPopup(
-            focusSearch: StreamPopupFocusHandoff.shouldFocusSearchOnOpen(
-                isSoftwareKeyboardVisible: isKeyboardVisible
-            )
+        let focusTarget = StreamPopupFocusPolicy.focusTargetOnOpen(
+            isSoftwareKeyboardVisible: isKeyboardVisible,
+            isHardwareKeyboardAvailable: currentHardwareKeyboardAvailability
         )
+        openStreamPopup(focusTarget: focusTarget)
     }
 
     @MainActor
@@ -3280,99 +3461,132 @@ struct ChatView: View {
     }
 
     @MainActor
-    private func openStreamPopup(focusSearch: Bool) {
-        shouldRestoreFocusAfterStreamPopup = isKeyboardVisible && isInputFocused
-        streamPopupKeyboardDismissalTask?.cancel()
-        streamPopupKeyboardDismissalTask = nil
-        streamPopupComposerFocusTask?.cancel()
-        streamPopupComposerFocusTask = nil
+    private func openStreamPopup(focusTarget: StreamPopupFocusPolicy.OpenFocusTarget) {
+        // R1136-ARCH-04 / R1136-ARCH-05: one coordinator owns the presentation
+        // identity and the displaced-composer-focus flag for the whole
+        // transaction. The flag is captured at open time and may be cleared by
+        // the coordinator if the software keyboard is dismissed during display.
+        let displacedComposerFocus = isKeyboardVisible && isInputFocused
+        streamPopupFocusCoordinator.beginPresentation(
+            focusTarget: focusTarget,
+            displacedComposerFocus: displacedComposerFocus
+        )
+        let focusSearch = focusTarget == .searchField
+        streamPopupClosingSuppressionTask?.cancel()
+        streamPopupClosingSuppressionTask = nil
         streamPopupRouteController.openPopup(focusSearch: focusSearch)
+        streamPopupFocusCoordinator.reconcileKeyboardVisibilityDuringPresentation(
+            isVisible: currentSoftwareKeyboardVisibility
+        )
     }
 
     @MainActor
     private func closeStreamPopup(
-        restoreComposerFocusIfNeeded: Bool = true,
+        reason: StreamPopupFocusCoordinator.DismissalReason = .unspecified,
         preserveComposerFocusDuringDismissal: Bool = false
     ) {
-        let shouldRestoreComposer = restoreComposerFocusIfNeeded
-            && StreamPopupFocusHandoff.shouldRestoreComposerOnCloseAfterTrackedKeyboardState(
-                didDisplaceComposerFocus: shouldRestoreFocusAfterStreamPopup,
-                isSoftwareKeyboardVisible: isKeyboardVisible
-            )
-        shouldRestoreFocusAfterStreamPopup = false
-        streamPopupKeyboardDismissalTask?.cancel()
-        streamPopupKeyboardDismissalTask = nil
+        // R1136-ARCH-05: dismissal is keyed by presentation identity. The
+        // coordinator treats dismissal as terminal per presentation, so a
+        // second closeStreamPopup call for the same presentation (e.g., from
+        // the reentrant composer-focus path) is a no-op.
+        guard streamPopupFocusCoordinator.recordDismissal(reason: reason) != nil else {
+            return
+        }
+        guard let dismissed = streamPopupFocusCoordinator.lastDismissedTransaction else {
+            streamPopupRouteController.closePopup()
+            return
+        }
+        let shouldRestoreComposer = StreamPopupFocusCoordinator.shouldRestoreComposer(for: dismissed)
+        let closingPresentationID = streamPopupRouteController.currentPopupPresentationID
 
-        for action in StreamPopupFocusHandoff.closeActions(
-            shouldRestoreComposerFocus: shouldRestoreComposer,
-            preserveComposerFocusDuringDismissal: preserveComposerFocusDuringDismissal
-        ) {
-            switch action {
-            case .requestComposerFocusBeforeDismissal:
+        if shouldRestoreComposer {
+            if preserveComposerFocusDuringDismissal {
+                // R1136-ARCH-02: requesting composer focus BEFORE SwiftUI tears
+                // down the popover keeps the keyboard up through the dismissal
+                // animation, so iPhone dismissal does not bounce the keyboard.
+                // The reentrant re-close path is blocked by the coordinator's
+                // isDismissalInProgress check in MessageInputBar.onRequestFocus.
+                grantSpatialPromptFocusShortcutTargetLease()
                 focusRequestID &+= 1
-            case .closePopup:
                 streamPopupRouteController.closePopup()
-            case .requestComposerFocusAfterDismissal:
-                requestComposerFocusAfterStreamPopupDismissal()
+            } else {
+                streamPopupRouteController.closePopup()
+                requestComposerFocusAfterStreamPopupDismissal(
+                    forDismissedPresentationID: dismissed.presentationID
+                )
             }
+        } else {
+            streamPopupRouteController.closePopup()
+        }
+        if let closingPresentationID {
+            suppressStreamPopupReopenFromClosingTap(presentationID: closingPresentationID)
         }
     }
 
     @MainActor
     private func presentTrackPickerFromStreamPopup() {
-        shouldRestoreFocusAfterStreamPopup = false
-        streamPopupKeyboardDismissalTask?.cancel()
-        streamPopupKeyboardDismissalTask = nil
-        streamPopupComposerFocusTask?.cancel()
-        streamPopupComposerFocusTask = nil
+        // Track-picker handoff is a route transition, not a row-selection
+        // dismissal; composer focus must not be restored from this path.
+        streamPopupFocusCoordinator.recordDismissal(reason: .trackPickerHandoff)
+        streamPopupFocusCoordinator.cancelPendingComposerRestore()
+        streamPopupClosingSuppressionTask?.cancel()
+        streamPopupClosingSuppressionTask = nil
         prepareForAttachmentPicker()
         streamPopupRouteController.presentTrackPicker()
     }
 
     @MainActor
-    private func requestComposerFocusAfterStreamPopupDismissal() {
-        streamPopupComposerFocusTask?.cancel()
-        streamPopupComposerFocusTask = Task { @MainActor in
-            await Task.yield()
-            do {
-                try await Task.sleep(for: .milliseconds(75))
-            } catch is CancellationError {
-                return
-            } catch {
-                return
-            }
-            guard streamPopupRouteController.route == .closed else { return }
+    private func requestComposerFocusAfterStreamPopupDismissal(
+        forDismissedPresentationID presentationID: UInt
+    ) {
+        // R1136-ARCH-02 / R1136-ARCH-05: delayed composer restore is owned by
+        // the coordinator and keyed by the dismissed presentation ID. A stale
+        // task from presentation N cannot mutate presentation N+1.
+        streamPopupFocusCoordinator.scheduleComposerFocusRestore(
+            forDismissedPresentationID: presentationID,
+            delay: .milliseconds(75)
+        ) { [self] in
+            grantSpatialPromptFocusShortcutTargetLease()
             focusRequestID &+= 1
-            streamPopupComposerFocusTask = nil
         }
     }
 
     @MainActor
-    private func reconcileStreamPopupKeyboardVisibility(isVisible: Bool) {
-        guard shouldRestoreFocusAfterStreamPopup,
-              streamPopupRouteController.isPopupPresented else {
-            streamPopupKeyboardDismissalTask?.cancel()
-            streamPopupKeyboardDismissalTask = nil
-            return
+    private func presentAttachmentMenu() {
+        attachmentMenuPresentationTask?.cancel()
+        attachmentMenuPresentationTask = nil
+        if streamPopupRouteController.isPopupPresented {
+            closeStreamPopup(reason: .programmaticClear)
         }
-        if isVisible {
-            streamPopupKeyboardDismissalTask?.cancel()
-            streamPopupKeyboardDismissalTask = nil
-            return
+
+        switch AttachmentMenuPresentationPolicy.action(isCurrentlyPresented: isAttachmentMenuPresented) {
+        case .present:
+            isAttachmentMenuPresented = true
+        case .resetThenPresent:
+            isAttachmentMenuPresented = false
+            attachmentMenuPresentationTask = Task { @MainActor in
+                await Task.yield()
+                guard !Task.isCancelled else { return }
+                isAttachmentMenuPresented = true
+                attachmentMenuPresentationTask = nil
+            }
         }
-        streamPopupKeyboardDismissalTask?.cancel()
-        streamPopupKeyboardDismissalTask = Task { @MainActor in
+    }
+
+    @MainActor
+    private func suppressStreamPopupReopenFromClosingTap(presentationID: Int?) {
+        streamPopupClosingSuppressionTask?.cancel()
+        streamPopupClosingSuppressionTask = Task { @MainActor in
+            await Task.yield()
             do {
-                try await Task.sleep(for: .milliseconds(180))
+                try await Task.sleep(for: .milliseconds(220))
             } catch is CancellationError {
                 return
             } catch {
                 return
             }
-            guard streamPopupRouteController.isPopupPresented,
-                  !isKeyboardVisible else { return }
-            shouldRestoreFocusAfterStreamPopup = false
-            streamPopupKeyboardDismissalTask = nil
+            streamPopupRouteController.finishClosingSuppression(for: presentationID)
+            streamPopupClosingSuppressionTask = nil
         }
     }
 
@@ -3680,6 +3894,11 @@ private struct StreamPopupTrigger: View {
     let maxWidth: CGFloat?
     let maxAvailableHeight: CGFloat
     let maxAvailableWidth: CGFloat
+    /// R1136-ARCH-05: active popup presentation identity, forwarded to the
+    /// sheet so child focus reports carry the same identity.
+    let presentationID: UInt
+    /// R1136-ARCH-06 / E6: parent permit for the hidden shortcut bridge.
+    let isShortcutOwnershipActive: Bool
     let onSelectStream: (String) -> Void
     let onPreviewScrubStream: (String) -> Void
     let onCommitScrubStream: (String) -> Void
@@ -3690,6 +3909,11 @@ private struct StreamPopupTrigger: View {
     let onTrackPickerDismiss: () -> Void
     let onRequestTrackPicker: () -> Void
     let onShortcutOwnershipChange: ([String]) -> Void
+    /// R1136-ARCH-06: child focus reporting channel.
+    let onSearchFocusApplied: (UInt) -> Void
+    let onSearchFocusResigned: (UInt) -> Void
+    /// R1136-ARCH-05: popup teardown reports the finished presentation ID.
+    let onPopupPresentationEnded: (UInt) -> Void
 
     var body: some View {
         StreamPageDotsView(
@@ -3700,8 +3924,12 @@ private struct StreamPopupTrigger: View {
             onTap: {
                 if routeController.isPopupPresented {
                     onClosePopupFromDotsIndicator()
-                } else {
+                } else if StreamPopupFocusHandoff.shouldOpenFromDotsTap(
+                    isSuppressingReopenFromClosingPresentation: routeController.isSuppressingReopenFromClosingPresentation
+                ) {
                     onOpenPopup()
+                } else {
+                    routeController.clearClosingSuppression()
                 }
             },
             onScrubPreview: onPreviewScrubStream,
@@ -3733,6 +3961,8 @@ private struct StreamPopupTrigger: View {
                 searchFocusRequestID: routeController.popupSearchFocusRequestID,
                 maxAvailableHeight: maxAvailableHeight,
                 maxAvailableWidth: maxAvailableWidth,
+                presentationID: presentationID,
+                isShortcutOwnershipActive: isShortcutOwnershipActive,
                 onSelectStream: { sessionKey in
                     onClosePopup()
                     onSelectStream(sessionKey)
@@ -3743,7 +3973,10 @@ private struct StreamPopupTrigger: View {
                 onConsumeSearchFocusRequest: {
                     routeController.consumeSearchFocusRequest()
                 },
-                onShortcutOwnershipChange: onShortcutOwnershipChange
+                onShortcutOwnershipChange: onShortcutOwnershipChange,
+                onSearchFocusApplied: onSearchFocusApplied,
+                onSearchFocusResigned: onSearchFocusResigned,
+                onPresentationEnded: onPopupPresentationEnded
             )
             .presentationCompactAdaptation(.popover)
             .streamManagerPopoverBackgroundInteraction()
@@ -4307,21 +4540,56 @@ private struct CancelCurrentPromptBubbleShape: Shape {
         )
         let tailLeftX = rect.minX + clampedTailCenterX - tailWidth / 2
         let tailRightX = rect.minX + clampedTailCenterX + tailWidth / 2
+        let tailTip = CGPoint(
+            x: rect.minX + clampedTailCenterX,
+            y: tailEdge == .top ? rect.minY : rect.maxY
+        )
 
-        var path = Path(roundedRect: bodyRect, cornerRadius: radius, style: .continuous)
-        var tail = Path()
-        switch tailEdge {
-        case .top:
-            tail.move(to: CGPoint(x: tailLeftX, y: bodyRect.minY + 1))
-            tail.addLine(to: CGPoint(x: rect.minX + clampedTailCenterX, y: rect.minY))
-            tail.addLine(to: CGPoint(x: tailRightX, y: bodyRect.minY + 1))
-        case .bottom:
-            tail.move(to: CGPoint(x: tailLeftX, y: bodyRect.maxY - 1))
-            tail.addLine(to: CGPoint(x: rect.minX + clampedTailCenterX, y: rect.maxY))
-            tail.addLine(to: CGPoint(x: tailRightX, y: bodyRect.maxY - 1))
+        var path = Path()
+        path.move(to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.minY))
+        if tailEdge == .top {
+            path.addLine(to: CGPoint(x: tailLeftX, y: bodyRect.minY))
+            path.addLine(to: tailTip)
+            path.addLine(to: CGPoint(x: tailRightX, y: bodyRect.minY))
         }
-        tail.closeSubpath()
-        path.addPath(tail)
+        path.addLine(to: CGPoint(x: bodyRect.maxX - radius, y: bodyRect.minY))
+        path.addArc(
+            center: CGPoint(x: bodyRect.maxX - radius, y: bodyRect.minY + radius),
+            radius: radius,
+            startAngle: .degrees(-90),
+            endAngle: .degrees(0),
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: bodyRect.maxX, y: bodyRect.maxY - radius))
+        path.addArc(
+            center: CGPoint(x: bodyRect.maxX - radius, y: bodyRect.maxY - radius),
+            radius: radius,
+            startAngle: .degrees(0),
+            endAngle: .degrees(90),
+            clockwise: false
+        )
+        if tailEdge == .bottom {
+            path.addLine(to: CGPoint(x: tailRightX, y: bodyRect.maxY))
+            path.addLine(to: tailTip)
+            path.addLine(to: CGPoint(x: tailLeftX, y: bodyRect.maxY))
+        }
+        path.addLine(to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.maxY))
+        path.addArc(
+            center: CGPoint(x: bodyRect.minX + radius, y: bodyRect.maxY - radius),
+            radius: radius,
+            startAngle: .degrees(90),
+            endAngle: .degrees(180),
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: bodyRect.minX, y: bodyRect.minY + radius))
+        path.addArc(
+            center: CGPoint(x: bodyRect.minX + radius, y: bodyRect.minY + radius),
+            radius: radius,
+            startAngle: .degrees(180),
+            endAngle: .degrees(270),
+            clockwise: false
+        )
+        path.closeSubpath()
         return path
     }
 }
@@ -4622,6 +4890,7 @@ enum ChatAppCommandShortcut {
         case scrollNotificationDown
         case scrollNotificationUp
         case notificationNumber
+        case notificationStack
 
         var selector: Selector {
             switch self {
@@ -4649,6 +4918,8 @@ enum ChatAppCommandShortcut {
                 return #selector(UIResponder.clawlineScrollNotificationUpCommand(_:))
             case .notificationNumber:
                 return #selector(UIResponder.clawlineNotificationNumberCommand(_:))
+            case .notificationStack:
+                return #selector(UIResponder.clawlineNotificationStackCommand(_:))
             }
         }
     }
@@ -4691,7 +4962,9 @@ enum ChatAppCommandShortcut {
     }
 
     static func notificationScrollKeyCommandSpecs(notificationVisibleCount: Int) -> [KeyCommandSpec] {
-        convert(KeyboardCommandBridge.notificationScrollSpecs)
+        convert(KeyboardCommandBridge.notificationScrollSpecs.filter {
+            $0.intent == .notificationScrollForward || $0.intent == .notificationScrollBackward
+        })
     }
 
     static func prioritizedTextInputKeyCommandSpecs(notificationVisibleCount: Int) -> [KeyCommandSpec] {
@@ -4741,6 +5014,8 @@ enum ChatAppCommandShortcut {
              .notificationAssignedReply,
              .notificationAssignedDismiss:
             return .notificationNumber
+        case .notificationDismissAll, .notificationToggleDock:
+            return .notificationStack
         default:
             return nil
         }
@@ -4869,6 +5144,14 @@ extension UIResponder {
     }
 
     @objc func clawlineNotificationNumberCommand(_ sender: UIKeyCommand) {
+        guard let intent = KeyboardCommandBridge.intent(
+            input: sender.input,
+            modifierFlags: sender.modifierFlags
+        ) else { return }
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: intent)
+    }
+
+    @objc func clawlineNotificationStackCommand(_ sender: UIKeyCommand) {
         guard let intent = KeyboardCommandBridge.intent(
             input: sender.input,
             modifierFlags: sender.modifierFlags
@@ -5231,8 +5514,9 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
         uiView.updatePageDots(pageDotsView, gap: pageDotsGap)
         // Seed the pinned gap immediately on every SwiftUI update so launch layout matches the
         // steady-state hidden-keyboard position even before coordinator-driven transitions fire.
+        // Constraint changes must leave this SwiftUI update before UIKit performs layout.
         if uiView.updateDesiredBottomGapIfNeeded(desiredBottomGap, isKeyboardVisible: isKeyboardVisible) {
-            uiView.layoutIfNeeded()
+            uiView.setNeedsLayout()
         }
         uiView.setOnBarHeightChange { [weak layoutCoordinator] height in
             // Break potential SwiftUI layout cycles by only propagating meaningful bar height changes.
@@ -5292,6 +5576,12 @@ enum KeyboardPinnedChromeEventRouting {
     }
 }
 
+enum KeyboardPinnedChromeLayoutDisposition: Equatable {
+    case unchanged
+    case deferred
+    case animated
+}
+
 final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedContainerViewProtocol {
     let hostingController: UIHostingController<Content>
     private var scrollButtonHost: UIHostingController<AnyView>?
@@ -5348,6 +5638,7 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
         onBarHeightChange = handler
     }
 
+    @discardableResult
     func updateScrollButton(
         _ view: AnyView?,
         isVisible: Bool,
@@ -5356,7 +5647,7 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
         maxHorizontalOffset: CGFloat,
         horizontalSettleStartOffset: CGFloat?,
         horizontalAnimationToken: Int
-    ) {
+    ) -> KeyboardPinnedChromeLayoutDisposition {
 #if os(visionOS)
         _ = view
         _ = isVisible
@@ -5365,12 +5656,13 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
         _ = maxHorizontalOffset
         _ = horizontalSettleStartOffset
         _ = horizontalAnimationToken
-        return
+        return .unchanged
 #else
         // Ensure the bar view is mounted so we can anchor the scroll button above it.
         ensureConstraints(desiredBottomGap: 0)
-        guard let hostingView = hostingController.view else { return }
+        guard let hostingView = hostingController.view else { return .unchanged }
 
+        var needsDeferredLayout = false
         if scrollButtonHost == nil {
             let host = UIHostingController(rootView: AnyView(EmptyView()))
             host.view.backgroundColor = .clear
@@ -5394,6 +5686,7 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
                 centerX,
                 bottom,
             ])
+            needsDeferredLayout = true
         }
 
         scrollButtonBaseHorizontalOffset = horizontalOffset
@@ -5408,19 +5701,31 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
             scrollButtonLiveTranslation = 0
             scrollButtonHost?.view.transform = .identity
         }
-        scrollButtonHost?.view.isHidden = KeyboardPinnedChromeEventRouting.scrollButtonHostIsHidden(
+        let scrollButtonIsHidden = KeyboardPinnedChromeEventRouting.scrollButtonHostIsHidden(
             hasView: view != nil,
             isVisible: isVisible
         )
-        scrollButtonHost?.view.isUserInteractionEnabled = scrollButtonReceivesEvents
-        scrollButtonPanGestureRecognizer?.isEnabled = scrollButtonReceivesEvents
-        scrollButtonBottomToBarTop?.constant = -gap
+        if scrollButtonHost?.view.isHidden != scrollButtonIsHidden {
+            scrollButtonHost?.view.isHidden = scrollButtonIsHidden
+        }
+        if scrollButtonHost?.view.isUserInteractionEnabled != scrollButtonReceivesEvents {
+            scrollButtonHost?.view.isUserInteractionEnabled = scrollButtonReceivesEvents
+        }
+        if scrollButtonPanGestureRecognizer?.isEnabled != scrollButtonReceivesEvents {
+            scrollButtonPanGestureRecognizer?.isEnabled = scrollButtonReceivesEvents
+        }
+        needsDeferredLayout = updateConstraint(scrollButtonBottomToBarTop, constant: -gap)
+            || needsDeferredLayout
         if scrollButtonIsPanning {
-            scrollButtonCenterX?.constant = horizontalOffset
+            needsDeferredLayout = updateConstraint(scrollButtonCenterX, constant: horizontalOffset)
+                || needsDeferredLayout
             if scrollButtonHost?.view.transform.tx != scrollButtonLiveTranslation {
                 scrollButtonHost?.view.transform = CGAffineTransform(translationX: scrollButtonLiveTranslation, y: 0)
             }
-            return
+            if needsDeferredLayout {
+                setNeedsLayout()
+            }
+            return needsDeferredLayout ? .deferred : .unchanged
         }
         let shouldAnimateOffset = horizontalAnimationToken != lastScrollButtonHorizontalAnimationToken
         lastScrollButtonHorizontalAnimationToken = horizontalAnimationToken
@@ -5428,11 +5733,11 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
         if shouldAnimateOffset {
             if let horizontalSettleStartOffset {
                 scrollButtonHost?.view.transform = .identity
-                scrollButtonCenterX?.constant = horizontalSettleStartOffset
+                _ = updateConstraint(scrollButtonCenterX, constant: horizontalSettleStartOffset)
                 // Force the spring to start from the drag-release position.
                 layoutIfNeeded()
             }
-            scrollButtonCenterX?.constant = horizontalOffset
+            _ = updateConstraint(scrollButtonCenterX, constant: horizontalOffset)
             UIView.animate(
                 withDuration: 0.46,
                 delay: 0,
@@ -5442,10 +5747,18 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
             ) {
                 self.layoutIfNeeded()
             }
+            return .animated
         } else {
-            scrollButtonHost?.view.transform = .identity
-            scrollButtonCenterX?.constant = horizontalOffset
-            layoutIfNeeded()
+            if scrollButtonHost?.view.transform != .identity {
+                scrollButtonHost?.view.transform = .identity
+            }
+            needsDeferredLayout = updateConstraint(scrollButtonCenterX, constant: horizontalOffset)
+                || needsDeferredLayout
+            // Repeated representable updates must not synchronously re-enter hosting layout.
+            if needsDeferredLayout {
+                setNeedsLayout()
+            }
+            return needsDeferredLayout ? .deferred : .unchanged
         }
 #endif
     }
@@ -5454,16 +5767,18 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
         onScrollButtonPanEnded = handler
     }
 
-    func updatePageDots(_ view: AnyView?, gap: CGFloat) {
+    @discardableResult
+    func updatePageDots(_ view: AnyView?, gap: CGFloat) -> KeyboardPinnedChromeLayoutDisposition {
 #if os(visionOS)
         _ = view
         _ = gap
-        return
+        return .unchanged
 #else
         // Mount above the input bar so dots track the same runtime anchor as the bar.
         ensureConstraints(desiredBottomGap: 0)
-        guard let hostingView = hostingController.view else { return }
+        guard let hostingView = hostingController.view else { return .unchanged }
 
+        var needsDeferredLayout = false
         if pageDotsHost == nil {
             let host = UIHostingController(rootView: AnyView(EmptyView()))
             host.view.backgroundColor = .clear
@@ -5485,22 +5800,37 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
                 host.view.centerXAnchor.constraint(equalTo: centerXAnchor),
                 bottom,
             ])
+            needsDeferredLayout = true
         }
 
         pageDotsHost?.rootView = view ?? AnyView(EmptyView())
-        pageDotsHost?.view.isHidden = (view == nil)
-        pageDotsHost?.view.isUserInteractionEnabled = (view != nil)
-        pageDotsBottomToBarTop?.constant = -gap
-        syncPageDotsHostLayout()
+        let pageDotsAreHidden = view == nil
+        let pageDotsReceiveEvents = !pageDotsAreHidden
+        if pageDotsHost?.view.isHidden != pageDotsAreHidden {
+            pageDotsHost?.view.isHidden = pageDotsAreHidden
+            needsDeferredLayout = true
+        }
+        if pageDotsHost?.view.isUserInteractionEnabled != pageDotsReceiveEvents {
+            pageDotsHost?.view.isUserInteractionEnabled = pageDotsReceiveEvents
+        }
+        needsDeferredLayout = updateConstraint(pageDotsBottomToBarTop, constant: -gap)
+            || needsDeferredLayout
+        // The hosting controller owns content-size invalidation. The wrapper only requests a
+        // deferred pass when its own visibility or anchor geometry changes.
+        if needsDeferredLayout {
+            pageDotsHost?.view.invalidateIntrinsicContentSize()
+            pageDotsHost?.view.setNeedsLayout()
+            setNeedsLayout()
+        }
+        return needsDeferredLayout ? .deferred : .unchanged
 #endif
     }
 
-    private func syncPageDotsHostLayout() {
-        guard let pageDotsView = pageDotsHost?.view else { return }
-        pageDotsView.invalidateIntrinsicContentSize()
-        pageDotsView.setNeedsLayout()
-        setNeedsLayout()
-        layoutIfNeeded()
+    @discardableResult
+    private func updateConstraint(_ constraint: NSLayoutConstraint?, constant: CGFloat) -> Bool {
+        guard let constraint, abs(constraint.constant - constant) > 0.5 else { return false }
+        constraint.constant = constant
+        return true
     }
 
     func setDesiredBottomGap(_ gap: CGFloat, isKeyboardVisible: Bool) {
@@ -5852,6 +6182,7 @@ private final class PreviewChatService: ChatServicing {
     var incomingMessages: AsyncStream<Message> {
         AsyncStream { _ in }
     }
+    var serverFeatures: [String] { [] }
     var connectionState: AsyncStream<ConnectionState> {
         AsyncStream { continuation in
             continuation.yield(.connected)
@@ -5881,6 +6212,7 @@ private final class PreviewChatService: ChatServicing {
     func publishReadState(sessionKey: String, lastReadMessageId: String) async throws {}
     func fetchStreams() async throws -> [StreamSession] { [] }
     func fetchTrackableSessions() async throws -> [TrackableSession] { [] }
+    func fetchOrgOptions() async throws -> OrgOptions { OrgOptions.empty }
     func fetchSessionStatus(sessionKey: String) async throws -> SessionStatus {
         throw ProviderChatService.Error.notConnected
     }
@@ -5914,6 +6246,17 @@ private final class PreviewChatService: ChatServicing {
             createdAt: Date(),
             updatedAt: Date()
         )
+    }
+    func createStream(
+        displayName: String,
+        idempotencyKey: String,
+        harness: String?,
+        model: String?,
+        host: String?,
+        archetype: String?
+    ) async throws -> StreamSession {
+        // Previews have no gateway; placement params are explicitly ignored here.
+        try await createStream(displayName: displayName, idempotencyKey: idempotencyKey)
     }
     func renameStream(sessionKey: String, displayName: String) async throws -> StreamSession {
         StreamSession(
@@ -6691,7 +7034,7 @@ private struct CrossChatNotificationOverlay: View {
     let showsDockedHitTarget: Bool
     let onVerticalDockDragDelta: (CGFloat) -> Void
     let onNavigateToSource: (String) -> Void
-    @State private var showShortcutLabels = CrossChatShortcutLabelAvailability.current
+    @State private var showShortcutLabels = CrossChatNotificationShortcutIndicatorAvailability.current
     @State private var actionMenuSelection: CrossChatNotificationActionMenuItem = .goToChat
     @State private var scrollViewsBySourceChatId: [String: WeakScrollViewBox] = [:]
     @State private var previewingCollapsedSourceChatIds: Set<String> = []
@@ -7086,7 +7429,7 @@ private struct CrossChatNotificationOverlay: View {
             .transition(Self.notificationTransition)
             .animation(isCollapsed ? Self.hideAnimation : Self.revealAnimation, value: isCollapsed)
             .onAppear {
-                showShortcutLabels = CrossChatShortcutLabelAvailability.current
+                showShortcutLabels = CrossChatNotificationShortcutIndicatorAvailability.current
                 viewModel.closeOverflowingCrossChatNotificationReplies(visibleSourceChatIds: Set(visibleBubbles.map(\.sourceChatId)))
                 if isCollapsed && !isDebugSkippingCollapsedPreview {
                     startCollapsedPreview(sourceChatIds: visibleBubbles.map(\.sourceChatId))
@@ -7103,12 +7446,12 @@ private struct CrossChatNotificationOverlay: View {
                 clearAllGestureAxisLocks()
                 selectionActiveSourceChatIds = []
             }
-#if os(iOS) && !targetEnvironment(macCatalyst) && canImport(GameController)
+#if (os(iOS) || os(visionOS)) && canImport(GameController)
             .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidConnect)) { _ in
-                showShortcutLabels = CrossChatShortcutLabelAvailability.current
+                showShortcutLabels = CrossChatNotificationShortcutIndicatorAvailability.current
             }
             .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidDisconnect)) { _ in
-                showShortcutLabels = CrossChatShortcutLabelAvailability.current
+                showShortcutLabels = CrossChatNotificationShortcutIndicatorAvailability.current
             }
 #endif
             .onReceive(NotificationCenter.default.publisher(for: .clawlineScrollNotificationDownCommand)) { _ in
@@ -7129,8 +7472,7 @@ private struct CrossChatNotificationOverlay: View {
                 if isCollapsed {
                     restoreDock()
                 }
-                actionMenuSelection = .goToChat
-                actionMenuSourceChatId = sourceChatId
+                openActionMenu(sourceChatId: sourceChatId)
             }
             .onReceive(NotificationCenter.default.publisher(for: .clawlineReplyNotificationCommand)) { notification in
                 guard let index = notification.object as? Int,
@@ -7532,8 +7874,7 @@ private struct CrossChatNotificationOverlay: View {
             if isCollapsed {
                 restoreDock()
             }
-            actionMenuSelection = .goToChat
-            actionMenuSourceChatId = sourceChatId
+            openActionMenu(sourceChatId: sourceChatId)
         case .notificationAssignedReply(let index):
             guard case .handled(.notificationBubble(let sourceChatId)) = route.outcome else { return }
             guard visibleBubbles.indices.contains(index),
@@ -7819,9 +8160,20 @@ private struct CrossChatNotificationOverlay: View {
         return 5_000_000_000
     }
 
+    private func openActionMenu(sourceChatId: String) {
+        if actionMenuSourceChatId != sourceChatId {
+            viewModel.endCrossChatNotificationPopupInteraction(sourceChatId: actionMenuSourceChatId)
+        }
+        actionMenuSelection = .goToChat
+        actionMenuSourceChatId = sourceChatId
+        viewModel.beginCrossChatNotificationPopupInteraction(sourceChatId: sourceChatId)
+    }
+
     private func closeActionMenu() {
+        let closingSourceChatId = actionMenuSourceChatId
         actionMenuSourceChatId = nil
         actionMenuSelection = .goToChat
+        viewModel.endCrossChatNotificationPopupInteraction(sourceChatId: closingSourceChatId)
     }
 
     private func handleActionMenuAction(
@@ -8003,6 +8355,32 @@ private struct CrossChatNotificationBubbleHeightPreferenceKey: PreferenceKey {
         value.merge(nextValue(), uniquingKeysWith: { _, new in new })
     }
 }
+
+#if !os(visionOS)
+/// Measurement seam for the notification-glass GPU cost hypothesis (T1591 I1).
+/// `--debug-notification-glass-off` (DEBUG builds only) swaps the bubble's
+/// backdrop-sampling glass for an opaque fill so Instruments can A/B GPU frame
+/// time with identical layout. Production builds always render glass.
+private struct CrossChatNotificationBubbleSurface: ViewModifier {
+#if DEBUG
+    private static let glassDisabledForMeasurement =
+        ProcessInfo.processInfo.arguments.contains("--debug-notification-glass-off")
+#else
+    private static let glassDisabledForMeasurement = false
+#endif
+
+    let cornerRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        if Self.glassDisabledForMeasurement {
+            content.background(Color(UIColor.systemBackground).opacity(0.96), in: shape)
+        } else {
+            content.glassEffect(.regular, in: shape)
+        }
+    }
+}
+#endif
 
 enum CrossChatNotificationMaterialStyle {
     static let backgroundOpacity = 1.0
@@ -8498,7 +8876,7 @@ struct CrossChatNotificationBubbleView: View {
             in: RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous)
         )
 #else
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous))
+        .modifier(CrossChatNotificationBubbleSurface(cornerRadius: bubbleCornerRadius))
 #endif
         .clipShape(RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous))
         .shadow(color: Color.black.opacity(0.14), radius: 8, x: 0, y: 3)
@@ -9116,7 +9494,12 @@ final class NotificationReplyUITextView: UITextView {
             action: #selector(didPressEscape)
         )
         let emacsCommands = [
-            UIKeyCommand(input: "w", modifierFlags: [.control], action: #selector(didPressCtrlW))
+            UIKeyCommand(input: "a", modifierFlags: [.control], action: #selector(didPressCtrlA)),
+            UIKeyCommand(input: "e", modifierFlags: [.control], action: #selector(didPressCtrlE)),
+            UIKeyCommand(input: "w", modifierFlags: [.control], action: #selector(didPressCtrlW)),
+            UIKeyCommand(input: "u", modifierFlags: [.control], action: #selector(didPressCtrlU)),
+            UIKeyCommand(input: "k", modifierFlags: [.control], action: #selector(didPressCtrlK)),
+            UIKeyCommand(input: "c", modifierFlags: [.control], action: #selector(didPressCtrlC))
         ]
         let modifiedReturnCommands = KeyboardCommandBridge.textInputSpecs.compactMap { spec -> UIKeyCommand? in
             guard spec.intent == .textModifiedNewline else { return nil }
@@ -9173,6 +9556,38 @@ final class NotificationReplyUITextView: UITextView {
         deletePreviousWordForReplyShortcut()
     }
 
+    @objc private func didPressCtrlA(_ sender: UIKeyCommand) {
+        guard canHandleReplyEditingShortcut else { return }
+        selectedTextRange = textRange(from: beginningOfDocument, to: beginningOfDocument)
+    }
+
+    @objc private func didPressCtrlE(_ sender: UIKeyCommand) {
+        guard canHandleReplyEditingShortcut else { return }
+        selectedTextRange = textRange(from: endOfDocument, to: endOfDocument)
+    }
+
+    @objc private func didPressCtrlU(_ sender: UIKeyCommand) {
+        guard canHandleReplyEditingShortcut else { return }
+        guard let cursor = selectedTextRange?.start,
+              let range = textRange(from: beginningOfDocument, to: cursor),
+              !range.isEmpty else { return }
+        replaceReplyText(range, with: "")
+    }
+
+    @objc private func didPressCtrlK(_ sender: UIKeyCommand) {
+        guard canHandleReplyEditingShortcut else { return }
+        guard let cursor = selectedTextRange?.start,
+              let range = textRange(from: cursor, to: endOfDocument),
+              !range.isEmpty else { return }
+        replaceReplyText(range, with: "")
+    }
+
+    @objc private func didPressCtrlC(_ sender: UIKeyCommand) {
+        guard canHandleReplyEditingShortcut else { return }
+        guard let range = textRange(from: beginningOfDocument, to: endOfDocument) else { return }
+        replaceReplyText(range, with: "")
+    }
+
     override func insertText(_ text: String) {
         if text == "\u{17}" {
             _ = deletePreviousWordForReplyShortcut()
@@ -9191,7 +9606,7 @@ final class NotificationReplyUITextView: UITextView {
 
     @discardableResult
     private func deletePreviousWordForReplyShortcut() -> Bool {
-        guard isEditable, isFirstResponder, isOwnedReplyShortcutRoute else { return false }
+        guard canHandleReplyEditingShortcut else { return false }
         guard let range = NotificationReplyPreviousWordDeletion.deleteRange(
             in: text ?? "",
             selectedRange: selectedRange
@@ -9205,6 +9620,16 @@ final class NotificationReplyUITextView: UITextView {
             .route(intent: .textModifiedNewline, store: keyboardOwnershipStore)
             .outcome else { return false }
         return routedSourceChatId == sourceChatId
+    }
+
+    private var canHandleReplyEditingShortcut: Bool {
+        isEditable && isFirstResponder && isOwnedReplyShortcutRoute
+    }
+
+    private func replaceReplyText(_ range: UITextRange, with text: String) {
+        let start = offset(from: beginningOfDocument, to: range.start)
+        let end = offset(from: beginningOfDocument, to: range.end)
+        replacePlainText(in: NSRange(location: start, length: end - start), with: text)
     }
 
     private func isControlWPress(_ press: UIPress) -> Bool {
@@ -9676,29 +10101,17 @@ enum CrossChatNotificationGlobalShortcut {
 }
 
 private struct CrossChatNotificationKeyboardShortcuts: View {
-    let bubbles: [CrossChatNotificationBubble]
-    let maxContainerHeight: CGFloat
-    let replyPinSlotsBySourceChatId: [String: Int]
-    let measuredHeightsBySourceChatId: [String: CGFloat]
+    let visibleSourceStates: [CrossChatNotificationObservation.SourceState]
     let keyboardOwnershipStore: KeyboardOwnershipStore
     let selectedSessionKey: String
     let streamPopupRoute: StreamPopupRoute
     let onDismissAll: () -> Void
     let onToggleDock: () -> Void
 
-    private var visibleBubbles: [CrossChatNotificationBubble] {
-        CrossChatNotificationOverlay.visibleBubbles(
-            maxContainerHeight: maxContainerHeight,
-            bubbles: bubbles,
-            replyPinSlotsBySourceChatId: replyPinSlotsBySourceChatId,
-            measuredHeightsBySourceChatId: measuredHeightsBySourceChatId
-        )
-    }
-
     var body: some View {
-        if !visibleBubbles.isEmpty {
+        if !visibleSourceStates.isEmpty {
             ZStack {
-                ForEach(Array(visibleBubbles.enumerated()), id: \.element.sourceChatId) { index, _ in
+                ForEach(Array(visibleSourceStates.enumerated()), id: \.element.sourceChatId) { index, _ in
                     Button("") {
                         routeAssignedShortcut(.notificationAssignedOpen(index), index: index) {
                             NotificationCenter.default.post(
@@ -9707,7 +10120,7 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
                             )
                         }
                     }
-                        .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: .command)
+                    .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: .command)
                     Button("") {
                         routeAssignedShortcut(.notificationAssignedReply(index), index: index) {
                             NotificationCenter.default.post(
@@ -9716,7 +10129,7 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
                             )
                         }
                     }
-                        .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .option])
+                    .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .option])
                     Button("") {
                         routeAssignedShortcut(.notificationAssignedDismiss(index), index: index) {
                             NotificationCenter.default.post(
@@ -9725,9 +10138,9 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
                             )
                         }
                     }
-                        .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .shift, .option])
+                    .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .shift, .option])
                 }
-                ForEach(CrossChatNotificationGlobalShortcut.scrollSpecs(visibleNotificationCount: visibleBubbles.count), id: \.input) { spec in
+                ForEach(CrossChatNotificationGlobalShortcut.scrollSpecs(visibleNotificationCount: visibleSourceStates.count), id: \.input) { spec in
                     Button("") {
                         routeScrollShortcut(spec)
                     }
@@ -9738,22 +10151,20 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
                         onDismissAll()
                     }
                 }
-                    .keyboardShortcut("-", modifiers: [.command, .shift, .option])
+                .keyboardShortcut("-", modifiers: [.command, .shift, .option])
                 Button("") {
                     routeNotificationStackShortcut(.notificationToggleDock) {
                         onToggleDock()
                     }
                 }
-                    .keyboardShortcut("\\", modifiers: .command)
+                .keyboardShortcut("\\", modifiers: .command)
             }
             .opacity(0.001)
             .frame(width: 1, height: 1)
             .accessibilityHidden(true)
             .id(
                 CrossChatNotificationShortcutLifecycle.identity(
-                    sourceStates: visibleBubbles.map { bubble in
-                        (sourceChatId: bubble.sourceChatId, isReplying: bubble.isReplying)
-                    },
+                    sourceStates: visibleSourceStates,
                     keyboardOwnershipStore: keyboardOwnershipStore,
                     selectedSessionKey: selectedSessionKey,
                     streamPopupRoute: streamPopupRoute
@@ -9767,7 +10178,7 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
         index: Int,
         perform action: () -> Void
     ) {
-        guard visibleBubbles.indices.contains(index) else { return }
+        guard visibleSourceStates.indices.contains(index) else { return }
         switch KeyboardCommandRouter.route(intent: intent, store: keyboardOwnershipStore).outcome {
         case .handled(.notificationBubble(_)):
             action()
@@ -9802,7 +10213,7 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
 
 enum CrossChatNotificationShortcutLifecycle {
     static func identity(
-        sourceStates: [(sourceChatId: String, isReplying: Bool)],
+        sourceStates: [CrossChatNotificationObservation.SourceState],
         keyboardOwnershipStore: KeyboardOwnershipStore,
         selectedSessionKey: String,
         streamPopupRoute: StreamPopupRoute
@@ -9825,10 +10236,10 @@ extension StreamPopupRoute {
         switch self {
         case .closed:
             return "closed"
-        case .popup(.none):
-            return "popup:none"
-        case .popup(.request(let id)):
-            return "popup:request:\(id)"
+        case .popup(let presentationID, .none):
+            return "popup:\(presentationID):none"
+        case .popup(let presentationID, .request(let id)):
+            return "popup:\(presentationID):request:\(id)"
         case .trackPicker:
             return "trackPicker"
         }

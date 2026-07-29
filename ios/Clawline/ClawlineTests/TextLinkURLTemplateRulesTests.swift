@@ -84,6 +84,50 @@ struct TextLinkURLTemplateRulesTests {
         #expect(linkTarget("T123", in: rendered)?.absoluteString == "https://tars.tail4105e8.ts.net:19443/tracker.html?id=T123")
     }
 
+    @Test("T190: detected URL followed by a backtick excludes the backtick from link range and URL")
+    @MainActor
+    func detectedURLFollowedByBacktickExcludesBoundary() throws {
+        let rendered = try #require(makeRendered("Open https://example.com/path` then continue."))
+        let linkRange = range("https://example.com/path", in: rendered)
+        let backtickRange = range("`", in: rendered)
+
+        #expect(linkTarget("https://example.com/path", in: rendered)?.absoluteString == "https://example.com/path")
+        #expect(rendered.attribute(.link, at: backtickRange.location, effectiveRange: nil) == nil)
+        #expect(rendered.attribute(.link, at: NSMaxRange(linkRange) - 1, effectiveRange: nil) != nil)
+    }
+
+    @Test("T190: detected URL keeps normal URL punctuation before a boundary")
+    @MainActor
+    func detectedURLKeepsNormalURLPunctuationBeforeBoundary() throws {
+        let rendered = try #require(makeRendered("Open https://example.com/search?q=a,b.c` now."))
+
+        #expect(linkTarget("https://example.com/search?q=a,b.c", in: rendered)?.absoluteString == "https://example.com/search?q=a,b.c")
+        #expect(rendered.attribute(.link, at: range("`", in: rendered).location, effectiveRange: nil) == nil)
+    }
+
+    @Test("T1513: Spatial Links submenu exposes detected links using rendered text-link attributes")
+    @MainActor
+    func spatialLinksSubmenuExposesDetectedLinks() throws {
+        let rendered = try withConfiguredRules([.janusTrackerExample]) {
+            try #require(makeRendered("See T1513 and https://example.com/details."))
+        }
+        let menu = try #require(MessageDetectedTextLinkMenuBuilder.linksSubmenu(
+            from: rendered,
+            isSpatial: true,
+            actionHandler: { _ in }
+        ))
+
+        #expect(menu.title == "Links")
+        #expect(menu.children.count == 2)
+        #expect(MessageDetectedTextLinkMenuBuilder.linksSubmenu(from: rendered, isSpatial: false, actionHandler: { _ in }) == nil)
+        #expect(MessageDetectedTextLinkMenuBuilder.linksSubmenu(from: makeRendered("No links here."), isSpatial: true, actionHandler: { _ in }) == nil)
+
+        let links = MessageDetectedTextLinkMenuBuilder.detectedTextLinks(from: rendered)
+        #expect(links.map(\.title) == ["T1513", "https://example.com/details"])
+        #expect(links.first?.url.absoluteString == "https://tars.tail4105e8.ts.net:19443/tracker.html?id=T1513")
+        #expect(links.first?.isGenerated == true)
+    }
+
     @Test("V1135-01: explicit links to generated URLs are not treated as generated")
     @MainActor
     func explicitLinksToGeneratedURLsAreNotTreatedAsGenerated() throws {
@@ -351,6 +395,63 @@ struct TextLinkURLTemplateRulesTests {
             }
             return false
         })
+    }
+
+
+    @Test("T1578: expanded detail sizes and renders the selected overflow content")
+    @MainActor
+    func expandedDetailSizesAndRendersSelectedOverflowContent() async {
+        let selectedContent = (
+            "T1578 selected overflow content must remain visible in the expanded detail viewer. "
+                + String(repeating: "This is the real selected message rendering path. ", count: 12)
+        ).trimmingCharacters(in: .whitespaces)
+        let message = Message(
+            id: "t1578-selected-overflow-detail",
+            role: .user,
+            content: selectedContent,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal",
+            sender: "Mike"
+        )
+        let presentation = MessagePresentation(
+            parts: [.text(selectedContent)],
+            copyableReadableText: selectedContent,
+            wordCount: selectedContent.split(whereSeparator: \.isWhitespace).count,
+            hasTextualContent: true,
+            isEmojiOnly: false,
+            hasMediaOnly: false,
+            detectedURLs: [],
+            detectedURLCount: 0,
+            hasSingleURL: false
+        )
+        let pool = TerminalSessionConnectionPool { _ in
+            fatalError("T1578 text detail must not create a terminal service")
+        }
+        let host = UIHostingController(
+            rootView: ExpandedMessageSheet(
+                message: message,
+                presentation: presentation,
+                fontScaleChangeSequence: 0,
+                terminalConnectionPool: pool
+            )
+            .environment(\.horizontalSizeClass, .regular)
+        )
+        let fittedSize = host.sizeThatFits(in: CGSize(width: 1_000, height: 1_000))
+        let window = UIWindow(frame: CGRect(origin: .zero, size: fittedSize))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.frame = window.bounds
+        host.view.layoutIfNeeded()
+        await Task.yield()
+        host.view.layoutIfNeeded()
+
+        let renderedText = textViews(in: host.view).map(\.text).joined(separator: "\n")
+        #expect(fittedSize.width >= 420)
+        #expect(fittedSize.height >= 320)
+        #expect(renderedText.contains(selectedContent))
     }
 
     @Test("T1369: expanded detail resolves selected snapshot to canonical message text")
@@ -851,6 +952,60 @@ struct TextLinkURLTemplateRulesTests {
         #expect(popupURLs == [popupURL])
     }
 
+    @Test("T1192: supplemental transcript text blocks expose popup hover routing")
+    @MainActor
+    func supplementalTranscriptTextBlocksExposePopupHoverRouting() throws {
+        let popupRule = TextLinkURLTemplateRule(
+            id: "popup",
+            enabled: true,
+            pattern: #"T([0-9]+)"#,
+            urlTemplate: "https://example.com/popup/{match}",
+            displayMode: .popup
+        )
+        let message = Message(
+            id: "t1192-supplemental-hover",
+            role: .assistant,
+            content: "Primary T1192.\n\n```swift\nlet separator = true\n```\n\nSupplemental T1192.",
+            timestamp: Date(timeIntervalSince1970: 1_773_600_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:test:s_t1192"
+        )
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        var streamingState = StreamingTableParseState()
+        let presentation = MessagePresentationBuilder.build(
+            from: message,
+            metrics: metrics,
+            streamingState: &streamingState
+        )
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 360, height: 1))
+
+        try withConfiguredRules([popupRule]) {
+            bubble.configure(
+                message: message,
+                stream: .personal,
+                presentation: presentation,
+                sizeClass: .long,
+                metrics: metrics,
+                maxWidth: 360,
+                onRequestExpand: nil,
+                onRequestLayout: nil,
+                onInteractiveCallback: nil
+            )
+        }
+
+        let supplementalTextView = try #require(
+            textViews(in: bubble).first { $0.attributedText.string.contains("Supplemental T1192") }
+        )
+        #expect(supplementalTextView.gestureRecognizers?.contains { $0 is UIHoverGestureRecognizer } == true)
+        let tokenRange = range("T1192", in: supplementalTextView.attributedText)
+        #expect(TextLinkURLTemplateRules.displayMode(
+            in: supplementalTextView.attributedText,
+            characterRange: tokenRange
+        ) == .popup)
+    }
+
     @Test("T1192: popup hover route carries anchor point")
     @MainActor
     func popupHoverRouteCarriesAnchorPoint() throws {
@@ -873,9 +1028,9 @@ struct TextLinkURLTemplateRulesTests {
         #expect(received?.2 == anchor)
     }
 
-    @Test("D11/R1135-11: popup resolved URL presentation uses clear outer background and web content")
+    @Test("D11/R1135-11/T1341: popup resolved URL chrome keeps clear outer background and overlaid close control")
     @MainActor
-    func popupResolvedURLPresentationUsesClearOuterBackgroundAndWebContent() throws {
+    func popupResolvedURLPresentationUsesClearOuterBackgroundAndOverlaidCloseControl() throws {
         let popupURL = try #require(URL(string: "https://example.com/popup/P1192"))
         let controller = TextLinkResolvedURLContentViewController(
             url: popupURL,
@@ -896,7 +1051,19 @@ struct TextLinkURLTemplateRulesTests {
         let webView = try #require(webViews(in: controller.view).first)
         #expect(webView.frame.width >= 320)
         #expect(webView.frame.height >= 280)
-        #expect(!buttons(in: controller.view).contains { !$0.isHidden })
+        let closeButton = try #require(buttons(in: controller.view).first { !$0.isHidden })
+        #expect(closeButton.accessibilityLabel == "Close resolved URL")
+
+        let webFrame = webView.convert(webView.bounds, to: controller.view)
+        let closeFrame = closeButton.convert(closeButton.bounds, to: controller.view)
+        #expect(webFrame.intersects(closeFrame))
+        #expect(closeFrame.minY < webFrame.minY)
+        #expect(closeFrame.maxX > webFrame.maxX)
+
+        let visibleFloatingPoint = CGPoint(x: closeFrame.maxX - 4, y: closeFrame.midY)
+        #expect(!webFrame.contains(visibleFloatingPoint))
+        #expect(closeFrame.contains(visibleFloatingPoint))
+        #expect(controller.view.hitTest(visibleFloatingPoint, with: nil) === closeButton)
     }
 
     @Test("T1192: popup layout keeps edge hover point inside content")

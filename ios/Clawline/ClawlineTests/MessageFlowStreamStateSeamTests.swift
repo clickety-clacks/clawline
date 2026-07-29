@@ -8,11 +8,11 @@ struct MessageFlowStreamStateSeamTests {
         let seam = try functionBody(named: "runStreamContextSwitchSeam", in: contents)
 
         #expect(
-            seam.contains("let allowTailStage = materializationStateBySessionKey[incomingSessionKey] == nil"),
-            "The stream switch seam should choose tail staging separately from restore setup."
+            seam.contains("prepareIncomingStateOnSwitch(sessionKey: incomingSessionKey, allowTailStage: true)"),
+            "Every bounded stream revisit must restore against its retained window."
         )
         #expect(
-            seam.contains("prepareIncomingStateOnSwitch(sessionKey: incomingSessionKey, allowTailStage: allowTailStage)"),
+            seam.contains("prepareIncomingStateOnSwitch(sessionKey: incomingSessionKey, allowTailStage: true)"),
             "Materialized revisits must still reload persisted scroll state before rendering."
         )
         #expect(

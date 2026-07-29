@@ -25,6 +25,8 @@ final class LinkCardUIKitView: UIControl {
     private var imageTask: Task<Void, Never>?
     private var lastMeasuredWidth: CGFloat = 0
     private var lastReportedHeight: CGFloat = 0
+    private(set) var isContentSettled = false
+    private var contentGeneration = UUID()
 
     // BubbleSizingV2 caches measurements; link cards update async (OpenGraph metadata, thumbnails).
     // When content changes, we need to request a re-measure so the bubble grows and avoids clipping.
@@ -159,6 +161,9 @@ final class LinkCardUIKitView: UIControl {
         metadataTask?.cancel()
         imageTask?.cancel()
         lastReportedHeight = 0
+        isContentSettled = false
+        contentGeneration = UUID()
+        let generation = contentGeneration
         thumbnailView.image = nil
         thumbnailView.isHidden = true
 
@@ -203,9 +208,12 @@ final class LinkCardUIKitView: UIControl {
         metadataTask = Task { [weak self] in
             guard let self else { return }
             let currentURL = url
-            if let meta = await LinkCardMetadataFetcher.shared.metadata(for: currentURL) {
+            let metadata = await LinkCardMetadataFetcher.shared.metadata(for: currentURL)
+            guard !Task.isCancelled else { return }
+            if let meta = metadata {
                 await MainActor.run {
-                    guard self.url?.absoluteString == currentURL.absoluteString else { return }
+                    guard self.contentGeneration == generation,
+                          self.url?.absoluteString == currentURL.absoluteString else { return }
                     self.titleLabel.text = meta.title
                     if let desc = meta.description, !desc.isEmpty {
                         self.descLabel.text = desc
@@ -218,16 +226,25 @@ final class LinkCardUIKitView: UIControl {
                 }
 
                 if let imageURL = meta.imageURL {
-                    await self.loadThumbnail(imageURL: imageURL, for: currentURL)
+                    await self.loadThumbnail(imageURL: imageURL, for: currentURL, generation: generation)
+                    guard !Task.isCancelled else { return }
                 }
             } else {
                 await MainActor.run {
-                    guard self.url?.absoluteString == currentURL.absoluteString else { return }
+                    guard self.contentGeneration == generation,
+                          self.url?.absoluteString == currentURL.absoluteString else { return }
                     self.titleLabel.text = currentURL.absoluteString
                     self.descLabel.text = nil
                     self.descLabel.isHidden = true
                     self.notifyHeightChangeIfNeeded()
                 }
+            }
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard self.contentGeneration == generation,
+                      self.url?.absoluteString == currentURL.absoluteString else { return }
+                self.isContentSettled = true
+                self.notifyHeightChangeIfNeeded(force: true)
             }
         }
     }
@@ -282,11 +299,12 @@ final class LinkCardUIKitView: UIControl {
 #endif
     }
 
-    private func loadThumbnail(imageURL: URL, for url: URL) async {
+    private func loadThumbnail(imageURL: URL, for url: URL, generation: UUID) async {
         let cacheKey = imageURL.absoluteString as NSString
         if let cached = Self.imageCache.object(forKey: cacheKey) {
             await MainActor.run {
-                guard self.url?.absoluteString == url.absoluteString else { return }
+                guard self.contentGeneration == generation,
+                      self.url?.absoluteString == url.absoluteString else { return }
                 self.thumbnailView.image = cached
                 self.thumbnailView.isHidden = false
                 self.notifyHeightChangeIfNeeded()
@@ -310,7 +328,8 @@ final class LinkCardUIKitView: UIControl {
                 guard let image = UIImage(data: data) else { return }
                 Self.imageCache.setObject(image, forKey: cacheKey)
                 await MainActor.run {
-                    guard self.url?.absoluteString == url.absoluteString else { return }
+                    guard self.contentGeneration == generation,
+                          self.url?.absoluteString == url.absoluteString else { return }
                     self.thumbnailView.image = image
                     self.thumbnailView.isHidden = false
                     self.notifyHeightChangeIfNeeded()
@@ -322,7 +341,7 @@ final class LinkCardUIKitView: UIControl {
         _ = await imageTask?.value
     }
 
-    private func notifyHeightChangeIfNeeded() {
+    private func notifyHeightChangeIfNeeded(force: Bool = false) {
         invalidateIntrinsicContentSize()
         setNeedsLayout()
         DispatchQueue.main.async { [weak self] in
@@ -333,7 +352,7 @@ final class LinkCardUIKitView: UIControl {
             let priority: UILayoutPriority = (self.bounds.width > 1) ? .required : .fittingSizeLevel
             let newHeight = self.measuredHeight(for: width, horizontalPriority: priority)
             let epsilon: CGFloat = 1
-            guard abs(newHeight - self.lastReportedHeight) > epsilon else { return }
+            guard force || abs(newHeight - self.lastReportedHeight) > epsilon else { return }
             self.lastReportedHeight = newHeight
             self.onHeightChange?()
         }

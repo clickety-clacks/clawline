@@ -932,7 +932,14 @@ enum UnifiedMarkdownRenderer {
                 additionalBoundaryTokens: markdownLinkBoundaryTokens
             ) ?? match.url
             guard let url else { continue }
-            attributed.addAttribute(.link, value: url, range: match.range)
+            let linkRange: NSRange
+            let urlStringLength = (url.absoluteString as NSString).length
+            if rawMatch.hasPrefix(url.absoluteString), urlStringLength > 0, urlStringLength < match.range.length {
+                linkRange = NSRange(location: match.range.location, length: urlStringLength)
+            } else {
+                linkRange = match.range
+            }
+            attributed.addAttribute(.link, value: url, range: linkRange)
         }
     }
 

@@ -46,6 +46,65 @@ struct MessageBubbleRenderedGeometry {
     let dynamicContentFrame: CGRect
 }
 
+struct MessageDetectedTextLink {
+    let title: String
+    let url: URL
+    let characterRange: NSRange
+    let displayMode: TextLinkResolvedURLDisplayMode
+    let isGenerated: Bool
+}
+
+enum MessageDetectedTextLinkMenuBuilder {
+    static func detectedTextLinks(from attributed: NSAttributedString?) -> [MessageDetectedTextLink] {
+        guard let attributed, attributed.length > 0 else { return [] }
+        let text = attributed.string as NSString
+        let fullRange = NSRange(location: 0, length: attributed.length)
+        var links: [MessageDetectedTextLink] = []
+
+        attributed.enumerateAttribute(.link, in: fullRange, options: []) { value, range, _ in
+            guard range.length > 0 else { return }
+            let url: URL?
+            if let value = value as? URL {
+                url = value
+            } else if let value = value as? String {
+                url = URL(string: value)
+            } else {
+                url = nil
+            }
+            guard let url else { return }
+            let title = text.substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { return }
+            let isGenerated = TextLinkURLTemplateRules.isGeneratedLink(in: attributed, characterRange: range)
+            links.append(MessageDetectedTextLink(
+                title: title,
+                url: url,
+                characterRange: range,
+                displayMode: TextLinkURLTemplateRules.displayMode(in: attributed, characterRange: range),
+                isGenerated: isGenerated
+            ))
+        }
+
+        return links
+    }
+
+    static func linksSubmenu(
+        from attributed: NSAttributedString?,
+        isSpatial: Bool,
+        actionHandler: @escaping (MessageDetectedTextLink) -> Void
+    ) -> UIMenu? {
+        guard isSpatial else { return nil }
+        let links = detectedTextLinks(from: attributed)
+        guard !links.isEmpty else { return nil }
+
+        let actions = links.map { link in
+            UIAction(title: link.title, image: UIImage(systemName: "link")) { _ in
+                actionHandler(link)
+            }
+        }
+        return UIMenu(title: "Links", image: UIImage(systemName: "link"), children: actions)
+    }
+}
+
 enum MessageBubbleGeometry {
     static let typingBubbleWidth: CGFloat = 240
     static let typingBubbleHeight: CGFloat = 86
@@ -495,7 +554,7 @@ final class MessageBubbleUIKitContainerView: UIView {
         bubbleView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(bubbleView)
 
-        bubbleBottomConstraint = bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor)
+        bubbleBottomConstraint = bubbleView.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor)
         NSLayoutConstraint.activate([
             bubbleView.leadingAnchor.constraint(equalTo: leadingAnchor),
             bubbleView.topAnchor.constraint(equalTo: topAnchor),
@@ -519,6 +578,7 @@ final class MessageBubbleUIKitContainerView: UIView {
     }
 
     func configure(message: Message,
+                   stream: ChatStream,
                    presentation: MessagePresentation,
                    sendIndicatorState: MessageSendIndicatorState?,
                    isCompact: Bool,
@@ -527,6 +587,7 @@ final class MessageBubbleUIKitContainerView: UIView {
                    truncationHeightOverride: CGFloat? = nil,
                    bubbleSizingV2: BubbleSizingV2.LayoutState? = nil,
                    showsHeader: Bool = true,
+                   showsProvenanceChrome: Bool = false,
                    paddingScale: CGFloat = 1,
                    minWidthOverride: CGFloat? = nil,
                    maxWidthOverride: CGFloat? = nil,
@@ -551,6 +612,7 @@ final class MessageBubbleUIKitContainerView: UIView {
         let sizeClass = MessageFlowRules.sizeClass(for: presentation)
         bubbleView.configure(
             message: message,
+            stream: stream,
             presentation: presentation,
             sizeClass: sizeClass,
             metrics: metrics,
@@ -559,6 +621,7 @@ final class MessageBubbleUIKitContainerView: UIView {
             truncationHeightOverride: truncationHeightOverride,
             bubbleSizingV2: bubbleSizingV2,
             showsHeader: showsHeader,
+            showsProvenanceChrome: showsProvenanceChrome,
             paddingScale: paddingScale,
             minWidthOverride: minWidthOverride,
             maxWidthOverride: maxWidthOverride,
@@ -649,6 +712,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private let dynamicContentStack = UIStackView()  // Holds text + code blocks
     private let avatarView = AvatarCircleView()
     private let senderLabel = UILabel()
+    private let provenanceChipView = ProvenanceChipView()
     private let senderTimestampSpacer = UIView()
     private let timestampLabel = UILabel()
     private let replyIndicatorContainer = UIView()
@@ -703,6 +767,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private var currentSalientHighlights: SalientHighlights?
     private var currentMetrics = ChatFlowTheme.Metrics(isCompact: true)
     private var currentMessageRole: Message.Role = .assistant
+    private var provenanceChipVisible = false
     private var currentMessageDeliveryState: Message.DeliveryState = .normal
     private var currentStream: ChatStream = .personal
     private var currentSizeClass: MessageSizeClass = .short
@@ -727,7 +792,6 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private var currentSessionKey: String?
     private var wasOverflowingOnLastLayout = false
     private var suppressExpandTapForLinkCards = false
-    private var allowSwipeUpExpandForSingleLink = false
     private var timestampDate: Date?
     private var timestampRefreshTimer: Timer?
 
@@ -767,6 +831,12 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     }
 
     private func bubbleGradientColors(for role: Message.Role, palette: ChatFlowUIKitTheme.Palette) -> [UIColor] {
+        // A wake-delivered `role=user` message is inbound to the agent, not text
+        // typed on this device. Keep its user-side placement, but use the inbound
+        // palette so the bubble treatment reinforces the provenance chip.
+        if role == .user, provenanceChipVisible {
+            return palette.bubbleOtherGradient
+        }
         if isCollapsedUserOnlyMode, role == .user {
             return [palette.collapsedUserBubbleGreenTint, palette.collapsedUserBubbleGreenTint]
         }
@@ -779,7 +849,6 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         bodyLabel.isSelectable = !isCollapsedUserOnlyMode
         bodyLabel.dataDetectorTypes = isCollapsedUserOnlyMode || !enableDataDetectors ? [] : [.link]
         dynamicContentStack.isUserInteractionEnabled = !isCollapsedUserOnlyMode
-        allowSwipeUpExpandForSingleLink = isCollapsedUserOnlyMode ? false : allowSwipeUpExpandForSingleLink
     }
 
     override init(frame: CGRect) {
@@ -822,12 +891,6 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         bubbleTap.delaysTouchesEnded = false
         bubbleTap.delegate = self
         bubbleBackgroundView.addGestureRecognizer(bubbleTap)
-        let bubbleSwipeUp = UISwipeGestureRecognizer(target: self, action: #selector(handleBubbleSwipeUp))
-        bubbleSwipeUp.direction = .up
-        bubbleSwipeUp.cancelsTouchesInView = false
-        bubbleSwipeUp.delaysTouchesBegan = false
-        bubbleSwipeUp.delaysTouchesEnded = false
-        bubbleBackgroundView.addGestureRecognizer(bubbleSwipeUp)
 #if targetEnvironment(macCatalyst)
         bubbleBackgroundView.addInteraction(UIContextMenuInteraction(delegate: self))
 #endif
@@ -912,8 +975,11 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         timestampLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         timestampLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
+        provenanceChipView.isHidden = true
+
         headerStack.addArrangedSubview(avatarView)
         headerStack.addArrangedSubview(senderLabel)
+        headerStack.addArrangedSubview(provenanceChipView)
         headerStack.addArrangedSubview(senderTimestampSpacer)
         headerStack.addArrangedSubview(timestampLabel)
         senderLabel.firstBaselineAnchor.constraint(equalTo: timestampLabel.firstBaselineAnchor).isActive = true
@@ -1009,7 +1075,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         bodyTap.delaysTouchesEnded = false
         bodyTap.delegate = self
         bodyLabel.addGestureRecognizer(bodyTap)
-        let bodyHover = UIHoverGestureRecognizer(target: self, action: #selector(handleBodyHover(_:)))
+        let bodyHover = UIHoverGestureRecognizer(target: self, action: #selector(handleTextHover(_:)))
         bodyLabel.addGestureRecognizer(bodyHover)
 #if targetEnvironment(macCatalyst)
         bodyLabel.addInteraction(UIContextMenuInteraction(delegate: self))
@@ -1225,6 +1291,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     }
 
     func configure(message: Message,
+                   stream: ChatStream,
                    presentation: MessagePresentation,
                    sizeClass: MessageSizeClass,
                    metrics: ChatFlowTheme.Metrics,
@@ -1233,6 +1300,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
                    truncationHeightOverride: CGFloat? = nil,
                    bubbleSizingV2: BubbleSizingV2.LayoutState? = nil,
                    showsHeader: Bool = true,
+                   showsProvenanceChrome: Bool = false,
                    paddingScale: CGFloat = 1,
                    minWidthOverride: CGFloat? = nil,
                    maxWidthOverride: CGFloat? = nil,
@@ -1265,12 +1333,21 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         // Store for trait collection updates
         currentMessageRole = message.role
         currentMessageDeliveryState = message.deliveryState
-        currentStream = message.stream
+        currentStream = stream
         explicitIsDarkOverride = isDark
         currentSizeClass = sizeClass
         self.showsHeader = showsHeader
         contentPaddingScale = paddingScale
         self.useContinuousCorners = useContinuousCorners
+
+        // Provenance (spec §T-D): a `role=user` message delivered by a wake carries a
+        // recognized `sender`. When the tightbeam chrome is on, render its origin chip
+        // and strip the first-line `[from <sender>]` stamp from the body; otherwise the
+        // message renders exactly as a device-typed one.
+        let provenanceOrigin = showsProvenanceChrome ? message.provenanceOrigin : nil
+        let bodyRenderContent = provenanceOrigin != nil
+            ? MessageProvenance.strippingProvenanceStamp(from: message.content, sender: message.sender ?? "")
+            : message.content
 
         let hasLinkPreview = Self.presentationHasLinkPreview(presentation)
         let isSingleLinkPreview = Self.presentationIsSingleLinkPreview(presentation)
@@ -1289,6 +1366,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         let effectiveIsDark = isDark ?? (traitCollection.userInterfaceStyle == .dark)
         let nextDynamicContentReuseKey = dynamicContentReuseKeyForTextualBubble(
             message: message,
+            bodyRenderContent: bodyRenderContent,
             presentation: presentation,
             metrics: metrics,
             sizeClass: sizeClass,
@@ -1336,13 +1414,19 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         let palette = ChatFlowUIKitTheme.palette(isDark: effectiveIsDark)
         let isCanceled = message.deliveryState == .canceled
         let contentColor = isCanceled ? ChatFlowUIKitTheme.canceledText(isDark: effectiveIsDark) : palette.ink
-        let senderColor = (message.stream == .admin) ? palette.adminAccent : palette.warmBrown
+        let senderColor = (stream == .admin) ? palette.adminAccent : palette.warmBrown
         senderLabel.font = UIFont.clawline(.senderName)
         senderLabel.adjustsFontForContentSizeCategory = true
         senderLabel.textColor = isCanceled
             ? ChatFlowUIKitTheme.canceledText(isDark: effectiveIsDark).withAlphaComponent(0.78)
-            : senderColor.withAlphaComponent(message.stream == .admin ? 1.0 : 0.7)
+            : senderColor.withAlphaComponent(stream == .admin ? 1.0 : 0.7)
         senderLabel.text = message.displayName
+        applyProvenanceChip(
+            origin: provenanceOrigin,
+            senderColor: senderColor,
+            isCanceled: isCanceled,
+            isDark: effectiveIsDark
+        )
         timestampLabel.font = UIFont.clawline(.timestamp)
         timestampLabel.adjustsFontForContentSizeCategory = true
         timestampLabel.textColor = isCanceled
@@ -1404,7 +1488,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
 
         let markdownStyle = Self.markdownStyle(for: sizeClass, metrics: metrics)
         let markdownContent = UnifiedMarkdownRenderer.makeContent(
-            messageText: message.content,
+            messageText: bodyRenderContent,
             context: MarkdownMessageRenderContext(
                 role: message.role,
                 messageID: message.id,
@@ -1485,7 +1569,6 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             return nil
         }).first
         let shouldShowInlineReloadButton = isSingleLinkPreview && linkPreviewURL != nil
-        allowSwipeUpExpandForSingleLink = isSingleLinkPreview
         applyCollapsedUserOnlyInteractionMode()
 
         // Flynn: URLs should render as tappable cards per the design-system, independent of embedded preview success.
@@ -1889,6 +1972,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
 
     private func dynamicContentReuseKeyForTextualBubble(
         message: Message,
+        bodyRenderContent: String,
         presentation: MessagePresentation,
         metrics: ChatFlowTheme.Metrics,
         sizeClass: MessageSizeClass,
@@ -1909,7 +1993,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         return DynamicContentReuseKey(
             sessionKey: message.sessionKey,
             messageId: message.id,
-            content: message.content,
+            content: bodyRenderContent,
             role: message.role,
             deliveryState: message.deliveryState,
             displayName: message.displayName,
@@ -2034,7 +2118,6 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         updateReplyIndicator()
         applyCollapsedUserOnlyInteractionMode()
         suppressExpandTapForLinkCards = false
-        allowSwipeUpExpandForSingleLink = false
         timestampDate = nil
         timestampRefreshTimer?.invalidate()
         timestampRefreshTimer = nil
@@ -2371,7 +2454,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
 
     func preferredWidth(maxWidth: CGFloat, minWidth: CGFloat = 120) -> CGFloat {
         let headerWidth: CGFloat = showsHeader
-            ? (32 + headerStack.spacing + senderLabel.intrinsicContentSize.width)
+            ? (32 + headerStack.spacing + headerLeadingContentWidth(fittingWidth: maxWidth))
             : 0
         let replyWidth: CGFloat = replyIndicatorContainer.isHidden
             ? 0
@@ -2395,7 +2478,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             withHorizontalFittingPriority: .required,
             verticalFittingPriority: .fittingSizeLevel
         )
-        return max(0, measured.height)
+        return max(0, measured.height, dynamicContentStack.bounds.height)
     }
 
     @objc private func handleBodyTap(_ recognizer: UITapGestureRecognizer) {
@@ -2411,11 +2494,14 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         handleBubbleTap()
     }
 
-    @objc private func handleBodyHover(_ recognizer: UIHoverGestureRecognizer) {
+    @objc private func handleTextHover(_ recognizer: UIHoverGestureRecognizer) {
         guard recognizer.state == .began || recognizer.state == .changed else {
             return
         }
-        _ = Self.presentGeneratedTextLinkPopupForHover(in: bodyLabel, at: recognizer.location(in: bodyLabel))
+        guard let textView = recognizer.view as? UITextView else {
+            return
+        }
+        _ = Self.presentGeneratedTextLinkPopupForHover(in: textView, at: recognizer.location(in: textView))
     }
 
     @objc private func handleBubbleTap() {
@@ -2568,13 +2654,6 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         return true
     }
 
-    @objc private func handleBubbleSwipeUp() {
-        guard allowSwipeUpExpandForSingleLink else {
-            return
-        }
-        onRequestExpand?()
-    }
-
     private func stripAttachmentSummaryIfNeeded() {
         guard let text = bodyLabel.attributedText?.string else { return }
         let lines = text.components(separatedBy: .newlines)
@@ -2631,11 +2710,40 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             )
             actions.append(command)
         }
+        if let linksMenu = MessageDetectedTextLinkMenuBuilder.linksSubmenu(
+            from: bodyLabel.attributedText,
+            isSpatial: Self.isSpatialPlatform,
+            actionHandler: { [weak self] link in
+                self?.openDetectedTextLink(link)
+            }
+        ) {
+            actions.append(linksMenu)
+        }
         return actions.isEmpty ? nil : UIMenu(children: actions)
     }
 
     @objc private func handleToggleShowOnlyUserMessagesCommand(_ sender: UICommand) {
         onToggleShowOnlyUserMessages?()
+    }
+
+    private func openDetectedTextLink(_ link: MessageDetectedTextLink) {
+        if link.isGenerated {
+            _ = GeneratedTextLinkActivationRouter.activateGeneratedLinkTap(
+                link.url,
+                displayMode: link.displayMode,
+                from: bodyLabel
+            )
+            return
+        }
+        UIApplication.shared.open(link.url)
+    }
+
+    private static var isSpatialPlatform: Bool {
+#if os(visionOS)
+        true
+#else
+        false
+#endif
     }
 
     @available(iOS 17.0, macCatalyst 17.0, visionOS 1.0, *)
@@ -2740,6 +2848,10 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         )
     }
 
+    func debugBubbleGradientColorsForTests() -> [UIColor] {
+        (gradientLayer.colors as? [CGColor] ?? []).map(UIColor.init(cgColor:))
+    }
+
     private func replyIndicatorUncappedTextHeightForTests() -> CGFloat {
         guard replyIndicatorTextView.bounds.width > 0 else { return 0 }
         let originalLineLimit = replyIndicatorTextView.textContainer.maximumNumberOfLines
@@ -2754,9 +2866,49 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private func metadataNeededWidth() -> CGFloat {
         avatarView.bounds.width
             + headerStack.spacing
-            + senderLabel.intrinsicContentSize.width
+            + headerLeadingContentWidth()
             + 8
             + timestampLabel.intrinsicContentSize.width
+    }
+
+    /// Width of the leading header content — the provenance chip when it is shown,
+    /// otherwise the sender label. Used by header sizing so the chip participates in
+    /// preferred-width and timestamp-visibility math the same way the label does.
+    private func headerLeadingContentWidth(fittingWidth: CGFloat = .greatestFiniteMagnitude) -> CGFloat {
+        guard provenanceChipVisible else {
+            return senderLabel.intrinsicContentSize.width
+        }
+        return provenanceChipView.systemLayoutSizeFitting(
+            CGSize(width: fittingWidth, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .fittingSizeLevel,
+            verticalFittingPriority: .fittingSizeLevel
+        ).width
+    }
+
+    /// Show the provenance chip in place of the "You" sender label for a wake-delivered
+    /// message, or restore the plain label when there is no recognized origin.
+    private func applyProvenanceChip(
+        origin: MessageProvenanceOrigin?,
+        senderColor: UIColor,
+        isCanceled: Bool,
+        isDark: Bool
+    ) {
+        guard let origin else {
+            provenanceChipVisible = false
+            provenanceChipView.isHidden = true
+            senderLabel.isHidden = false
+            return
+        }
+        let chipText = origin.chipGlyph.map { "\($0) \(origin.chipLabel)" } ?? origin.chipLabel
+        let baseColor = isCanceled ? ChatFlowUIKitTheme.canceledText(isDark: isDark) : senderColor
+        provenanceChipView.configure(
+            text: chipText,
+            textColor: baseColor,
+            fillColor: baseColor.withAlphaComponent(0.14)
+        )
+        provenanceChipView.isHidden = false
+        provenanceChipVisible = true
+        senderLabel.isHidden = true
     }
 
     private func updateReplyIndicator() {
@@ -2999,6 +3151,8 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             enableDataDetectors: false
         )
         textView.attributedText = attributed
+        let hover = UIHoverGestureRecognizer(target: self, action: #selector(handleTextHover(_:)))
+        textView.addGestureRecognizer(hover)
 
         container.addSubview(textView)
         let textPrefersFillWidth = textView.widthAnchor.constraint(equalTo: container.widthAnchor)
@@ -3763,6 +3917,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
     private var messageSnippet: String = ""
     private var lastMismatch: (bounds: CGRect, bubble: CGRect)?
     private var lastDebugGeometry: (bounds: CGRect, bubble: CGRect, content: CGRect, body: CGRect)?
+    private var lastLayoutRequestMessageId: String?
     private var onRequestLayout: ((String) -> Void)?
     private var flashOverlayView: UIView?
 
@@ -3791,6 +3946,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
     }
 
     func configure(message: Message,
+                   stream: ChatStream,
                    presentation: MessagePresentation,
                    sendIndicatorState: MessageSendIndicatorState?,
                    isCompact: Bool,
@@ -3799,6 +3955,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
                    truncationHeightOverride: CGFloat? = nil,
                    bubbleSizingV2: BubbleSizingV2.LayoutState? = nil,
                    showsHeader: Bool = true,
+                   showsProvenanceChrome: Bool = false,
                    isDark: Bool? = nil,
                    terminalConnectionPool: TerminalSessionConnectionPool? = nil,
                    webBubbleCoordinator: (any WebBubbleCoordinating)? = nil,
@@ -3817,6 +3974,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
         messageId = message.id
         messageSessionKey = message.sessionKey
         messageSnippet = String(message.content.prefix(80))
+        lastLayoutRequestMessageId = nil
         let guardedRequestLayout: (String) -> Void = { [weak self] requestedId in
             guard let self, self.messageId == requestedId, self.messageSessionKey == message.sessionKey else { return }
             onRequestLayout?(requestedId)
@@ -3824,6 +3982,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
         self.onRequestLayout = guardedRequestLayout
         containerView.configure(
             message: message,
+            stream: stream,
             presentation: presentation,
             sendIndicatorState: sendIndicatorState,
             isCompact: isCompact,
@@ -3832,6 +3991,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
             truncationHeightOverride: truncationHeightOverride,
             bubbleSizingV2: bubbleSizingV2,
             showsHeader: showsHeader,
+            showsProvenanceChrome: showsProvenanceChrome,
             isDark: isDark,
             terminalConnectionPool: terminalConnectionPool,
             webBubbleCoordinator: webBubbleCoordinator,
@@ -3860,6 +4020,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
         messageSnippet = ""
         lastMismatch = nil
         lastDebugGeometry = nil
+        lastLayoutRequestMessageId = nil
         onRequestLayout = nil
     }
 
@@ -3950,6 +4111,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
         let xDelta = abs(bubbleInCell.minX - bounds.minX)
         guard heightDelta > 1 || widthDelta > 1 || yDelta > 1 || xDelta > 1 else {
             lastMismatch = nil
+            lastLayoutRequestMessageId = nil
             return
         }
         if let lastMismatch,
@@ -3970,6 +4132,10 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
         Self.logger.info("UIKit bubble mismatch id=\(id) session=\(sessionKey) snippet=\"\(snippet)\"")
         Self.logger.info("UIKit bubble mismatch bounds=\(boundsDesc)")
         Self.logger.info("UIKit bubble mismatch bubble=\(bubbleDesc)")
+        if heightDelta > 8, !id.isEmpty, lastLayoutRequestMessageId != id {
+            lastLayoutRequestMessageId = id
+            onRequestLayout?(id)
+        }
     }
 
     private func emitT1193RowBoundsDebugIfNeeded() {

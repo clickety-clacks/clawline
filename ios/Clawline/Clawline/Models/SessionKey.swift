@@ -36,10 +36,6 @@ enum SessionKey {
         return isClawlineCustomStreamSuffix(suffix)
     }
 
-    static func stream(for sessionKey: String) -> ChatStream {
-        SessionRegistry.shared.stream(for: sessionKey)
-    }
-
     private static func isClawlineCustomStreamSuffix(_ suffix: String) -> Bool {
         guard suffix.count == 10, suffix.hasPrefix("s_") else { return false }
         return suffix.dropFirst(2).unicodeScalars.allSatisfy { scalar in

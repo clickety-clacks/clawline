@@ -58,6 +58,27 @@ struct KeyboardCommandRouterTests {
         assertRoute(.textModifiedNewline, in: store, isHandledBy: .notificationReply("n0"), rule: "PR-05")
     }
 
+    @Test("T1354 notification shortcut routing follows stable source identity after order changes")
+    func notificationShortcutRoutingFollowsStableSourceIdentityAfterOrderChanges() {
+        let originalStore = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: ["older", "target", "newer"],
+            mentionPickerVisible: false,
+            composerFocused: true,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
+        assertRoute(.notificationAssignedOpen(1), in: originalStore, isHandledBy: .notificationBubble("target"), rule: "PR-03")
+
+        let reorderedStore = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: ["incoming", "older", "target"],
+            mentionPickerVisible: false,
+            composerFocused: true,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
+        assertRoute(.notificationAssignedOpen(2), in: reorderedStore, isHandledBy: .notificationBubble("target"), rule: "PR-03")
+    }
+
     @Test("T1210 selector plain number shortcuts override notification open only while selector owns slot")
     func selectorPlainNumberShortcutsOverrideNotificationOpenOnlyWhileSelectorOwnsSlot() {
         var selectorStore = KeyboardOwnershipSceneFactory.chatScene(
@@ -458,6 +479,12 @@ struct KeyboardCommandRouterTests {
 #endif
     }
 
+    @Test("T1190 notification shortcut indicators follow hardware keyboard availability")
+    func notificationShortcutIndicatorsFollowHardwareKeyboardAvailability() {
+        #expect(CrossChatNotificationShortcutIndicatorAvailability.current(coalescedKeyboardPresent: true) == true)
+        #expect(CrossChatNotificationShortcutIndicatorAvailability.current(coalescedKeyboardPresent: false) == false)
+    }
+
     @Test("T343 VG-03 mention picker open close cannot poison notification scroll ownership")
     func mentionPickerOpenCloseCannotPoisonNotificationScrollOwnership() {
         let openStore = KeyboardOwnershipSceneFactory.chatScene(
@@ -721,6 +748,42 @@ struct KeyboardCommandRouterTests {
         )
     }
 
+    @Test("Notification stack intents have exactly one overlay execution owner")
+    func notificationStackIntentsBypassRootRedispatch() {
+        let store = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: ["n0"],
+            mentionPickerVisible: false,
+            composerFocused: true,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
+
+        #expect(
+            KeyboardCommandRouter.route(
+                intent: .notificationToggleDock,
+                store: store
+            ).outcome == .handled(.notificationBubble("n0"))
+        )
+        #expect(
+            ChatRootKeyboardCommandDispatch.notificationNames(
+                for: .notificationToggleDock,
+                keyboardOwnershipStore: store
+            ).isEmpty
+        )
+        #expect(
+            KeyboardCommandRouter.route(
+                intent: .notificationDismissAll,
+                store: store
+            ).outcome == .handled(.notificationBubble("n0"))
+        )
+        #expect(
+            ChatRootKeyboardCommandDispatch.notificationNames(
+                for: .notificationDismissAll,
+                keyboardOwnershipStore: store
+            ).isEmpty
+        )
+    }
+
     @Test("Shortcut authority Cmd-J/K fan out through bubble scroll while Cmd-Shift-J/K stays transcript")
     func shortcutAuthorityPhysicalScrollShortcutsUseCorrectRootBridge() {
         for composerFocused in [false, true] {
@@ -887,6 +950,8 @@ struct KeyboardCommandRouterTests {
                         return .scrollChatUp
                     case .notificationAssignedOpen, .notificationAssignedReply, .notificationAssignedDismiss:
                         return .notificationNumber
+                    case .notificationDismissAll, .notificationToggleDock:
+                        return .notificationStack
                     default:
                         return nil
                     }
@@ -912,6 +977,9 @@ struct KeyboardCommandRouterTests {
                 .scrollUp,
                 .scrollChatDown,
                 .scrollChatUp,
+                .notificationStack,
+                .notificationStack,
+                .notificationStack,
                 .notificationNumber,
                 .notificationNumber,
                 .notificationNumber,

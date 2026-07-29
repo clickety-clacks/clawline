@@ -28,8 +28,7 @@ enum ClawlineCoreRuntimeServicesFactory {
             connector: connector,
             deviceId: device.deviceId,
             userIdProvider: { authManager.currentUserId },
-            authTokenProvider: { @MainActor in authManager.token },
-            adoptedSessionKeysProvider: { SessionRegistry.shared.adoptedSessionKeys() }
+            authTokenProvider: { @MainActor in authManager.token }
         )
         let uploadService = UploadService(
             auth: authManager,

@@ -7,10 +7,15 @@
 
 import Testing
 import UIKit
+import SafariServices
 import WebKit
 @testable import Clawline
 
 struct BubbleScrollTests {
+    @Test("T1377: repaired bubble sizing path is active in production")
+    func repairedBubbleSizingPathIsActiveInProduction() {
+        #expect(BubbleSizingV2.isEnabled)
+    }
 
     @Test("Bug #62: Truncated bubbles enable inner scroll when link preview pushes content past cap")
     @MainActor
@@ -79,6 +84,7 @@ struct BubbleScrollTests {
         for bubble in [visibleBubble, measurementBubble] {
             bubble.configure(
                 message: message,
+                stream: .personal,
                 presentation: presentation,
                 sizeClass: sizeClass,
                 metrics: metrics,
@@ -101,6 +107,174 @@ struct BubbleScrollTests {
 
         #expect(visibleDetectors.contains([.link]))
         #expect(measurementDetectors.allSatisfy { $0.isEmpty })
+    }
+
+    @Test("T1193: Collection rows are tallest bubble plus row spacing without stretching peer bubbles")
+    func collectionRowHeightIsOwnedByTallestBubbleWithoutStretchingPeers() {
+        let result = MessageFlowRowLayoutEngine.layout(
+            items: [
+                .init(index: 0, size: CGSize(width: 90, height: 42)),
+                .init(index: 1, size: CGSize(width: 80, height: 88)),
+                .init(index: 2, size: CGSize(width: 120, height: 56)),
+                .init(index: 3, size: CGSize(width: 70, height: 64))
+            ],
+            contentWidth: 220,
+            sectionInset: UIEdgeInsets(top: 7, left: 5, bottom: 11, right: 5),
+            minimumInteritemSpacing: 3,
+            rowSpacing: { previous, next in previous == 1 && next == 2 ? 17 : 13 }
+        )
+        let frames = Dictionary(uniqueKeysWithValues: result.items.map { ($0.index, $0.frame) })
+        let firstRowTallestBubble = max(frames[0]?.height ?? 0, frames[1]?.height ?? 0)
+        let secondRowTallestBubble = max(frames[2]?.height ?? 0, frames[3]?.height ?? 0)
+        let expectedSecondRowY: CGFloat = 7 + firstRowTallestBubble + 17
+        let expectedContentHeight = expectedSecondRowY + secondRowTallestBubble + 11
+
+        #expect(abs((frames[0]?.height ?? 0) - 42) < 0.5)
+        #expect(abs((frames[1]?.height ?? 0) - 88) < 0.5)
+        #expect(abs((frames[2]?.height ?? 0) - 56) < 0.5)
+        #expect(abs((frames[3]?.height ?? 0) - 64) < 0.5)
+        #expect((frames[0]?.height ?? 0) < firstRowTallestBubble)
+        #expect((frames[2]?.height ?? 0) < secondRowTallestBubble)
+        #expect(abs((frames[2]?.minY ?? 0) - expectedSecondRowY) < 0.5)
+        #expect(abs((frames[3]?.minY ?? 0) - expectedSecondRowY) < 0.5)
+        #expect(abs(result.contentSize.height - expectedContentHeight) < 0.5)
+    }
+
+    @Test("T1193: Cached item-height reflow uses row-owned delta and leaves bubble heights content-owned")
+    func cachedRowHeightChangeReflowsByTallestBubbleDeltaWithoutStretchingPeers() {
+        let before = MessageFlowRowLayoutEngine.layout(
+            items: [
+                .init(index: 0, size: CGSize(width: 86, height: 40)),
+                .init(index: 1, size: CGSize(width: 92, height: 70)),
+                .init(index: 2, size: CGSize(width: 100, height: 52))
+            ],
+            contentWidth: 210,
+            sectionInset: UIEdgeInsets(top: 4, left: 4, bottom: 6, right: 4),
+            minimumInteritemSpacing: 4,
+            rowSpacing: { _, _ in 12 }
+        )
+        let beforeFrames = Dictionary(uniqueKeysWithValues: before.items.map { ($0.index, $0.frame) })
+        guard let updated = MessageFlowRowLayoutEngine.applyItemHeightChange(
+            frames: beforeFrames,
+            contentHeight: before.contentSize.height,
+            index: 0,
+            delta: 55
+        ) else {
+            Issue.record("T1193 cached row height update unexpectedly fell back to a rebuild")
+            return
+        }
+
+        let oldTallest = max(beforeFrames[0]?.height ?? 0, beforeFrames[1]?.height ?? 0)
+        let newTallest = max(updated.frames[0]?.height ?? 0, updated.frames[1]?.height ?? 0)
+        let expectedRowDelta = newTallest - oldTallest
+
+        #expect(abs((updated.frames[0]?.height ?? 0) - 95) < 0.5)
+        #expect(abs((updated.frames[1]?.height ?? 0) - 70) < 0.5)
+        #expect(abs((updated.frames[2]?.height ?? 0) - 52) < 0.5)
+        #expect((updated.frames[1]?.height ?? 0) < newTallest)
+        #expect(abs(((updated.frames[2]?.minY ?? 0) - (beforeFrames[2]?.minY ?? 0)) - expectedRowDelta) < 0.5)
+        #expect(abs(updated.contentHeight - (before.contentSize.height + expectedRowDelta)) < 0.5)
+    }
+
+    @Test("T1193: Message row spacing uses the standard left-edge visual padding token")
+    func messageRowSpacingMatchesLeftEdgePaddingToken() {
+        let compact = ChatFlowTheme.Metrics(isCompact: true)
+        let regular = ChatFlowTheme.Metrics(isCompact: false)
+
+        #expect(MessageBubbleGeometry.adjacentMessageRowSpacing(metrics: compact) == compact.containerPadding)
+        #expect(MessageBubbleGeometry.adjacentMessageRowSpacing(metrics: regular) == regular.containerPadding)
+        #expect(
+            MessageBubbleGeometry.adjacentMessageRowSpacing(metrics: regular)
+                == MessageFlowCollectionViewController.flowSectionInset(
+                    containerPadding: regular.containerPadding,
+                    trailingContentInset: 0
+                ).left
+        )
+    }
+
+    @Test("T1193: V2 remeasure can update offscreen cached geometry before scrollback visibility")
+    func bubbleSizingV2RemeasurePolicyDoesNotWaitForNearBottomAtRest() {
+        #expect(
+            MessageFlowCollectionViewController.shouldApplyBubbleSizingV2Remeasure(
+                isNearBottom: false,
+                isScrollAtRest: true
+            )
+        )
+        #expect(
+            MessageFlowCollectionViewController.shouldApplyBubbleSizingV2Remeasure(
+                isNearBottom: true,
+                isScrollAtRest: true
+            )
+        )
+        #expect(
+            !MessageFlowCollectionViewController.shouldApplyBubbleSizingV2Remeasure(
+                isNearBottom: true,
+                isScrollAtRest: false
+            )
+        )
+    }
+
+    @Test("T1377: async preview height feedback converges within the four-point epsilon")
+    func bubbleSizingV2AsyncPreviewHeightConvergencePolicy() {
+        #expect(
+            MessageFlowCollectionViewController.bubbleSizingV2AsyncPreviewHeightChanged(
+                previous: nil,
+                next: 240
+            )
+        )
+        #expect(
+            !MessageFlowCollectionViewController.bubbleSizingV2AsyncPreviewHeightChanged(
+                previous: 240,
+                next: 244
+            )
+        )
+        #expect(
+            MessageFlowCollectionViewController.bubbleSizingV2AsyncPreviewHeightChanged(
+                previous: 240,
+                next: 245
+            )
+        )
+    }
+
+    @Test("T1377: only settled content accepts one consumed remeasure per settle")
+    func bubbleSizingV2SettleAcceptancePolicy() {
+        #expect(
+            MessageFlowCollectionViewController.shouldQueueBubbleSizingV2AsyncRemeasure(
+                isContentSettled: true,
+                alreadyAcceptedInSettle: false
+            )
+        )
+        #expect(
+            !MessageFlowCollectionViewController.shouldQueueBubbleSizingV2AsyncRemeasure(
+                isContentSettled: true,
+                alreadyAcceptedInSettle: true
+            )
+        )
+        #expect(
+            !MessageFlowCollectionViewController.shouldQueueBubbleSizingV2AsyncRemeasure(
+                isContentSettled: false,
+                alreadyAcceptedInSettle: false
+            )
+        )
+    }
+
+    @Test("T1377: mixed web producers retain late preview geometry in the production revision")
+    func bubbleSizingV2MixedWebProducerRevisionTracksFinalGeometry() throws {
+        let token = try #require(UUID(uuidString: "11111111-2222-3333-4444-555555555555"))
+        let initial = MessageFlowCollectionViewController.bubbleSizingV2AsyncProducerRevision(
+            htmlGeometryRevisions: [1],
+            previewLoadToken: token,
+            previewHeight: 180
+        )
+        let late = MessageFlowCollectionViewController.bubbleSizingV2AsyncProducerRevision(
+            htmlGeometryRevisions: [1],
+            previewLoadToken: token,
+            previewHeight: 260
+        )
+
+        #expect(initial == "html:1|preview:11111111-2222-3333-4444-555555555555:180")
+        #expect(late == "html:1|preview:11111111-2222-3333-4444-555555555555:260")
+        #expect(initial != late)
     }
 
     @Test("BubbleSizingV2 short bubbles honor the plan min width instead of the legacy 120pt floor")
@@ -170,6 +344,7 @@ struct BubbleScrollTests {
         let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: planMaxWidth, height: 1))
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: sizeClass,
             metrics: metrics,
@@ -269,6 +444,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: sizeClass,
             metrics: metrics,
@@ -287,6 +463,7 @@ struct BubbleScrollTests {
         )
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: sizeClass,
             metrics: metrics,
@@ -769,6 +946,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: firstMessage,
+            stream: .personal,
             presentation: firstPresentation,
             sizeClass: firstSizeClass,
             metrics: metrics,
@@ -795,6 +973,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: secondMessage,
+            stream: .personal,
             presentation: secondPresentation,
             sizeClass: secondSizeClass,
             metrics: metrics,
@@ -814,6 +993,172 @@ struct BubbleScrollTests {
         bubble.layoutIfNeeded()
 
         #expect(abs(scroll.contentOffset.y) < 0.5)
+    }
+
+    @Test("T1487: Rendered markdown attributed strings carry no trailing newline slack")
+    @MainActor
+    func renderedMarkdownStringsCarryNoTrailingNewlineSlack() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let cases: [(id: String, content: String)] = [
+            ("plain-user", "So it's deployable"),
+            ("assistant-para", "First paragraph of a real reply.\n\nSecond paragraph continues here."),
+            ("assistant-list", "Here is a checklist:\n\n- first item\n- second item\n- third item"),
+            ("assistant-code", "Example code:\n\n```swift\nlet value = 42\n```"),
+            ("assistant-heading", "## Section\n\nContent under the heading."),
+            ("trailing-newline-source", "Message with trailing newline.\n"),
+        ]
+
+        for entry in cases {
+            let content = UnifiedMarkdownRenderer.makeContent(
+                messageText: entry.content,
+                context: MarkdownMessageRenderContext(
+                    role: .assistant,
+                    messageID: entry.id,
+                    metrics: metrics
+                ),
+                baseFont: UIFont.clawline(.bodyText),
+                inkColor: .black,
+                lineSpacing: 4,
+                stripDetectedURLs: false,
+                isDark: false
+            )
+
+            for block in content.renderedBlocks {
+                guard case .attributedText(let attributed) = block else { continue }
+                let hasTrailingNewline = attributed.string.last?.isNewline == true
+                #expect(
+                    !hasTrailingNewline,
+                    "\(entry.id): rendered attributed string ends with newline: \(attributed.string.debugDescription)"
+                )
+            }
+        }
+    }
+
+    @Test("T1487: Markdown text view fitting height matches trailing-stripped height")
+    @MainActor
+    func markdownTextViewFittingHeightMatchesTrailingStripped() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let cases: [(id: String, content: String)] = [
+            ("plain-user", "So it's deployable"),
+            ("assistant-para", "First paragraph of a real reply.\n\nSecond paragraph continues here."),
+            ("assistant-list", "Here is a checklist:\n\n- first item\n- second item\n- third item"),
+            ("assistant-code", "Example code:\n\n```swift\nlet value = 42\n```"),
+            ("trailing-newline-source", "Message with trailing newline.\n"),
+        ]
+        let measureWidth: CGFloat = 300
+
+        for entry in cases {
+            let content = UnifiedMarkdownRenderer.makeContent(
+                messageText: entry.content,
+                context: MarkdownMessageRenderContext(
+                    role: .assistant,
+                    messageID: entry.id,
+                    metrics: metrics
+                ),
+                baseFont: UIFont.clawline(.bodyText),
+                inkColor: .black,
+                lineSpacing: 4,
+                stripDetectedURLs: false,
+                isDark: false
+            )
+
+            for block in content.renderedBlocks {
+                guard case .attributedText(let attributed) = block else { continue }
+
+                let textView = UITextView()
+                UnifiedMarkdownRenderer.configureTextView(textView, delegate: nil)
+                textView.attributedText = attributed
+                let currentHeight = textView.sizeThatFits(
+                    CGSize(width: measureWidth, height: .greatestFiniteMagnitude)
+                ).height
+
+                let mutable = NSMutableAttributedString(attributedString: attributed)
+                while mutable.length > 0,
+                      let lastScalar = mutable.string.unicodeScalars.last,
+                      CharacterSet.whitespacesAndNewlines.contains(lastScalar) {
+                    mutable.deleteCharacters(in: NSRange(location: mutable.length - 1, length: 1))
+                }
+                textView.attributedText = mutable
+                let strippedHeight = textView.sizeThatFits(
+                    CGSize(width: measureWidth, height: .greatestFiniteMagnitude)
+                ).height
+
+                let hiddenSlack = currentHeight - strippedHeight
+                #expect(
+                    hiddenSlack <= 1.0,
+                    "\(entry.id): trailing newline slack = \(hiddenSlack)pt (current=\(currentHeight), stripped=\(strippedHeight))"
+                )
+            }
+        }
+    }
+
+    @Test("T1487: Markdown text-only bubble glyph bottom stays tight to bubble bottom")
+    @MainActor
+    func markdownTextOnlyBubbleGlyphBottomStaysTight() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let cases: [(id: String, content: String, role: Message.Role)] = [
+            ("plain-user", "So it's deployable", .user),
+            ("assistant-para", "First paragraph of a real reply.\n\nSecond paragraph continues here.", .assistant),
+            ("assistant-list", "Here is a checklist:\n\n- first item\n- second item\n- third item", .assistant),
+        ]
+
+        for entry in cases {
+            let message = Message(
+                id: entry.id,
+                role: entry.role,
+                content: entry.content,
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: "agent:main:clawline:flynn:s_111df227"
+            )
+            let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+            let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 360, height: 1))
+            bubble.configure(
+                message: message,
+                stream: .personal,
+                presentation: presentation,
+                sizeClass: MessageFlowRules.sizeClass(for: presentation),
+                metrics: metrics,
+                maxWidth: 360,
+                truncationHeightOverride: 1000,
+                bubbleSizingV2: nil,
+                showsHeader: false,
+                paddingScale: 1,
+                minWidthOverride: nil,
+                maxWidthOverride: nil,
+                useContinuousCorners: true,
+                isDark: false,
+                onRequestExpand: nil,
+                onRequestLayout: nil,
+                onInteractiveCallback: nil
+            )
+            let measured = bubble.systemLayoutSizeFitting(
+                CGSize(width: 360, height: UIView.layoutFittingCompressedSize.height),
+                withHorizontalFittingPriority: .required,
+                verticalFittingPriority: .fittingSizeLevel
+            )
+            bubble.frame = CGRect(origin: .zero, size: measured)
+            bubble.setNeedsLayout()
+            bubble.layoutIfNeeded()
+            bubble.layoutIfNeeded()
+
+            let bodyTexts = textViews(in: bubble)
+            guard let lastTextView = bodyTexts.max(by: {
+                $0.convert($0.bounds, to: bubble).maxY < $1.convert($1.bounds, to: bubble).maxY
+            }) else {
+                Issue.record("No body text view found for \(entry.id)")
+                continue
+            }
+
+            let glyphFrame = renderedGlyphFrame(for: lastTextView, in: bubble)
+            let glyphToBubbleBottom = bubble.bounds.maxY - glyphFrame.maxY
+            #expect(
+                glyphToBubbleBottom <= metrics.bubblePaddingBottom + 2.5,
+                "\(entry.id): glyph-to-bottom gap = \(glyphToBubbleBottom), expected <= \(metrics.bubblePaddingBottom + 2.5)"
+            )
+        }
     }
 
     @Test("T1193: Production text bubble metrics stay compact")
@@ -858,6 +1203,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: MessageFlowRules.sizeClass(for: presentation),
             metrics: metrics,
@@ -902,6 +1248,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: MessageFlowRules.sizeClass(for: presentation),
             metrics: metrics,
@@ -959,6 +1306,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: MessageFlowRules.sizeClass(for: presentation),
             metrics: metrics,
@@ -995,14 +1343,14 @@ struct BubbleScrollTests {
         #expect(bottomChrome <= metrics.bubblePaddingBottom + 12)
     }
 
-    @Test("T1193: live cell mismatch is diagnostic, not production remeasurement")
+    @Test("T1487: oversized normal-message cells request live remeasurement")
     @MainActor
-    func liveCellMismatchDoesNotRequestProductionRemeasurement() async {
+    func oversizedNormalMessageCellRequestsLiveRemeasurement() async {
         let metrics = ChatFlowTheme.Metrics(isCompact: true)
         let message = Message(
-            id: "t1193-live-cell-mismatch",
-            role: .assistant,
-            content: "A compact Ansible transcript bubble should not let a stale tall cell remain the row height owner.",
+            id: "t1487-oversized-cell",
+            role: .user,
+            content: "So it's deployable",
             timestamp: Date(),
             streaming: false,
             attachments: [],
@@ -1016,6 +1364,7 @@ struct BubbleScrollTests {
         var requestedIds: [String] = []
         cell.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sendIndicatorState: nil,
             isCompact: true,
@@ -1041,12 +1390,12 @@ struct BubbleScrollTests {
 
         let geometry = renderedBubbleView(in: cell)?.renderedGeometryForTests(in: cell.contentView)
         #expect(geometry?.bubbleFrame.height ?? cell.bounds.height < cell.bounds.height - 100)
-        #expect(requestedIds.isEmpty)
+        #expect(requestedIds == [message.id])
     }
 
-    @Test("T1193: stale cell mismatch does not request layout after session reuse")
+    @Test("T1487: stale cell mismatch does not request previous session layout after reuse")
     @MainActor
-    func staleCellMismatchDoesNotRequestLayoutAfterSessionReuse() async {
+    func staleCellMismatchDoesNotRequestPreviousSessionLayoutAfterReuse() async {
         let metrics = ChatFlowTheme.Metrics(isCompact: true)
         let messageId = "t1193-live-cell-reuse-mismatch"
         let originalMessage = Message(
@@ -1076,6 +1425,7 @@ struct BubbleScrollTests {
         let originalPresentation = buildPresentation(originalMessage, metrics: metrics, enableLinkPreviews: false)
         cell.configure(
             message: originalMessage,
+            stream: .personal,
             presentation: originalPresentation,
             sendIndicatorState: nil,
             isCompact: true,
@@ -1103,6 +1453,7 @@ struct BubbleScrollTests {
         cell.prepareForReuse()
         cell.configure(
             message: reusedMessage,
+            stream: .personal,
             presentation: reusedPresentation,
             sendIndicatorState: nil,
             isCompact: true,
@@ -1124,8 +1475,161 @@ struct BubbleScrollTests {
         )
         await Task.yield()
 
-        #expect(originalRequestedIds.isEmpty)
+        #expect(originalRequestedIds == [messageId])
         #expect(reusedRequestedIds.isEmpty)
+    }
+
+    @Test("T1465: mixed rendered transcript rows keep natural bubble heights")
+    @MainActor
+    func mixedRenderedTranscriptRowsKeepNaturalBubbleHeights() throws {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let maxWidth: CGFloat = 360
+        let cases: [(id: String, role: Message.Role, content: String)] = [
+            ("t1465-user-short", .user, "So it's deployable"),
+            ("t1465-assistant-markdown", .assistant, "First paragraph of a real reply.\n\nSecond paragraph continues here."),
+            ("t1465-user-multiline", .user, "Here is a user message that wraps naturally over multiple lines without needing a viewport cap."),
+            ("t1465-assistant-list", .assistant, "Checklist:\n\n- first item\n- second item\n- third item")
+        ]
+        var y: CGFloat = 0
+        let transcript = UIView(frame: CGRect(x: 0, y: 0, width: maxWidth, height: 1))
+        transcript.backgroundColor = .systemBackground
+        var rows: [[String: Any]] = []
+
+        for entry in cases {
+            let message = Message(
+                id: entry.id,
+                role: entry.role,
+                content: entry.content,
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: "agent:main:clawline:flynn:s_111df227"
+            )
+            let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+            let naturalBubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: maxWidth, height: 1))
+            naturalBubble.configure(
+                message: message,
+                stream: .personal,
+                presentation: presentation,
+                sizeClass: MessageFlowRules.sizeClass(for: presentation),
+                metrics: metrics,
+                maxWidth: maxWidth,
+                truncationHeightOverride: 1000,
+                bubbleSizingV2: nil,
+                showsHeader: false,
+                paddingScale: 1,
+                minWidthOverride: nil,
+                maxWidthOverride: nil,
+                useContinuousCorners: true,
+                isDark: false,
+                onRequestExpand: nil,
+                onRequestLayout: nil,
+                onInteractiveCallback: nil
+            )
+            let naturalSize = naturalBubble.systemLayoutSizeFitting(
+                CGSize(width: maxWidth, height: UIView.layoutFittingCompressedSize.height),
+                withHorizontalFittingPriority: .required,
+                verticalFittingPriority: .fittingSizeLevel
+            )
+
+            var requestedIds: [String] = []
+            let oversizedCellHeight = ceil(naturalSize.height + 48)
+            let cell = MessageBubbleUIKitCell(frame: CGRect(x: 0, y: y, width: maxWidth, height: oversizedCellHeight))
+            cell.contentView.frame = cell.bounds
+            cell.configure(
+                message: message,
+                stream: .personal,
+                presentation: presentation,
+                sendIndicatorState: nil,
+                isCompact: false,
+                maxWidth: naturalSize.width,
+                showsHeader: false,
+                isDark: false,
+                onRequestExpand: nil,
+                onRequestLayout: { requestedIds.append($0) },
+                onInteractiveCallback: nil,
+                onInsertIntoPrompt: nil,
+                onReferenceMessage: nil,
+                onResend: nil
+            )
+            transcript.addSubview(cell)
+            transcript.setNeedsLayout()
+            transcript.layoutIfNeeded()
+            cell.setNeedsLayout()
+            cell.layoutIfNeeded()
+            cell.contentView.setNeedsLayout()
+            cell.contentView.layoutIfNeeded()
+            cell.layoutIfNeeded()
+
+            guard let geometry = renderedBubbleView(in: cell)?.renderedGeometryForTests(in: cell.contentView) else {
+                Issue.record("Expected rendered bubble geometry for \(entry.id)")
+                continue
+            }
+            let bodyStack = markdownBodyStack(in: cell.contentView, arrangedSubviewCountAtLeast: 1)
+            let bodyFrame = bodyStack.map { $0.convert($0.bounds, to: cell.contentView) } ?? .zero
+            let textFrames = textViews(in: cell.contentView).map { renderedGlyphFrame(for: $0, in: cell.contentView) }
+            let textUnion = textFrames.reduce(nil) { partial, frame in
+                partial.map { $0.union(frame) } ?? frame
+            } ?? .zero
+            let viewport = innerBubbleScrollView(in: cell.contentView)
+            let widthConstraintSummary = allConstraints(in: cell.contentView)
+                .filter { ($0.identifier ?? "").contains("MessageBubbleUIKitView") }
+                .map { constraint in
+                    [
+                        "identifier": constraint.identifier ?? "",
+                        "constant": constraint.constant,
+                        "priority": constraint.priority.rawValue
+                    ] as [String: Any]
+                }
+
+            #expect(abs(geometry.bubbleFrame.height - naturalSize.height) <= 1.5)
+            #expect(geometry.bubbleFrame.height < cell.contentView.bounds.height - 8)
+            #expect(requestedIds == [message.id])
+
+            rows.append([
+                "id": entry.id,
+                "role": String(describing: entry.role),
+                "cellFrame": rectDictionary(cell.frame),
+                "cellBounds": rectDictionary(cell.contentView.bounds),
+                "bubbleFrame": rectDictionary(geometry.bubbleFrame),
+                "bodyFrame": rectDictionary(bodyFrame),
+                "textFrame": rectDictionary(textUnion),
+                "measuredContentHeight": naturalBubble.measuredDynamicContentHeight(fittingWidth: maxWidth),
+                "viewportFrame": rectDictionary(viewport?.convert(viewport?.bounds ?? .zero, to: cell.contentView) ?? .zero),
+                "viewportContentInset": insetDictionary(viewport?.contentInset ?? .zero),
+                "bubbleInsets": [
+                    "top": metrics.bubblePaddingTop,
+                    "bottom": metrics.bubblePaddingBottom,
+                    "horizontal": metrics.bubblePaddingHorizontal
+                ],
+                "widthConstraints": widthConstraintSummary
+            ])
+            y += oversizedCellHeight + metrics.flowGap
+        }
+
+        transcript.frame.size.height = y
+        let timestamp = Int(Date().timeIntervalSince1970)
+        let artifactDirectory = ProcessInfo.processInfo.environment["T1465_ROW_SIZING_ARTIFACT_DIR"]
+            ?? ProcessInfo.processInfo.environment["TEST_RUNNER_T1465_ROW_SIZING_ARTIFACT_DIR"]
+            ?? NSTemporaryDirectory()
+        let directory = URL(fileURLWithPath: artifactDirectory, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let jsonURL = directory.appendingPathComponent("clawline-t1465-row-sizing-\(timestamp).json")
+        let pngURL = directory.appendingPathComponent("clawline-t1465-row-sizing-\(timestamp).png")
+        let payload: [String: Any] = [
+            "source": "BubbleScrollTests.mixedRenderedTranscriptRowsKeepNaturalBubbleHeights",
+            "bsRefs": ["BS-01", "BS-02", "BS-03", "BS-04", "BS-05", "BS-06", "BS-07", "BS-08", "BS-09"],
+            "invariant": "cell/row height must not stretch normal plain/markdown bubbles beyond natural rendered height",
+            "rows": rows
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: jsonURL)
+        let image = UIGraphicsImageRenderer(bounds: transcript.bounds).image { _ in
+            transcript.drawHierarchy(in: transcript.bounds, afterScreenUpdates: true)
+        }
+        try image.pngData()?.write(to: pngURL)
+        print("T1465_ROW_SIZING_ARTIFACT json=\(jsonURL.path) png=\(pngURL.path)")
     }
 
     @Test("T1193: Rendered text bubble bottom chrome is tighter than top chrome")
@@ -1147,6 +1651,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: MessageFlowRules.sizeClass(for: presentation),
             metrics: metrics,
@@ -1229,8 +1734,23 @@ struct BubbleScrollTests {
             metrics: metrics,
             injectedViewportHeight: 260
         )
+        let shortMessage = Message(
+            id: "t1390-multiline-user-baseline",
+            role: .user,
+            content: "OK",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:flynn:s_111df227"
+        )
+        let shortMeasured = measuredUserBubble(
+            message: shortMessage,
+            metrics: metrics,
+            injectedViewportHeight: 260
+        )
 
-        #expect(measured.height > 80)
+        #expect(measured.height > shortMeasured.height)
         #expect(measured.height < 150)
     }
 
@@ -1298,6 +1818,7 @@ struct BubbleScrollTests {
         )
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: sizeClass,
             metrics: metrics,
@@ -1521,6 +2042,7 @@ struct BubbleScrollTests {
         cell.contentView.frame = cell.bounds
         cell.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sendIndicatorState: nil,
             isCompact: false,
@@ -1575,6 +2097,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: sizeClass,
             metrics: metrics,
@@ -1762,6 +2285,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: longMessage,
+            stream: .personal,
             presentation: longPresentation,
             sizeClass: longSizeClass,
             metrics: metrics,
@@ -1793,6 +2317,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: shortMessage,
+            stream: .personal,
             presentation: shortPresentation,
             sizeClass: shortSizeClass,
             metrics: metrics,
@@ -1841,6 +2366,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: sizeClass,
             metrics: metrics,
@@ -1964,6 +2490,7 @@ struct BubbleScrollTests {
         var layoutRequests = 0
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: MessageFlowRules.sizeClass(for: presentation),
             metrics: metrics,
@@ -2035,9 +2562,9 @@ struct BubbleScrollTests {
         #expect(expandsWithPreview == 0)
     }
 
-    @Test("T118: Single-link bubble swipe-up opens expanded viewer")
+    @Test("T118-R1/R2: Single-link bubble has no swipe expansion and retains card tap action")
     @MainActor
-    func singleLinkSwipeUpRequestsExpand() {
+    func singleLinkInteractionUsesCardTapOnly() {
         let metrics = ChatFlowTheme.Metrics(isCompact: false)
         let singleLinkMessage = Message(
             id: "single-link-swipe-up",
@@ -2049,42 +2576,50 @@ struct BubbleScrollTests {
             deviceId: nil,
             sessionKey: "server:personal"
         )
-        let multiLinkMessage = Message(
-            id: "multi-link-swipe-up",
+        let singleLinkPresentation = buildPresentation(singleLinkMessage, metrics: metrics, enableLinkPreviews: true)
+        let bubble = configuredBubble(
+            message: singleLinkMessage,
+            presentation: singleLinkPresentation,
+            metrics: metrics
+        )
+        let cards = allSubviews(in: bubble).compactMap { $0 as? LinkCardUIKitView }
+        #expect(cards.count == 1)
+        guard let card = cards.first,
+              let interactionSurface = bubbleInteractionSurface(containing: card, within: bubble) else {
+            Issue.record("Expected single-link card on the bubble interaction surface")
+            return
+        }
+        #expect(interactionSurface.gestureRecognizers?.contains(where: { $0 is UISwipeGestureRecognizer }) == false)
+        #expect(card.allControlEvents.contains(.touchUpInside))
+
+        let host = UIViewController()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.addSubview(bubble)
+        card.sendActions(for: .touchUpInside)
+        #expect(host.presentedViewController is SFSafariViewController)
+        window.isHidden = true
+    }
+
+    @Test("T118-R3/R4: Unrelated overflow tap expansion remains conditional")
+    @MainActor
+    func nonLinkBubbleTapExpandsOnlyWhenOverflowing() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let message = Message(
+            id: "non-link-overflow",
             role: .assistant,
-            content: "Links:\nhttps://a.example\nhttps://b.example",
+            content: "Plain message content",
             timestamp: Date(),
             streaming: false,
             attachments: [],
             deviceId: nil,
             sessionKey: "server:personal"
         )
+        let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: true)
 
-        let singleLinkPresentation = buildPresentation(singleLinkMessage, metrics: metrics, enableLinkPreviews: true)
-        let multiLinkPresentation = buildPresentation(multiLinkMessage, metrics: metrics, enableLinkPreviews: true)
-        let noPreviewPresentation = buildPresentation(singleLinkMessage, metrics: metrics, enableLinkPreviews: false)
-
-        #expect(
-            swipeUpExpandCallbackCount(
-                message: singleLinkMessage,
-                presentation: singleLinkPresentation,
-                metrics: metrics
-            ) == 1
-        )
-        #expect(
-            swipeUpExpandCallbackCount(
-                message: multiLinkMessage,
-                presentation: multiLinkPresentation,
-                metrics: metrics
-            ) == 0
-        )
-        #expect(
-            swipeUpExpandCallbackCount(
-                message: singleLinkMessage,
-                presentation: noPreviewPresentation,
-                metrics: metrics
-            ) == 0
-        )
+        #expect(expandCallbackCount(message: message, presentation: presentation, metrics: metrics) == 1)
+        #expect(expandCallbackCount(message: message, presentation: presentation, metrics: metrics, forceOverflow: false) == 0)
     }
 
     @Test("T028: Link preview uses one outer squircle radius (no inner webview corner radius)")
@@ -2121,6 +2656,195 @@ struct BubbleScrollTests {
         #expect(webView.configuration.allowsAirPlayForMediaPlayback == false)
         #expect(webView.configuration.allowsPictureInPictureMediaPlayback == false)
         #expect(webView.configuration.preferences.isElementFullscreenEnabled == false)
+    }
+
+    @Test("T1377: production preview observer commits late JavaScript geometry")
+    @MainActor
+    func linkPreviewCommitsLateJavaScriptGeometry() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        )
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let host = UIViewController()
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+
+        let preview = LinkPreviewView()
+        preview.frame = CGRect(x: 16, y: 16, width: 320, height: 800)
+        host.view.addSubview(preview)
+        var reportedHeights: [CGFloat] = []
+        preview.onHeightChange = { reportedHeights.append(preview.reportedHeight) }
+        let url = try #require(URL(string: "https://example.com/t1377-late-growth-\(UUID().uuidString)"))
+        preview.configure(url: url, maxHeight: 800)
+        host.view.layoutIfNeeded()
+
+        let webView = try #require(firstWebView(in: preview))
+        let loadDeadline = ContinuousClock.now + .seconds(15)
+        while (webView.url == nil || webView.isLoading), ContinuousClock.now < loadDeadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        guard webView.url != nil && !webView.isLoading else {
+            Issue.record("Production preview did not finish loading before the late-JavaScript assertion.")
+            return
+        }
+
+        let baselineHeight = preview.reportedHeight
+        try await evaluateNoResult(
+            webView: webView,
+            script: """
+            var late = document.createElement('div');
+            late.id = 't1377-late-growth';
+            late.style.display = 'block';
+            late.style.height = '350px';
+            late.style.paddingTop = '350px';
+            late.textContent = 'Late production preview content';
+            document.body.appendChild(late);
+            0;
+            """
+        )
+
+        let geometryDeadline = ContinuousClock.now + .seconds(3)
+        while preview.reportedHeight < baselineHeight + 300, ContinuousClock.now < geometryDeadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+
+        #expect(preview.reportedHeight >= baselineHeight + 300)
+        #expect(reportedHeights.last == preview.reportedHeight)
+        #expect(reportedHeights.count <= 2)
+    }
+
+    @Test("T1377: cached preview geometry remains provisional for late content")
+    @MainActor
+    func cachedLinkPreviewCommitsLateJavaScriptGeometry() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        )
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let host = UIViewController()
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+
+        let url = try #require(URL(string: "https://example.com/t1377-cached-late-growth-\(UUID().uuidString)"))
+        let firstPreview = LinkPreviewView()
+        firstPreview.frame = CGRect(x: 16, y: 16, width: 320, height: 800)
+        host.view.addSubview(firstPreview)
+        firstPreview.configure(url: url, maxHeight: 800)
+        host.view.layoutIfNeeded()
+
+        let initialWebView = try #require(firstWebView(in: firstPreview))
+        let firstLoadDeadline = ContinuousClock.now + .seconds(8)
+        while (initialWebView.url == nil || initialWebView.isLoading), ContinuousClock.now < firstLoadDeadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        #expect(initialWebView.url != nil && !initialWebView.isLoading)
+
+        let cacheDeadline = ContinuousClock.now + .seconds(3)
+        while firstPreview.reportedHeight <= 190, ContinuousClock.now < cacheDeadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        let cachedHeight = firstPreview.reportedHeight
+        #expect(cachedHeight > 190)
+        firstPreview.prepareForReuse()
+        firstPreview.removeFromSuperview()
+
+        let secondPreview = LinkPreviewView()
+        secondPreview.frame = CGRect(x: 16, y: 16, width: 320, height: 800)
+        host.view.addSubview(secondPreview)
+        secondPreview.configure(url: url, maxHeight: 800)
+        host.view.layoutIfNeeded()
+        #expect(abs(secondPreview.reportedHeight - cachedHeight) <= 1)
+
+        let secondWebView = try #require(firstWebView(in: secondPreview))
+        let secondLoadDeadline = ContinuousClock.now + .seconds(8)
+        while (secondWebView.url == nil || secondWebView.isLoading), ContinuousClock.now < secondLoadDeadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        #expect(secondWebView.url != nil && !secondWebView.isLoading)
+
+        let provisionalHeight = secondPreview.reportedHeight
+        try await evaluateNoResult(
+            webView: secondWebView,
+            script: """
+            var late = document.createElement('div');
+            late.id = 't1377-cached-late-growth';
+            for (var index = 0; index < 16; index += 1) {
+              var paragraph = document.createElement('p');
+              paragraph.textContent = 'Late cached production preview content ' + index;
+              late.appendChild(paragraph);
+            }
+            document.body.appendChild(late);
+            0;
+            """
+        )
+
+        let geometryDeadline = ContinuousClock.now + .seconds(3)
+        while secondPreview.reportedHeight < provisionalHeight + 200, ContinuousClock.now < geometryDeadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+
+        #expect(secondPreview.reportedHeight >= provisionalHeight + 200)
+    }
+
+    @Test("T1377: production preview observer commits late image geometry")
+    @MainActor
+    func linkPreviewCommitsLateImageGeometry() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        )
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let host = UIViewController()
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+
+        let preview = LinkPreviewView()
+        preview.frame = CGRect(x: 16, y: 16, width: 320, height: 800)
+        host.view.addSubview(preview)
+        let url = try #require(URL(string: "https://example.com/t1377-late-image"))
+        preview.configure(url: url, maxHeight: 1_200)
+        host.view.layoutIfNeeded()
+
+        let webView = try #require(firstWebView(in: preview))
+        let loadDeadline = ContinuousClock.now + .seconds(15)
+        while (webView.url == nil || webView.isLoading), ContinuousClock.now < loadDeadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        guard webView.url != nil && !webView.isLoading else {
+            Issue.record("Production preview did not finish loading before the late-image assertion.")
+            return
+        }
+
+        let baselineHeight = preview.reportedHeight
+        let imageTop = Int(baselineHeight.rounded()) + 250
+        try await evaluateNoResult(
+            webView: webView,
+            script: """
+            document.body.style.position = 'relative';
+            document.body.style.height = '100px';
+            var image = document.createElement('img');
+            image.id = 't1377-late-image';
+            image.style.position = 'absolute';
+            image.style.top = '\(imageTop)px';
+            image.style.left = '0';
+            document.body.appendChild(image);
+            setTimeout(function(){
+              image.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="20" height="100"%3E%3Crect width="20" height="100" fill="blue"/%3E%3C/svg%3E';
+            }, 50);
+            0;
+            """
+        )
+
+        let geometryDeadline = ContinuousClock.now + .seconds(3)
+        while preview.reportedHeight < baselineHeight + 300, ContinuousClock.now < geometryDeadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+
+        #expect(preview.reportedHeight >= baselineHeight + 300)
     }
 
     @Test("T191: Direct video previews use embedded aspect-height sizing")
@@ -2191,6 +2915,7 @@ struct BubbleScrollTests {
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: sizeClass,
             metrics: metrics,
@@ -2231,6 +2956,7 @@ struct BubbleScrollTests {
         let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: maxWidth, height: 1))
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: sizeClass,
             metrics: metrics,
@@ -2268,54 +2994,39 @@ struct BubbleScrollTests {
     @MainActor
     private func expandCallbackCount(message: Message,
                                      presentation: MessagePresentation,
-                                     metrics: ChatFlowTheme.Metrics) -> Int {
-        let sizeClass = MessageFlowRules.sizeClass(for: presentation)
-        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 360, height: 1))
+                                     metrics: ChatFlowTheme.Metrics,
+                                     forceOverflow: Bool = true) -> Int {
         var count = 0
-
-        bubble.configure(
+        let bubble = configuredBubble(
             message: message,
             presentation: presentation,
-            sizeClass: sizeClass,
             metrics: metrics,
-            maxWidth: 360,
-            truncationHeightOverride: 44,
-            bubbleSizingV2: nil,
-            showsHeader: true,
-            paddingScale: 1,
-            minWidthOverride: nil,
-            maxWidthOverride: nil,
-            useContinuousCorners: true,
-            isDark: false,
-            onRequestExpand: { count += 1 },
-            onRequestLayout: nil,
-            onInteractiveCallback: nil
+            onRequestExpand: { count += 1 }
         )
-        let measured = bubble.systemLayoutSizeFitting(
-            CGSize(width: 360, height: UIView.layoutFittingCompressedSize.height),
-            withHorizontalFittingPriority: .required,
-            verticalFittingPriority: .fittingSizeLevel
-        )
-        bubble.frame = CGRect(origin: .zero, size: measured)
-        bubble.layoutIfNeeded()
-        if let inner = innerBubbleScrollView(in: bubble) {
+        if forceOverflow, let inner = innerBubbleScrollView(in: bubble) {
             inner.contentSize = CGSize(width: max(1, inner.bounds.width), height: inner.bounds.height + 200)
         }
+        guard let interactionSurface = bubbleInteractionSurface(containing: nil, within: bubble) else {
+            Issue.record("Expected bubble tap interaction surface")
+            return count
+        }
+        #expect(interactionSurface.gestureRecognizers?.contains(where: { $0 is UITapGestureRecognizer }) == true)
 
         _ = bubble.perform(NSSelectorFromString("handleBubbleTap"))
         return count
     }
 
     @MainActor
-    private func swipeUpExpandCallbackCount(message: Message,
-                                            presentation: MessagePresentation,
-                                            metrics: ChatFlowTheme.Metrics) -> Int {
+    private func configuredBubble(message: Message,
+                                  presentation: MessagePresentation,
+                                  metrics: ChatFlowTheme.Metrics,
+                                  onRequestExpand: (() -> Void)? = nil) -> MessageBubbleUIKitView {
         let sizeClass = MessageFlowRules.sizeClass(for: presentation)
         let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 360, height: 1))
-        var count = 0
 
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: sizeClass,
             metrics: metrics,
@@ -2328,7 +3039,7 @@ struct BubbleScrollTests {
             maxWidthOverride: nil,
             useContinuousCorners: true,
             isDark: false,
-            onRequestExpand: { count += 1 },
+            onRequestExpand: onRequestExpand,
             onRequestLayout: nil,
             onInteractiveCallback: nil
         )
@@ -2340,8 +3051,24 @@ struct BubbleScrollTests {
         bubble.frame = CGRect(origin: .zero, size: measured)
         bubble.layoutIfNeeded()
 
-        _ = bubble.perform(NSSelectorFromString("handleBubbleSwipeUp"))
-        return count
+        return bubble
+    }
+
+    private func allSubviews(in view: UIView) -> [UIView] {
+        view.subviews + view.subviews.flatMap { allSubviews(in: $0) }
+    }
+
+    private func bubbleInteractionSurface(containing descendant: UIView?, within bubble: UIView) -> UIView? {
+        var candidate = descendant?.superview
+        while let view = candidate, view !== bubble {
+            if view.gestureRecognizers?.contains(where: { $0 is UITapGestureRecognizer }) == true {
+                return view
+            }
+            candidate = view.superview
+        }
+        return bubble.subviews.first(where: {
+            $0.gestureRecognizers?.contains(where: { $0 is UITapGestureRecognizer }) == true
+        })
     }
 
     private func allScrollViews(in view: UIView) -> [UIScrollView] {
@@ -2429,6 +3156,24 @@ struct BubbleScrollTests {
         return textView.convert(glyphFrame, to: targetView)
     }
 
+    private func rectDictionary(_ rect: CGRect) -> [String: CGFloat] {
+        [
+            "x": rect.origin.x,
+            "y": rect.origin.y,
+            "width": rect.size.width,
+            "height": rect.size.height
+        ]
+    }
+
+    private func insetDictionary(_ inset: UIEdgeInsets) -> [String: CGFloat] {
+        [
+            "top": inset.top,
+            "left": inset.left,
+            "bottom": inset.bottom,
+            "right": inset.right
+        ]
+    }
+
     @MainActor
     private func measuredUserBubble(
         message: Message,
@@ -2485,6 +3230,7 @@ struct BubbleScrollTests {
         let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 320, height: 1))
         bubble.configure(
             message: message,
+            stream: .personal,
             presentation: presentation,
             sizeClass: sizeClass,
             metrics: metrics,
@@ -2539,6 +3285,19 @@ struct BubbleScrollTests {
             }
         }
         return nil
+    }
+
+    @MainActor
+    private func evaluateNoResult(webView: WKWebView, script: String) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            webView.evaluateJavaScript(script) { _, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
     }
 
     private struct ImmediateHighlightService: SalientHighlightServicing {

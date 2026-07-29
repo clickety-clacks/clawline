@@ -50,6 +50,7 @@ struct ExpandedMessageSheet: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var dragOffset: CGFloat = 0
+    @State private var renderedBlocksCache: RenderedBlocksCache?
     private let dismissThreshold: CGFloat = 100
     private let compactHorizontalPadding: CGFloat = 16
     private let regularOuterPadding: CGFloat = 28
@@ -63,6 +64,39 @@ struct ExpandedMessageSheet: View {
         ChatFlowTheme.maxLineWidth(bodyFontSize: expandedBodyFont.pointSize)
             + (regularContentHorizontalPadding * 2)
     }
+
+    private struct RenderedBlocksCache: Equatable {
+        let key: RenderedBlocksCacheKey
+        let blocks: [RenderedMarkdownBlock]
+
+        static func == (lhs: RenderedBlocksCache, rhs: RenderedBlocksCache) -> Bool {
+            lhs.key == rhs.key
+        }
+    }
+
+    private struct RenderedBlocksCacheKey: Equatable {
+        let messageId: String
+        let contentFingerprint: Int
+        let fontScaleChangeSequence: Int
+        let isDark: Bool
+    }
+
+    private var renderedBlocksCacheKey: RenderedBlocksCacheKey {
+        var hasher = Hasher()
+        hasher.combine(message.content)
+        hasher.combine(presentation.copyableReadableText)
+        for part in presentation.parts {
+            hasher.combine(String(describing: part))
+        }
+        return RenderedBlocksCacheKey(
+            messageId: message.id,
+            contentFingerprint: hasher.finalize(),
+            fontScaleChangeSequence: fontScaleChangeSequence,
+            isDark: effectiveColorScheme == .dark
+        )
+    }
+
+    static let minimumRegularDetailSize = CGSize(width: 420, height: 320)
 
     var body: some View {
         let _ = fontScaleChangeSequence
@@ -95,6 +129,10 @@ struct ExpandedMessageSheet: View {
         }
         .offset(x: dragOffset)
         .opacity(1.0 - Double(abs(dragOffset)) / 300.0)
+        .frame(
+            minWidth: isCompact ? 0 : Self.minimumRegularDetailSize.width,
+            minHeight: Self.minimumRegularDetailSize.height
+        )
         .gesture(
             DragGesture()
                 .onChanged { value in
@@ -111,6 +149,19 @@ struct ExpandedMessageSheet: View {
                 }
         )
         .presentationSizing(.fitted.fitted(horizontal: true, vertical: false))
+        .task(id: renderedBlocksCacheKey) {
+            let key = renderedBlocksCacheKey
+            renderedBlocksCache = RenderedBlocksCache(
+                key: key,
+                blocks: Self.renderedBlocks(
+                    message: message,
+                    presentation: presentation,
+                    baseFont: UIFont.clawline(.bodyText),
+                    inkColor: UIColor(ChatFlowTheme.ink(effectiveColorScheme)),
+                    isDark: effectiveColorScheme == .dark
+                )
+            )
+        }
     }
 
     private func layoutMetrics(availableWidth: CGFloat) -> ExpandedMessageSheetLayout {
@@ -136,13 +187,8 @@ struct ExpandedMessageSheet: View {
     }
 
     private var content: some View {
-        let renderedBlocks = Self.renderedBlocks(
-            message: message,
-            presentation: presentation,
-            baseFont: UIFont.clawline(.bodyText),
-            inkColor: UIColor(ChatFlowTheme.ink(effectiveColorScheme)),
-            isDark: effectiveColorScheme == .dark
-        )
+        let key = renderedBlocksCacheKey
+        let renderedBlocks = renderedBlocksCache?.key == key ? renderedBlocksCache?.blocks ?? [] : []
         return VStack(alignment: .leading, spacing: 12) {
             ForEach(fileAttachments) { attachment in
                 FileAttachmentRow(
@@ -212,6 +258,7 @@ struct ExpandedMessageSheet: View {
             ForEach(Array(mediaParts.enumerated()), id: \.offset) { item in
                 mediaPartView(item.element)
             }
+
         }
         .font(.clawline(.bodyText))
         .foregroundColor(ChatFlowTheme.ink(effectiveColorScheme))
@@ -357,8 +404,8 @@ struct ExpandedMessageSheet: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }
         case .gallery(let attachments):
-            ForEach(attachments) { attachment in
-                if let data = attachment.data, let uiImage = UIImage(data: data) {
+            ForEach(Array(attachments.enumerated()), id: \.offset) { item in
+                if let data = item.element.data, let uiImage = UIImage(data: data) {
                     Image(uiImage: uiImage)
                         .resizable()
                         .scaledToFit()

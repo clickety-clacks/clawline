@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct Attachment: Identifiable, Equatable, Codable {
+nonisolated struct Attachment: Identifiable, Equatable, Codable, Sendable {
     let id: String
     let type: AttachmentType
     let mimeType: String?
@@ -25,7 +25,7 @@ struct Attachment: Identifiable, Equatable, Codable {
         case metadata
     }
 
-    private struct AttachmentMetadata: Codable, Equatable {
+    private struct AttachmentMetadata: Codable, Equatable, Sendable {
         let mimeType: String?
         let filename: String?
         let size: Int?
@@ -84,7 +84,7 @@ struct Attachment: Identifiable, Equatable, Codable {
     }
 }
 
-enum AttachmentType: String, Codable, Equatable {
+nonisolated enum AttachmentType: String, Codable, Equatable, Sendable {
     case image
     case asset
     case document

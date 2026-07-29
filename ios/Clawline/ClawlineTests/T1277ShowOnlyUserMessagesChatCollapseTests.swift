@@ -327,6 +327,7 @@ private func t1277ConfiguredBubble(
     let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 320, height: 1))
     bubble.configure(
         message: message,
+        stream: .personal,
         presentation: presentation,
         sizeClass: sizeClass,
         metrics: metrics,

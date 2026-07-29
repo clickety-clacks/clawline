@@ -22,17 +22,21 @@ final class InteractiveHTMLBubbleUIKitView: UIView {
     private var descriptor: InteractiveHTMLDescriptor?
     private var sourceMessageId: String?
     private var configureNonce = UUID()
+    private var documentGeneration = UUID()
+    private weak var activeUserContentController: WKUserContentController?
     private var pendingStart = false
     private var pendingIsDark = false
 
     private var isInitialLoadInProgress = false
     private var heightLocked = false
     private var resizeUsed = false
-    private var webContentProcessReloadedAfterTermination = false
+    private var webContentProcessRecoveryInProgress = false
+    private weak var recoveryWebView: WKWebView?
 
     private var callbackWindowStart: CFAbsoluteTime = 0
     private var callbackWindowCount: Int = 0
 
+    private(set) var geometryRevision = 0
     var onHeightChange: (() -> Void)?
     var onCallback: ((String, JSONValue?) -> Void)?
 
@@ -96,9 +100,11 @@ final class InteractiveHTMLBubbleUIKitView: UIView {
         isInitialLoadInProgress = false
         heightLocked = false
         resizeUsed = false
-        webContentProcessReloadedAfterTermination = false
+        webContentProcessRecoveryInProgress = false
+        recoveryWebView = nil
         callbackWindowStart = 0
         callbackWindowCount = 0
+        geometryRevision = 0
         summaryLabel.isHidden = true
         summaryLabel.text = nil
         errorLabel.isHidden = true
@@ -119,7 +125,9 @@ final class InteractiveHTMLBubbleUIKitView: UIView {
         self.isInitialLoadInProgress = true
         self.heightLocked = false
         self.resizeUsed = false
-        self.webContentProcessReloadedAfterTermination = false
+        self.geometryRevision = 0
+        self.webContentProcessRecoveryInProgress = false
+        self.recoveryWebView = nil
         self.summaryLabel.isHidden = true
         self.errorLabel.isHidden = true
         self.placeholder.startAnimating()
@@ -177,6 +185,7 @@ final class InteractiveHTMLBubbleUIKitView: UIView {
     private func attach(webView: WKWebView) {
         teardownWebView()
         self.webView = webView
+        activeUserContentController = webView.configuration.userContentController
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.translatesAutoresizingMaskIntoConstraints = false
@@ -199,6 +208,8 @@ final class InteractiveHTMLBubbleUIKitView: UIView {
     }
 
     private func teardownWebView() {
+        activeUserContentController = nil
+        recoveryWebView = nil
         webViewHeightConstraint?.isActive = false
         webViewHeightConstraint = nil
         if let webView {
@@ -220,6 +231,7 @@ final class InteractiveHTMLBubbleUIKitView: UIView {
 
     private func loadHTML(isDark: Bool) {
         guard let descriptor, let webView else { return }
+        documentGeneration = UUID()
         let maxHeight = descriptor.metadata?.maxHeight ?? 400
         let fixedHeight: CGFloat? = {
             guard let height = descriptor.metadata?.height else { return nil }
@@ -252,6 +264,7 @@ final class InteractiveHTMLBubbleUIKitView: UIView {
             return
         }
         webViewHeightConstraint.constant = clamped
+        geometryRevision += 1
         onHeightChange?()
         updateScrollability(maxHeight: maxHeight, lockedHeight: clamped)
     }
@@ -369,6 +382,11 @@ private final class InteractiveHTMLWebKit: NSObject {
 
 extension InteractiveHTMLBubbleUIKitView: WKNavigationDelegate, WKUIDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard self.webView === webView else { return }
+        if recoveryWebView === webView {
+            webContentProcessRecoveryInProgress = false
+            recoveryWebView = nil
+        }
         placeholder.stopAnimating()
 
         guard let descriptor else { return }
@@ -392,9 +410,14 @@ extension InteractiveHTMLBubbleUIKitView: WKNavigationDelegate, WKUIDelegate {
 
     private func measureAndReveal(maxHeight: CGFloat) {
         guard let webView else { return }
+        let nonce = configureNonce
+        let generation = documentGeneration
         let js = "Math.ceil(document.body.scrollHeight)"
         webView.evaluateJavaScript(js) { [weak self] value, error in
             guard let self else { return }
+            guard self.configureNonce == nonce, self.webView === webView else { return }
+            guard self.documentGeneration == generation else { return }
+            guard !self.heightLocked else { return }
             if let error {
                 self.isInitialLoadInProgress = false
                 let id = self.sourceMessageId ?? ""
@@ -442,16 +465,27 @@ extension InteractiveHTMLBubbleUIKitView: WKNavigationDelegate, WKUIDelegate {
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        guard !webContentProcessReloadedAfterTermination else {
+        guard self.webView === webView else { return }
+        guard !webContentProcessRecoveryInProgress else {
             showError("Content crashed.")
             return
         }
 
-        webContentProcessReloadedAfterTermination = true
+        webContentProcessRecoveryInProgress = true
         isInitialLoadInProgress = true
+        heightLocked = false
         placeholder.startAnimating()
         webView.alpha = 0
-        loadHTML(isDark: pendingIsDark)
+        documentGeneration = UUID()
+        activeUserContentController = nil
+        let nonce = configureNonce
+        InteractiveHTMLWebKit.shared.makeWebView(handler: self) { [weak self, weak webView] replacement in
+            guard let self, let webView else { return }
+            guard self.configureNonce == nonce, self.webView === webView else { return }
+            self.attach(webView: replacement)
+            self.recoveryWebView = replacement
+            self.loadHTML(isDark: self.pendingIsDark)
+        }
     }
 
     func webView(_ webView: WKWebView,
@@ -480,6 +514,7 @@ extension InteractiveHTMLBubbleUIKitView: WKNavigationDelegate, WKUIDelegate {
 extension InteractiveHTMLBubbleUIKitView: WKScriptMessageHandler {
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.name == "clawline" else { return }
+        guard activeUserContentController === userContentController else { return }
         guard acceptCallback() else { return }
         guard let descriptor, let sourceMessageId else { return }
 
@@ -500,6 +535,7 @@ extension InteractiveHTMLBubbleUIKitView: WKScriptMessageHandler {
             teardownWebView()
             placeholder.stopAnimating()
             errorLabel.isHidden = true
+            geometryRevision += 1
             onHeightChange?()
             return
         }

@@ -56,6 +56,12 @@ final class ProviderChatService: ChatServicing {
         case invalidMessageId
         case serverError(code: String, message: String?)
         case policyViolation(code: Int, reason: String?)
+        /// A Tightbeam-only control-plane mutation (placement create / set_harness)
+        /// was attempted on a link whose current authenticated features do not
+        /// include "tightbeam". Thrown at the service boundary so a stale
+        /// view-model gate or a post-reconnect retry can never post to a
+        /// featureless/OpenClaw link.
+        case tightbeamCapabilityUnavailable
 
         var errorDescription: String? {
             switch self {
@@ -83,6 +89,8 @@ final class ProviderChatService: ChatServicing {
                     return reason
                 }
                 return "Connection rejected by server."
+            case .tightbeamCapabilityUnavailable:
+                return "New-chat options are unavailable on this server."
             }
         }
     }
@@ -117,7 +125,7 @@ final class ProviderChatService: ChatServicing {
         }
     }
 
-    private struct Envelope: Decodable {
+    nonisolated private struct Envelope: Decodable, Sendable {
         let type: String
     }
 
@@ -202,7 +210,7 @@ final class ProviderChatService: ChatServicing {
     private let baseURLProvider: () -> URL?
     private let userIdProvider: () -> String?
     private let authTokenProvider: @Sendable () async -> String?
-    private let adoptedSessionKeysProvider: @Sendable () -> [String]
+    private var adoptedSessionKeysProvider: @Sendable () -> [String]
     private let streamAPIClient: StreamAPIClient
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
@@ -232,6 +240,11 @@ final class ProviderChatService: ChatServicing {
     private var knownSessionKeys: Set<String> = []
 
     private static let serverEventIDPrefix = "s_"
+
+    /// Features of the current authed link (`auth_result.features`). Set on
+    /// auth success before the `.serverFeatures` event fires, cleared when the
+    /// link goes away, so late subscribers can always pull the current value.
+    private(set) var serverFeatures: [String] = []
 
     var isTransportReadyForSend: Bool {
         guard socket != nil, authToken != nil else { return false }
@@ -264,6 +277,10 @@ final class ProviderChatService: ChatServicing {
     var serviceEvents: AsyncStream<ChatServiceEvent> { serviceEventBroadcaster.stream() }
     var lifecycleTransportEvents: AsyncStream<LifecycleTransportEvent> { lifecycleTransportEventBroadcaster.stream() }
 
+    func setAdoptedSessionKeysProvider(_ provider: @escaping @Sendable () -> [String]) {
+        adoptedSessionKeysProvider = provider
+    }
+
     func fetchStreams() async throws -> [StreamSession] {
         guard let token = await resolveControlPlaneToken() else {
             throw Error.notConnected
@@ -286,6 +303,17 @@ final class ProviderChatService: ChatServicing {
         }
     }
 
+    func fetchOrgOptions() async throws -> OrgOptions {
+        guard let token = await resolveControlPlaneToken() else {
+            throw Error.notConnected
+        }
+        do {
+            return try await streamAPIClient.fetchOrgOptions(token: token)
+        } catch {
+            throw mapStreamAPIError(error)
+        }
+    }
+
     func fetchSessionStatus(sessionKey: String) async throws -> SessionStatus {
         guard let token = await resolveControlPlaneToken() else {
             throw Error.notConnected
@@ -303,6 +331,13 @@ final class ProviderChatService: ChatServicing {
         value: String?,
         enabled: Bool?
     ) async throws -> SessionControlResponse {
+        // Current-link capability fence: set_harness is Tightbeam-only. Checked
+        // here (not just at the view-model) against the service's authoritative
+        // feature set immediately before posting, so a queued task whose link was
+        // retired/reconnected to a featureless link cannot post set_harness.
+        if action == .setHarness, !serverFeatures.contains("tightbeam") {
+            throw Error.tightbeamCapabilityUnavailable
+        }
         guard let token = await resolveControlPlaneToken() else {
             throw Error.notConnected
         }
@@ -320,6 +355,34 @@ final class ProviderChatService: ChatServicing {
     }
 
     func createStream(displayName: String, idempotencyKey: String) async throws -> StreamSession {
+        try await createStream(
+            displayName: displayName,
+            idempotencyKey: idempotencyKey,
+            harness: nil,
+            model: nil,
+            host: nil,
+            archetype: nil
+        )
+    }
+
+    func createStream(
+        displayName: String,
+        idempotencyKey: String,
+        harness: String?,
+        model: String?,
+        host: String?,
+        archetype: String?
+    ) async throws -> StreamSession {
+        // Current-link capability fence: a placement-bearing create is
+        // Tightbeam-only. The legacy name-only create (all placement fields nil)
+        // is an OpenClaw path and stays ungated. Checked against the service's
+        // authoritative feature set immediately before EVERY submission — the VM's
+        // retry-after-reconnect calls back through here, so a create that began on
+        // Tightbeam and reconnected to a featureless link is refused, not posted.
+        let hasPlacement = harness != nil || model != nil || host != nil || archetype != nil
+        if hasPlacement, !serverFeatures.contains("tightbeam") {
+            throw Error.tightbeamCapabilityUnavailable
+        }
         guard let token = await resolveControlPlaneToken() else {
             throw Error.notConnected
         }
@@ -327,6 +390,10 @@ final class ProviderChatService: ChatServicing {
             return try await streamAPIClient.createStream(
                 displayName: displayName,
                 idempotencyKey: idempotencyKey,
+                harness: harness,
+                model: model,
+                host: host,
+                archetype: archetype,
                 token: token
             )
         } catch {
@@ -421,8 +488,10 @@ final class ProviderChatService: ChatServicing {
             do {
                 authToken = token
                 let client = try await connector.connect(to: wsURL)
+                let connectionToken = UUID()
+                activeLifecycleConnectionToken = connectionToken
                 socket = client
-                startListening(on: client)
+                startListening(on: client, connectionToken: connectionToken)
                 try await awaitAuthResult(client: client, token: token, lastMessageId: lastMessageId)
                 return
             } catch {
@@ -513,6 +582,7 @@ final class ProviderChatService: ChatServicing {
         socket?.close(with: .normalClosure)
         socket = nil
         authToken = nil
+        serverFeatures = []
         if !pendingMessages.isEmpty {
             for messageId in pendingMessages {
                 emitServiceEvent(.messageError(
@@ -635,7 +705,8 @@ final class ProviderChatService: ChatServicing {
                  .sessionReplaced,
                  .invalidMessageId,
                  .serverError,
-                 .policyViolation:
+                 .policyViolation,
+                 .tightbeamCapabilityUnavailable:
                 return false
             case .notConnected, .authTimeout:
                 return true
@@ -761,14 +832,19 @@ final class ProviderChatService: ChatServicing {
             }
     }
 
-    private func startListening(on client: any WebSocketClient) {
+    private func startListening(on client: any WebSocketClient, connectionToken: UUID) {
         receiveTask = Task { [weak self] in
             guard let self else { return }
             var iterator = client.incomingTextMessages.makeAsyncIterator()
             while let text = await iterator.next() {
-                handle(text: text, lifecycleEpoch: nil, lifecycleConnectionToken: nil)
+                // The direct connect() path is token-guarded exactly like the
+                // lifecycle path: a frame carries the token of the link it was read
+                // on, so a retired link's delayed auth_result (or any frame) is
+                // dropped and cannot restore serverFeatures on a link that has since
+                // reconnected — including a reconnect to a featureless OpenClaw link.
+                await handle(text: text, lifecycleEpoch: nil, lifecycleConnectionToken: connectionToken)
             }
-            handleSocketClose(closeInfo: client.lastCloseInfo, lifecycleEpoch: nil, lifecycleConnectionToken: nil)
+            handleSocketClose(closeInfo: client.lastCloseInfo, lifecycleEpoch: nil, lifecycleConnectionToken: connectionToken)
         }
     }
 
@@ -777,7 +853,7 @@ final class ProviderChatService: ChatServicing {
             guard let self else { return }
             var iterator = client.incomingTextMessages.makeAsyncIterator()
             while let text = await iterator.next() {
-                handle(text: text, lifecycleEpoch: epoch, lifecycleConnectionToken: connectionToken)
+                await handle(text: text, lifecycleEpoch: epoch, lifecycleConnectionToken: connectionToken)
             }
             handleSocketClose(
                 closeInfo: client.lastCloseInfo,
@@ -787,20 +863,43 @@ final class ProviderChatService: ChatServicing {
         }
     }
 
-    private func handle(text: String, lifecycleEpoch: Int?, lifecycleConnectionToken: UUID?) {
+    private func handle(text: String, lifecycleEpoch: Int?, lifecycleConnectionToken: UUID?) async {
         if let lifecycleConnectionToken, !isCurrentLifecycleConnectionToken(lifecycleConnectionToken) {
             return
         }
-        guard let data = text.data(using: .utf8) else {
+        let data: Data
+        let envelope: Envelope
+        do {
+            (data, envelope) = try await Self.decodeEnvelopeFrame(text)
+        } catch FrameDecodeError.invalidUTF8 {
             logger.warning("Dropping inbound frame: failed UTF-8 conversion")
+            return
+        } catch {
+            logger.warning("Dropping inbound frame: failed to decode envelope error=\(error.localizedDescription, privacy: .public)")
             return
         }
 
-        let envelope: Envelope
-        do {
-            envelope = try decoder.decode(Envelope.self, from: data)
-        } catch {
-            logger.warning("Dropping inbound frame: failed to decode envelope error=\(error.localizedDescription, privacy: .public)")
+        await dispatchDecodedFrame(
+            data: data,
+            envelope: envelope,
+            lifecycleEpoch: lifecycleEpoch,
+            lifecycleConnectionToken: lifecycleConnectionToken
+        )
+    }
+
+    /// Dispatch a decoded inbound frame. Split out of `handle(text:)` so the
+    /// post-decode link-token recheck is the FIRST thing that runs here: the
+    /// token can retire while the decode await is suspended (socket close +
+    /// reconnect), and dispatching a stale frame would mutate the NEW link
+    /// (e.g. an old auth_result setting serverFeatures for a replaced link).
+    private func dispatchDecodedFrame(
+        data: Data,
+        envelope: Envelope,
+        lifecycleEpoch: Int?,
+        lifecycleConnectionToken: UUID?
+    ) async {
+        if let lifecycleConnectionToken, !isCurrentLifecycleConnectionToken(lifecycleConnectionToken) {
+            logger.debug("dropping stale inbound frame: link token retired during decode")
             return
         }
 
@@ -812,7 +911,7 @@ final class ProviderChatService: ChatServicing {
                 lifecycleConnectionToken: lifecycleConnectionToken
             )
         case "message":
-            handleMessage(
+            await handleMessage(
                 data: data,
                 lifecycleEpoch: lifecycleEpoch,
                 lifecycleConnectionToken: lifecycleConnectionToken
@@ -841,6 +940,12 @@ final class ProviderChatService: ChatServicing {
             handleStreamUpdated(data: data)
         case "stream_deleted":
             handleStreamDeleted(data: data)
+        case "stream_history_cleared":
+            handleStreamHistoryCleared(
+                data: data,
+                lifecycleEpoch: lifecycleEpoch,
+                lifecycleConnectionToken: lifecycleConnectionToken
+            )
         case "stream_read_state":
             handleStreamReadState(data: data)
         case "stream_tail_state":
@@ -852,6 +957,30 @@ final class ProviderChatService: ChatServicing {
         default:
             logger.debug("Unknown message type: \(envelope.type, privacy: .public)")
         }
+    }
+
+    private enum FrameDecodeError: Swift.Error {
+        case invalidUTF8
+    }
+
+    private struct StreamHistoryClearedPayload: Decodable {
+        let sessionKey: String
+    }
+
+    nonisolated private static func decodeEnvelopeFrame(_ text: String) async throws -> (Data, Envelope) {
+        try await Task.detached(priority: .userInitiated) {
+            guard let data = text.data(using: .utf8) else {
+                throw FrameDecodeError.invalidUTF8
+            }
+            let envelope = try JSONDecoder().decode(Envelope.self, from: data)
+            return (data, envelope)
+        }.value
+    }
+
+    nonisolated private static func decodeServerMessagePayload(data: Data, decoder _: JSONDecoder) async throws -> ServerMessagePayload {
+        try await Task.detached(priority: .userInitiated) {
+            try JSONDecoder().decode(ServerMessagePayload.self, from: data)
+        }.value
     }
 
     private func handleAuthResult(data: Data, lifecycleEpoch: Int?, lifecycleConnectionToken: UUID?) {
@@ -878,9 +1007,11 @@ final class ProviderChatService: ChatServicing {
         if result.success {
             resolveAuthContinuation(with: .success(()))
             logger.info("state -> connected (auth success)")
+            serverFeatures = result.features ?? []
             updateState(.connected)
             let supportsSessionProvisioning = result.features?.contains("session_info") ?? false
             emitServiceEvent(.sessionProvisioningAvailable(supportsSessionProvisioning))
+            emitServiceEvent(.serverFeatures(result.features ?? []))
             if let info = sessionInfo(from: result) {
                 knownSessionKeys = Set(info.sessionKeys)
                 emitServiceEvent(.sessionInfo(info))
@@ -906,7 +1037,7 @@ final class ProviderChatService: ChatServicing {
         }
     }
 
-    private func handleMessage(data: Data, lifecycleEpoch: Int?, lifecycleConnectionToken: UUID?) {
+    private func handleMessage(data: Data, lifecycleEpoch: Int?, lifecycleConnectionToken: UUID?) async {
         if let lifecycleEpoch {
             emitLifecycleEvent(
                 epoch: lifecycleEpoch,
@@ -917,9 +1048,20 @@ final class ProviderChatService: ChatServicing {
         }
         let payload: ServerMessagePayload
         do {
-            payload = try decoder.decode(ServerMessagePayload.self, from: data)
+            payload = try await Self.decodeServerMessagePayload(data: data, decoder: decoder)
         } catch {
             logger.warning("Dropping message payload: decode failed error=\(error.localizedDescription, privacy: .public)")
+            return
+        }
+        // SECOND suspension-window fence: the payload decode above is a detached
+        // await, so the direct link can retire (and a new link authenticate)
+        // WHILE it runs — a Tightbeam->OpenClaw reconnect being the dangerous case.
+        // Re-check the link token here, after the decode and before we touch the
+        // replay cursor or broadcast, so a resumed retired-link message can never
+        // advance the new link's cursor or leak a stale message into it. (The
+        // pre-decode fence in dispatchDecodedFrame guards the first window.)
+        if let lifecycleConnectionToken, !isCurrentLifecycleConnectionToken(lifecycleConnectionToken) {
+            logger.debug("dropping stale inbound message: link token retired during payload decode")
             return
         }
         guard let sessionKey = resolveSessionKey(from: payload) else {
@@ -1196,6 +1338,36 @@ final class ProviderChatService: ChatServicing {
         emitServiceEvent(.streamDeleted(sessionKey: payload.sessionKey))
     }
 
+    private func handleStreamHistoryCleared(
+        data: Data,
+        lifecycleEpoch: Int?,
+        lifecycleConnectionToken: UUID?
+    ) {
+        guard let payload = try? decoder.decode(StreamHistoryClearedPayload.self, from: data) else {
+            logger.warning("Failed to decode stream_history_cleared payload")
+            return
+        }
+        // Barrier moved server-side; drop the replay cursor so reconnect/replay
+        // returns only post-barrier messages. The ViewModel drops local state.
+        setReplayCursor(nil, for: payload.sessionKey)
+        // Emit the barrier IN-BAND on the lifecycle stream when one is active:
+        // server messages travel that stream, and frames are decoded in wire
+        // order here, so a pre-barrier message can never be delivered after the
+        // barrier (and vice versa). The two emissions are MUTUALLY EXCLUSIVE —
+        // same shape as `handleMessage` — because clearing is destructive and
+        // NOT idempotent once content arrives between two invocations: a
+        // delayed duplicate would wipe a legitimately post-barrier message.
+        if let lifecycleEpoch {
+            emitLifecycleEvent(
+                epoch: lifecycleEpoch,
+                payload: .historyCleared(sessionKey: payload.sessionKey),
+                lifecycleConnectionToken: lifecycleConnectionToken
+            )
+            return
+        }
+        emitServiceEvent(.streamHistoryCleared(sessionKey: payload.sessionKey))
+    }
+
     private func handleStreamReadState(data: Data) {
         guard let payload = try? decoder.decode(StreamReadStatePayload.self, from: data) else {
             logger.warning("Failed to decode stream_read_state payload")
@@ -1362,6 +1534,12 @@ final class ProviderChatService: ChatServicing {
             logger.debug("ignoring stale lifecycle socket close")
             return
         }
+        // The authed link is gone: clear the current-link feature set on EVERY
+        // socket close (expected or not), not just explicit performDisconnect.
+        // Otherwise a delayed `.serverFeatures` event re-derives from a stale
+        // ["tightbeam"] here and reopens the gate with no live authed link. The
+        // gate reopens only when the NEXT auth sets features again.
+        serverFeatures = []
         let rejectionError: Error? = {
             guard let closeInfo else { return nil }
             guard closeInfo.code == 1008 else { return nil }
@@ -1434,6 +1612,7 @@ final class ProviderChatService: ChatServicing {
     }
 
     private func resolveAuthContinuation(with result: Result<Void, Swift.Error>) {
+        // This check-then-clear is safe under the target's MainActor default isolation.
         authTimeoutTask?.cancel()
         authTimeoutTask = nil
         guard let continuation = authContinuation else { return }
@@ -1513,4 +1692,36 @@ final class ProviderChatService: ChatServicing {
     private func isReplayCursorEvent(_ message: Message) -> Bool {
         normalizeServerEventID(message.id) != nil && !message.streaming
     }
+
+#if DEBUG
+    // Suspension-window regression hooks (post-decode token fence).
+    func debugSetActiveLifecycleToken() -> UUID {
+        let token = UUID()
+        activeLifecycleConnectionToken = token
+        return token
+    }
+
+    /// Dispatch a frame exactly as `handle(text:)` does AFTER its decode await —
+    /// i.e. with a token captured at read time — so a test can retire the token
+    /// first and prove the post-decode recheck drops the stale frame.
+    func debugDispatchFrameAfterDecode(text: String, lifecycleConnectionToken: UUID?) async {
+        guard let data = text.data(using: .utf8),
+              let envelope = try? JSONDecoder().decode(Envelope.self, from: data) else { return }
+        await dispatchDecodedFrame(
+            data: data,
+            envelope: envelope,
+            lifecycleEpoch: 1,
+            lifecycleConnectionToken: lifecycleConnectionToken
+        )
+    }
+
+    /// Drive the DIRECT-link message path (`lifecycleEpoch == nil`) so a test can
+    /// exercise the SECOND suspension window: `handleMessage` awaits the detached
+    /// payload decode, then the post-decode token recheck must drop a message whose
+    /// link retired during that decode before it can touch the cursor or broadcast.
+    func debugHandleDirectMessageAfterDecode(text: String, lifecycleConnectionToken: UUID?) async {
+        guard let data = text.data(using: .utf8) else { return }
+        await handleMessage(data: data, lifecycleEpoch: nil, lifecycleConnectionToken: lifecycleConnectionToken)
+    }
+#endif
 }

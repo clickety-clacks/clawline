@@ -11,6 +11,13 @@ import OSLog
 struct RootView: View {
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "RootView")
     let uploadService: any UploadServicing
+    // The ONE process-wide cache-IO service, owned by the @main App (the true
+    // composition root — a RootView is reconstructed per scene, so owning it
+    // here would give each visionOS scene its own queue and defeat cross-scene
+    // ordering). Injected down and passed to every ChatViewModel so message-cache
+    // write/delete ordering holds across overlapping/replaced instances AND
+    // across scenes that share the on-disk cache (spec §T-A). No global state.
+    let messageCacheIO: any MessageCacheIOServicing
     @State private var toastManager = ToastManager()
     @State private var salientHighlightService = SalientHighlightService()
     @State private var chatViewModel: ChatViewModel?
@@ -145,9 +152,17 @@ struct RootView: View {
             device: device,
             uploadService: uploadService,
             toastManager: toastManager,
-            salientHighlightService: salientHighlightService
+            salientHighlightService: salientHighlightService,
+            messageCacheIO: messageCacheIO
         )
         if let created = chatViewModel {
+            if let providerChatService = chatService as? ProviderChatService {
+                providerChatService.setAdoptedSessionKeysProvider { [weak created] in
+                    MainActor.assumeIsolated {
+                        created?.adoptedSessionKeysForProvider() ?? []
+                    }
+                }
+            }
             logger.info(
                 "[T099-PIN] root=\(self.rootViewTraceId, privacy: .public) event=ensureChatViewModel_created origin=\(origin, privacy: .public) vm=\(created.debugInstanceId, privacy: .public) vmObject=\(String(describing: ObjectIdentifier(created)), privacy: .public)"
             )
@@ -185,7 +200,7 @@ private struct KeyboardSafeAreaMode: ViewModifier {
 // MARK: - Previews
 
 #Preview("Unauthenticated") {
-    RootView(uploadService: PreviewUploadService())
+    RootView(uploadService: PreviewUploadService(), messageCacheIO: MessageCacheIO())
         .environment(AuthManager())
         .environment(\.connectionService, StubConnectionService())
         .environment(\.deviceIdentifier, DeviceIdentifier())
@@ -195,7 +210,7 @@ private struct KeyboardSafeAreaMode: ViewModifier {
 #Preview("Authenticated") {
     let auth = AuthManager()
     auth.storeCredentials(token: "preview-token", userId: "preview-user")
-    return RootView(uploadService: PreviewUploadService())
+    return RootView(uploadService: PreviewUploadService(), messageCacheIO: MessageCacheIO())
         .environment(auth)
         .environment(\.connectionService, StubConnectionService())
         .environment(\.deviceIdentifier, DeviceIdentifier())

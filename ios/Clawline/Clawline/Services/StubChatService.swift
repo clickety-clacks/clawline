@@ -7,7 +7,7 @@
 
 import Foundation
 
-final class StubChatService: ChatServicing, DirectChatConnecting {
+final class StubChatService: ChatServicing {
     var responseDelay: TimeInterval = 1.5
     private var streams: [StreamSession] = []
     private var replayCursorBySessionKey: [String: String] = [:]
@@ -48,6 +48,8 @@ final class StubChatService: ChatServicing, DirectChatConnecting {
             self.lifecycleContinuation = continuation
         }
     }()
+
+    var serverFeatures: [String] = []
 
     var isTransportReadyForSend: Bool {
         latestConnectionState == .connected
@@ -182,6 +184,10 @@ final class StubChatService: ChatServicing, DirectChatConnecting {
         []
     }
 
+    func fetchOrgOptions() async throws -> OrgOptions {
+        OrgOptions.empty
+    }
+
     func fetchSessionStatus(sessionKey: String) async throws -> SessionStatus {
         throw ProviderChatService.Error.notConnected
     }
@@ -196,6 +202,27 @@ final class StubChatService: ChatServicing, DirectChatConnecting {
     }
 
     func createStream(displayName: String, idempotencyKey: String) async throws -> StreamSession {
+        try await createStream(
+            displayName: displayName,
+            idempotencyKey: idempotencyKey,
+            harness: nil,
+            model: nil,
+            host: nil,
+            archetype: nil
+        )
+    }
+
+    func createStream(
+        displayName: String,
+        idempotencyKey: String,
+        harness: String?,
+        model: String?,
+        host: String?,
+        archetype: String?
+    ) async throws -> StreamSession {
+        // The offline stub has no gateway to place the agent on; the placement
+        // params are accepted and ignored so a name-only preview create still
+        // yields a local stream.
         let now = Date()
         let stream = StreamSession(
             sessionKey: "agent:main:clawline:preview:s_\(UUID().uuidString.prefix(8).lowercased())",

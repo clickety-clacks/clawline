@@ -126,6 +126,7 @@ private final class VerificationChatService: ChatServicing {
     private(set) var startConnectionAttemptCallCount = 0
     private var replayCursorBySessionKey: [String: String] = [:]
     var isTransportReadyForSend = false
+    var serverFeatures: [String] = []
 
     lazy var incomingMessages: AsyncStream<Message> = {
         AsyncStream { continuation in
@@ -241,6 +242,7 @@ private final class VerificationChatService: ChatServicing {
 
     func fetchStreams() async throws -> [StreamSession] { [] }
     func fetchTrackableSessions() async throws -> [TrackableSession] { [] }
+    func fetchOrgOptions() async throws -> OrgOptions { OrgOptions.empty }
     func fetchSessionStatus(sessionKey: String) async throws -> SessionStatus {
         let _ = sessionKey
         throw ProviderChatService.Error.notConnected
@@ -262,6 +264,18 @@ private final class VerificationChatService: ChatServicing {
     func createStream(displayName: String, idempotencyKey: String) async throws -> StreamSession {
         let _ = displayName
         let _ = idempotencyKey
+        throw ProviderChatService.Error.notConnected
+    }
+
+    func createStream(
+        displayName: String,
+        idempotencyKey: String,
+        harness: String?,
+        model: String?,
+        host: String?,
+        archetype: String?
+    ) async throws -> StreamSession {
+        let _ = (harness, model, host, archetype)
         throw ProviderChatService.Error.notConnected
     }
 

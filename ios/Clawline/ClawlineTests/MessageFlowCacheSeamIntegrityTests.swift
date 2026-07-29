@@ -142,8 +142,159 @@ struct MessageFlowCacheSeamIntegrityTests {
         )
         #expect(
             contents.contains("MessageBubbleGeometry.adjacentMessageRowSpacing(metrics: metrics)"),
-            "T1485 proof: compact row gap comes from the shared bubble geometry invariant."
+            "T1485 proof: message row gap comes from the shared bubble geometry invariant."
         )
+        #expect(
+            contents.contains("static func shouldApplyBubbleSizingV2Remeasure(isNearBottom _: Bool, isScrollAtRest: Bool) -> Bool"),
+            "T1193 proof: V2 remeasure flushing should be controlled by a testable first-pass cache policy."
+        )
+    }
+
+    @Test("T1193: V2 sizing and visible cells consume one authoritative layout state")
+    func bubbleSizingV2SizingAndRenderingShareAuthoritativeLayoutState() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // ClawlineTests
+            .deletingLastPathComponent() // Clawline
+            .appendingPathComponent("Clawline/Views/Chat/MessageFlowCollectionView.swift")
+        let contents = try String(contentsOf: sourceURL, encoding: .utf8)
+        let lines = contents.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+
+        guard let sizeForItemStart = lines.firstIndex(where: { $0.contains("private func sizeForItem(at indexPath: IndexPath)") }),
+              let sizeForItemEnd = lines[sizeForItemStart...].firstIndex(where: { $0.contains("private func measureUIKitBubbleSize") }),
+              let cellProviderStart = lines.firstIndex(where: { $0.contains("withReuseIdentifier: MessageBubbleUIKitCell.reuseIdentifier") }),
+              let cellProviderEnd = lines[cellProviderStart...].firstIndex(where: { $0.contains("cell?.configure(") }),
+              let authorityStart = lines.firstIndex(where: { $0.contains("private func authoritativeBubbleSizingV2LayoutState") }),
+              let authorityEnd = lines[authorityStart...].firstIndex(where: { $0.contains("private func bubbleSizingV2LayoutState") }) else {
+            Issue.record("Unable to locate the V2 sizing, visible rendering, or authoritative geometry sections.")
+            return
+        }
+
+        let sizeForItemWindow = lines[sizeForItemStart..<sizeForItemEnd].joined(separator: "\n")
+        let cellProviderWindow = lines[cellProviderStart..<cellProviderEnd].joined(separator: "\n")
+        let authorityWindow = lines[authorityStart..<authorityEnd].joined(separator: "\n")
+
+        #expect(
+            sizeForItemWindow.contains("authoritativeBubbleSizingV2LayoutState("),
+            "sizeForItem must resolve the shared authoritative V2 layout state instead of independently producing a plan."
+        )
+        #expect(
+            cellProviderWindow.contains("authoritativeBubbleSizingV2LayoutState("),
+            "Visible cells must consume the same authoritative V2 layout state used by first-pass sizing."
+        )
+        #expect(
+            !cellProviderWindow.contains("bubbleSizingV2Plan("),
+            "Visible cells must not run a second V2 planning algorithm and silently self-heal after scroll."
+        )
+        #expect(
+            authorityWindow.contains("bubbleSizingV2Plan(") && authorityWindow.contains("bubbleSizingV2LayoutState("),
+            "The geometry authority should be the only place that joins plan resolution with measured/render layout state."
+        )
+        #expect(
+            contents.contains("private let bubbleSizingV2LayoutStateCache"),
+            "The shared authority must cache the complete LayoutState, not only a size, so rendering consumes the measured plan."
+        )
+    }
+
+    @Test("T1377: async sizing waits for settle and preserves preview view identity")
+    func asyncSizingUsesSettledGeometryOnlyPreviewFeedback() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Clawline/Views/Chat/MessageFlowCollectionView.swift")
+        let contents = try String(contentsOf: sourceURL, encoding: .utf8)
+        let lines = contents.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+
+        guard let handlerStart = lines.firstIndex(where: { $0.contains("private func handleCellRequestedLayout") }),
+              let handlerEnd = lines[handlerStart...].firstIndex(where: { $0.contains("private func applyRequestedLayoutNow") }),
+              let deferredStart = lines.firstIndex(where: { $0.contains("private func flushDeferredPreviewRemeasuresIfPossible") }),
+              let deferredEnd = lines[deferredStart...].firstIndex(where: { $0.contains("private func handleBubbleSizingV2LinkPreviewLayout") }),
+              let queueStart = lines.firstIndex(where: { $0.contains("private func queueBubbleSizingV2Remeasure") }),
+              let queueEnd = lines[queueStart...].firstIndex(where: { $0.contains("static func shouldQueueBubbleSizingV2AsyncRemeasure") }),
+              let previewStart = lines.firstIndex(where: { $0.contains("private func handleBubbleSizingV2LinkPreviewLayout") }),
+              let previewEnd = lines[previewStart...].firstIndex(where: { $0.contains("private struct BubbleSizingV2AcceptedRemeasureKey") }),
+              let retryStart = lines.firstIndex(where: { $0.contains("private func scheduleBubbleSizingV2DeferredFlushAfterRest") }),
+              let retryEnd = lines[retryStart...].firstIndex(where: { $0.contains("private func flushDeferredBubbleSizingV2RemeasureIfNeeded") }),
+              let flushStart = lines.firstIndex(where: { $0.contains("private func flushBubbleSizingV2RemeasureIfPossible") }),
+              let flushEnd = lines[flushStart...].firstIndex(where: { $0.contains("private func invalidateBubbleSizingV2Cache") }) else {
+            Issue.record("Unable to locate the T1377 async sizing production seams.")
+            return
+        }
+
+        let handler = lines[handlerStart..<handlerEnd].joined(separator: "\n")
+        let deferred = lines[deferredStart..<deferredEnd].joined(separator: "\n")
+        let queue = lines[queueStart..<queueEnd].joined(separator: "\n")
+        let preview = lines[previewStart..<previewEnd].joined(separator: "\n")
+        let retry = lines[retryStart..<retryEnd].joined(separator: "\n")
+        let flush = lines[flushStart..<flushEnd].joined(separator: "\n")
+
+        #expect(handler.contains("? isBubbleSizingV2ScrollAtRest()"))
+        guard let settleGate = handler.range(of: "guard isSettled"),
+              let v2Branch = handler.range(of: "if bubbleSizingV2Enabled") else {
+            Issue.record("Unable to locate the settle gate or V2 branch.")
+            return
+        }
+        #expect(settleGate.lowerBound < v2Branch.lowerBound)
+        #expect(deferred.contains("handleCellRequestedLayout(messageId: id)"))
+        #expect(!deferred.contains("applyRequestedLayoutNow(messageId: id)"))
+        #expect(handler.contains("bubbleSizingV2PendingLiveMeasurementIds.insert(messageId)"))
+        #expect(queue.contains("producerRevision: String"))
+        #expect(queue.contains("bubbleSizingV2AcceptedRemeasureKeys.insert(key)"))
+        #expect(preview.contains("bubbleSizingV2AsyncPreviewHeightChanged"))
+        #expect(preview.contains("previewView.currentLoadToken.uuidString):\\(Int(newHeight.rounded()))"))
+        #expect(!preview.contains("isContentSettled: previewView.hasSettledHeight"))
+        #expect(!retry.contains("isNearBottom"))
+        #expect(retry.contains("Self.bubbleSizingV2RestSettleDelaySeconds - elapsedSinceLastScroll"))
+        #expect(retry.contains("self.flushDeferredBubbleSizingV2RemeasureIfNeeded()"))
+        #expect(retry.contains("self.scheduleBubbleSizingV2DeferredFlushAfterRest()"))
+        #expect(contents.contains("previewHeight: preview?.reportedHeight"))
+        #expect(flush.contains("liveMeasurementIds.contains(id)"))
+        #expect(flush.contains("applyRequestedLayoutNow(messageId: id)"))
+        #expect(!flush.contains("scheduleReconfigure(for: id)"))
+        #expect(contents.contains("return applyingLiveMeasuredCellSize(cached, messageId: message.id)"))
+        #expect(contents.contains("return applyingLiveMeasuredCellSize(layoutState, messageId: message.id)"))
+        #expect(contents.contains("return applyingLiveMeasuredCellSize(measured, messageId: message.id)"))
+        #expect(contents.contains("let outcome = bubbleSizingV2PendingRemeasureIds.contains(messageId) ? \"coalesced\" : \"queued\""))
+        #expect(contents.contains("state.bubbleSizingV2AcceptedRemeasureKeys.removeAll()"))
+        #expect(contents.contains("state.deferredPreviewRemeasureIds.removeAll()"))
+    }
+
+    @Test("T1377: preview settlement restores last-good post-load measurement semantics")
+    func previewSettlementUsesMeaningfulPostLoadMeasurement() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Clawline/Views/Chat/LinkPreviewView.swift")
+        let contents = try String(contentsOf: sourceURL, encoding: .utf8)
+        let lines = contents.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+
+        let applyStart = try #require(lines.firstIndex(where: { $0.contains("private func applyMeasuredHeight") }))
+        let applyEnd = try #require(lines[applyStart...].firstIndex(where: { $0.contains("private func handleFailure") }))
+        let finishStart = try #require(lines.firstIndex(where: { $0.contains("func webView(_: WKWebView, didFinish") }))
+        let finishEnd = try #require(lines[finishStart...].firstIndex(where: { $0.contains("func webView(_: WKWebView, didFail") }))
+        let apply = lines[applyStart..<applyEnd].joined(separator: "\n")
+        let finish = lines[finishStart..<finishEnd].joined(separator: "\n")
+
+        #expect(apply.contains("guard abs(webViewHeightConstraint.constant - clamped) > 10 else { return false }"))
+        #expect(apply.contains("onHeightChange?()"))
+        #expect(apply.contains("Self.heightCache.setObject"))
+        #expect(contents.contains("if applyMeasuredHeight(heightValue)"))
+        #expect(!contents.contains("heightUpdates += 1\n        applyMeasuredHeight(heightValue)"))
+        #expect(!contents.contains("if heightUpdates >= 2"))
+        #expect(finish.contains("guard state == .loading else { return }"))
+        #expect(finish.contains("if heightUpdates == 0"))
+        #expect(!finish.contains("state == .loading || state == .loaded"))
+    }
+
+    @Test("T1377: preview loads expose a stable production counter")
+    func linkPreviewLoadHasProductionCounter() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Clawline/Views/Chat/LinkPreviewView.swift")
+        let contents = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        #expect(contents.contains("T1377_PROFILE preview_load message_id="))
+        #expect(contents.contains("preview_load=\\(self.loadToken.uuidString"))
     }
 
     @Test("T1465: row flow keeps ordinary bubbles content-shaped")
@@ -183,48 +334,4 @@ struct MessageFlowCacheSeamIntegrityTests {
         )
     }
 
-    @Test("T1193: V2 sizing and visible cells consume one authoritative layout state")
-    func bubbleSizingV2SizingAndRenderingShareAuthoritativeLayoutState() throws {
-        let sourceURL = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent() // ClawlineTests
-            .deletingLastPathComponent() // Clawline
-            .appendingPathComponent("Clawline/Views/Chat/MessageFlowCollectionView.swift")
-        let contents = try String(contentsOf: sourceURL, encoding: .utf8)
-        let lines = contents.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-
-        guard let sizeForItemStart = lines.firstIndex(where: { $0.contains("private func sizeForItem(at indexPath: IndexPath)") }),
-              let sizeForItemEnd = lines[sizeForItemStart...].firstIndex(where: { $0.contains("private func measureUIKitBubbleSize") }),
-              let cellProviderStart = lines.firstIndex(where: { $0.contains("withReuseIdentifier: MessageBubbleUIKitCell.reuseIdentifier") }),
-              let cellProviderEnd = lines[cellProviderStart...].firstIndex(where: { $0.contains("cell?.configure(") }),
-              let authorityStart = lines.firstIndex(where: { $0.contains("private func authoritativeBubbleSizingV2LayoutState") }),
-              let authorityEnd = lines[authorityStart...].firstIndex(where: { $0.contains("private func bubbleSizingV2LayoutState(") }) else {
-            Issue.record("Unable to locate the V2 sizing, visible rendering, or authoritative geometry sections.")
-            return
-        }
-
-        let sizeForItemWindow = lines[sizeForItemStart..<sizeForItemEnd].joined(separator: "\n")
-        let cellProviderWindow = lines[cellProviderStart..<cellProviderEnd].joined(separator: "\n")
-        let authorityWindow = lines[authorityStart..<authorityEnd].joined(separator: "\n")
-
-        #expect(
-            sizeForItemWindow.contains("authoritativeBubbleSizingV2LayoutState("),
-            "sizeForItem must resolve the shared authoritative V2 layout state instead of independently producing a plan."
-        )
-        #expect(
-            cellProviderWindow.contains("authoritativeBubbleSizingV2LayoutState("),
-            "Visible cells must consume the same authoritative V2 layout state used by first-pass sizing."
-        )
-        #expect(
-            !cellProviderWindow.contains("bubbleSizingV2Plan("),
-            "Visible cells must not run a second V2 planning algorithm and silently self-heal after scroll."
-        )
-        #expect(
-            authorityWindow.contains("bubbleSizingV2Plan(") && authorityWindow.contains("bubbleSizingV2LayoutState("),
-            "The geometry authority should be the only place that joins plan resolution with measured/render layout state."
-        )
-        #expect(
-            contents.contains("private let bubbleSizingV2LayoutStateCache"),
-            "The shared authority must cache the complete LayoutState, not only a size, so rendering consumes the measured plan."
-        )
-    }
 }

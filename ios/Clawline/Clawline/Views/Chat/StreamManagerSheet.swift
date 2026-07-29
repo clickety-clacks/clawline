@@ -19,6 +19,7 @@ enum StreamPopupSearchPresentationFocusPolicy {
 
 struct StreamManagerSheet: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.displayScale) private var displayScale
     @Environment(\.settingsManager) private var settings
 
     @Bindable var viewModel: ChatViewModel
@@ -27,10 +28,26 @@ struct StreamManagerSheet: View {
     let searchFocusRequestID: Int?
     let maxAvailableHeight: CGFloat
     let maxAvailableWidth: CGFloat
+    /// Active popup presentation identity from the focus coordinator.
+    /// Carries R1136-ARCH-05 identity into child focus reports so the parent
+    /// can decide policy without children holding long-lived focus counters.
+    let presentationID: UInt
+    /// True only while the popup focus coordinator permits the shortcut
+    /// key-command bridge to take first responder. Drives R1136-ARCH-06 / E6:
+    /// the hidden bridge must stand down during dismissal and composer
+    /// restoration so it cannot opportunistically grab first responder.
+    let isShortcutOwnershipActive: Bool
     let onSelectStream: (String) -> Void
     let onRequestTrackPicker: () -> Void
     let onConsumeSearchFocusRequest: () -> Void
     let onShortcutOwnershipChange: ([String]) -> Void
+    /// R1136-ARCH-06: child focus reporting. StreamManagerSheet reports actual
+    /// search-focus applied/resigned events back to the focus coordinator with
+    /// the active presentation ID. Children report; the parent decides policy.
+    let onSearchFocusApplied: (UInt) -> Void
+    let onSearchFocusResigned: (UInt) -> Void
+    /// Reports that SwiftUI has torn down the popup presentation for this ID.
+    let onPresentationEnded: (UInt) -> Void
 
     @State private var draftName = ""
     @State private var searchQuery = ""
@@ -40,12 +57,35 @@ struct StreamManagerSheet: View {
     @State private var removingSessionKeys: Set<String> = []
     @State private var pendingCreateRows: [PendingCreateRow] = []
     @State private var pendingRemovalStream: StreamSession?
+    @State private var isPresentingCreationSheet = false
     @State private var selectedStreamSessionKey: String?
     @State private var didActivateSelection = false
     @State private var isSearchFieldFocusEnabled = false
     @State private var localSearchFocusRequestID = 0
     @State private var isSearchFieldFocused = false
+    @State private var popoverWidthCache: PopoverWidthCache?
+    @State private var rowHighlightCache: [RowHighlightCacheKey: StreamSelectorLayout.SelectionHighlightStyle] = [:]
     @FocusState private var focusedEditor: EditorMode?
+
+    private struct PopoverWidthCacheKey: Hashable {
+        let streamNames: [String]
+        let pendingNames: [String]
+        let maximumWidthPixels: Int
+        let showsShortcutLabels: Bool
+        let fontScaleChangeSequence: Int
+    }
+
+    private struct PopoverWidthCache: Equatable {
+        let key: PopoverWidthCacheKey
+        let width: CGFloat
+    }
+
+    private struct RowHighlightCacheKey: Hashable {
+        let sessionKey: String
+        let isSelected: Bool
+        let colorScheme: ColorScheme
+        let isSpatial: Bool
+    }
 
     private enum EditorMode: Hashable {
         case renaming(String)
@@ -78,7 +118,10 @@ struct StreamManagerSheet: View {
         max(baselineMaximumPopoverWidth, floor(maxAvailableWidth * 0.8))
     }
 
-    private var idealPopoverWidth: CGFloat {
+    private func idealPopoverWidth(
+        filteredStreams: [StreamSession],
+        filteredPendingCreateRows: [PendingCreateRow]
+    ) -> CGFloat {
         let visibleNames = filteredStreams.map(\.displayName) + filteredPendingCreateRows.map(\.displayName)
         let titleFont = UIFont.clawline(.subsectionHeader)
         let longestTitleWidth = visibleNames
@@ -132,6 +175,13 @@ struct StreamManagerSheet: View {
         resolvedHardwareKeyboardShortcutsAvailable
     }
 
+    private var selectorShortcutBridgeShouldOwnFirstResponder: Bool {
+        isShortcutOwnershipActive
+            && selectorShortcutsAvailable
+            && searchFocusRequestID == nil
+            && !isSearchFieldFocused
+    }
+
     private var shouldRenderSearchTextField: Bool {
         isSearchFieldFocusEnabled
             || StreamPopupSearchPresentationFocusPolicy
@@ -167,6 +217,28 @@ struct StreamManagerSheet: View {
 
     var body: some View {
         let _ = settings.fontScaleChangeSequence
+        // Hoisted once per body evaluation; the filter chain and shortcut map
+        // must not be re-derived per row (O(N^2)) or per width measurement.
+        let filteredStreams = self.filteredStreams
+        let filteredPendingCreateRows = self.filteredPendingCreateRows
+        let selectableShortcutKeys = selectableShortcutSessionKeys(
+            shortcutsAvailable: selectorShortcutsAvailable,
+            filteredSessionKeys: filteredStreams.map(\.sessionKey)
+        )
+        let listItemCount = filteredStreams.count + filteredPendingCreateRows.count
+        let popoverWidthCacheKey = PopoverWidthCacheKey(
+            streamNames: filteredStreams.map(\.displayName),
+            pendingNames: filteredPendingCreateRows.map(\.displayName),
+            maximumWidthPixels: Int((maximumPopoverWidth * displayScale).rounded()),
+            showsShortcutLabels: selectorShortcutsAvailable,
+            fontScaleChangeSequence: settings.fontScaleChangeSequence
+        )
+        let idealWidth = popoverWidthCache?.key == popoverWidthCacheKey
+            ? popoverWidthCache?.width ?? baselineIdealPopoverWidth
+            : idealPopoverWidth(
+                filteredStreams: filteredStreams,
+                filteredPendingCreateRows: filteredPendingCreateRows
+            )
         let idealVerticalLayout = StreamSelectorLayout.popupVerticalLayout(
             itemCount: listItemCount,
             showsCreateInlineRow: false,
@@ -198,7 +270,8 @@ struct StreamManagerSheet: View {
                     ForEach(filteredStreams) { stream in
                         streamRow(
                             for: stream,
-                            dotState: rowDotStates[stream.sessionKey] ?? .inactive
+                            dotState: rowDotStates[stream.sessionKey] ?? .inactive,
+                            selectableShortcutKeys: selectableShortcutKeys
                         )
                     }
 
@@ -271,7 +344,7 @@ struct StreamManagerSheet: View {
         .frame(height: heightFrame.fixedHeight, alignment: .top)
         .frame(
             minWidth: minimumPopoverWidth,
-            idealWidth: idealPopoverWidth,
+            idealWidth: idealWidth,
             maxWidth: maximumPopoverWidth
         )
         .frame(
@@ -294,22 +367,30 @@ struct StreamManagerSheet: View {
         .background {
             selectorShortcutKeyCommandBridge
         }
+        .modifier(
+            StreamManagerSheetLifecycleModifier(
+                searchFocusRequestID: searchFocusRequestID,
+                isSearchFieldFocused: isSearchFieldFocused,
+                presentationID: presentationID,
+                onAppear: { [self] in handleAppearance() },
+                onDisappear: { [self] in handleDisappearance() },
+                onSearchFocusRequestIDChange: { [self] requestID in handleSearchFocusRequest(requestID) },
+                onSearchFocusChange: { [self] focused in reportSearchFocus(focused) }
+            )
+        )
         .onAppear {
-            refreshShortcutAvailabilityAndPublish()
-            syncSelectionWithFilteredStreams()
-            handleInitialSearchFocus(searchFocusRequestID)
+            refreshStreamManagerCaches(
+                key: popoverWidthCacheKey,
+                filteredStreams: filteredStreams,
+                filteredPendingCreateRows: filteredPendingCreateRows
+            )
         }
-        .onDisappear {
-            onShortcutOwnershipChange([])
-            resetInlineEditing()
-            searchQuery = ""
-            isSearchFieldFocused = false
-            isSearchFieldFocusEnabled = false
-            selectedStreamSessionKey = nil
-            didActivateSelection = false
-        }
-        .onChange(of: searchFocusRequestID) { _, requestID in
-            handleSearchFocusRequest(requestID)
+        .onChange(of: popoverWidthCacheKey) { _, key in
+            refreshStreamManagerCaches(
+                key: key,
+                filteredStreams: filteredStreams,
+                filteredPendingCreateRows: filteredPendingCreateRows
+            )
         }
         .onChange(of: searchQuery) { _, _ in
             syncSelectionWithFilteredStreams()
@@ -335,14 +416,7 @@ struct StreamManagerSheet: View {
 #endif
         .alert(
             pendingRemovalTitle,
-            isPresented: Binding(
-                get: { pendingRemovalStream != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        pendingRemovalStream = nil
-                    }
-                }
-            ),
+            isPresented: pendingRemovalPresented,
             presenting: pendingRemovalStream
         ) { stream in
             Button("Cancel", role: .cancel) {}
@@ -351,6 +425,28 @@ struct StreamManagerSheet: View {
                 Task { await removeStream(stream) }
             }
         }
+        .sheet(isPresented: $isPresentingCreationSheet) {
+            StreamCreationSheet(viewModel: viewModel, defaultName: nextStreamDefaultName)
+        }
+        // The creation sheet is a Tightbeam-only affordance. If the shared gate
+        // closes while it is open (disconnect, or a feature set without
+        // "tightbeam"), it must stop being actionable rather than continue to
+        // offer placement creation against an ungated server.
+        .onChange(of: viewModel.isTightbeamServer) { _, isTightbeam in
+            if !isTightbeam { isPresentingCreationSheet = false }
+        }
+    }
+
+
+    private var pendingRemovalPresented: Binding<Bool> {
+        Binding(
+            get: { pendingRemovalStream != nil },
+            set: { isPresented in
+                if !isPresented {
+                    pendingRemovalStream = nil
+                }
+            }
+        )
     }
 
     private var bottomActionBar: some View {
@@ -398,7 +494,7 @@ struct StreamManagerSheet: View {
 
             // Keep add affordance optically centered in a fixed-height toolbar regardless of keyboard changes.
             Button {
-                addStreamDirectly()
+                addStream()
             } label: {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(Color.clear)
@@ -426,7 +522,8 @@ struct StreamManagerSheet: View {
     private var selectorShortcutKeyCommandBridge: some View {
         StreamSelectorShortcutKeyCommandBridge(
             selectableSessionKeys: selectorShortcutsAvailable ? selectableShortcutSessionKeys : [],
-            isSearchFieldFocused: isSearchFieldFocused
+            isSearchFieldFocused: isSearchFieldFocused,
+            shouldOwnFirstResponder: selectorShortcutBridgeShouldOwnFirstResponder
         )
         .frame(width: 1, height: 1)
         .opacity(0.001)
@@ -467,8 +564,12 @@ struct StreamManagerSheet: View {
     }
 
     @ViewBuilder
-    private func streamRow(for stream: StreamSession, dotState: StreamDotState) -> some View {
-        rowContent(for: stream, dotState: dotState)
+    private func streamRow(
+        for stream: StreamSession,
+        dotState: StreamDotState,
+        selectableShortcutKeys: [String]
+    ) -> some View {
+        rowContent(for: stream, dotState: dotState, selectableShortcutKeys: selectableShortcutKeys)
             .frame(height: listRowHeight, alignment: .center)
             .listRowInsets(
                 EdgeInsets(
@@ -513,7 +614,11 @@ struct StreamManagerSheet: View {
     }
 
     @ViewBuilder
-    private func rowContent(for stream: StreamSession, dotState: StreamDotState) -> some View {
+    private func rowContent(
+        for stream: StreamSession,
+        dotState: StreamDotState,
+        selectableShortcutKeys: [String]
+    ) -> some View {
         if activeEditor == .renaming(stream.sessionKey) {
             TextField("Stream name", text: $draftName)
                 .font(.clawline(.subsectionHeader))
@@ -556,20 +661,23 @@ struct StreamManagerSheet: View {
                             .controlSize(.small)
                             .tint(.secondary)
                     }
-                    shortcutLabel(for: stream)
+                    shortcutLabel(for: stream, selectableShortcutKeys: selectableShortcutKeys)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(isWorking || isRemovingStream(stream.sessionKey))
-            .accessibilityHint(accessibilityShortcutLabel(for: stream).map { "Shortcut \($0)" } ?? "")
+            .accessibilityHint(
+                accessibilityShortcutLabel(for: stream, selectableShortcutKeys: selectableShortcutKeys)
+                    .map { "Shortcut \($0)" } ?? ""
+            )
         }
     }
 
     @ViewBuilder
-    private func shortcutLabel(for stream: StreamSession) -> some View {
-        if let label = shortcutLabelText(for: stream) {
+    private func shortcutLabel(for stream: StreamSession, selectableShortcutKeys: [String]) -> some View {
+        if let label = shortcutLabelText(for: stream, selectableShortcutKeys: selectableShortcutKeys) {
             Text(label)
                 .font(.clawline(.secondaryLabel))
                 .monospacedDigit()
@@ -580,12 +688,52 @@ struct StreamManagerSheet: View {
         }
     }
 
+
+    private func refreshStreamManagerCaches(
+        key: PopoverWidthCacheKey,
+        filteredStreams: [StreamSession],
+        filteredPendingCreateRows: [PendingCreateRow]
+    ) {
+        if popoverWidthCache?.key != key {
+            popoverWidthCache = PopoverWidthCache(
+                key: key,
+                width: idealPopoverWidth(
+                    filteredStreams: filteredStreams,
+                    filteredPendingCreateRows: filteredPendingCreateRows
+                )
+            )
+        }
+        rowHighlightCache = Dictionary(uniqueKeysWithValues: filteredStreams.map { stream in
+            let key = RowHighlightCacheKey(
+                sessionKey: stream.sessionKey,
+                isSelected: selectedStreamSessionKey == stream.sessionKey,
+                colorScheme: colorScheme,
+                isSpatial: Self.isSpatialPlatform
+            )
+            return (
+                key,
+                StreamSelectorLayout.selectionHighlightStyle(
+                    isSelected: key.isSelected,
+                    isDark: key.colorScheme == .dark,
+                    isSpatial: key.isSpatial
+                )
+            )
+        })
+    }
+
     private func rowBackground(for stream: StreamSession) -> some View {
-        let highlight = StreamSelectorLayout.selectionHighlightStyle(
+        let key = RowHighlightCacheKey(
+            sessionKey: stream.sessionKey,
             isSelected: selectedStreamSessionKey == stream.sessionKey,
-            isDark: colorScheme == .dark,
+            colorScheme: colorScheme,
             isSpatial: Self.isSpatialPlatform
         )
+        let highlight = rowHighlightCache[key]
+            ?? StreamSelectorLayout.selectionHighlightStyle(
+                isSelected: key.isSelected,
+                isDark: key.colorScheme == .dark,
+                isSpatial: key.isSpatial
+            )
         return RoundedRectangle(cornerRadius: 12, style: .continuous)
             .fill(Color.primary.opacity(highlight.fillOpacity))
             .overlay {
@@ -643,9 +791,24 @@ struct StreamManagerSheet: View {
         removingSessionKeys.contains(sessionKey)
     }
 
-    private func addStreamDirectly() {
+    private var nextStreamDefaultName: String {
         let existingCount = streams.count + pendingCreateRows.count
-        let name = "Stream \(existingCount + 1)"
+        return "Stream \(existingCount + 1)"
+    }
+
+    /// Routes the "+" affordance: tightbeam opens the placement creation sheet;
+    /// openclaw keeps the legacy name-only direct create unchanged.
+    private func addStream() {
+        if StreamCreationLaunchPolicy.usesCreationSheet(isTightbeamServer: viewModel.isTightbeamServer) {
+            viewModel.loadOrgOptionsIfNeeded()
+            isPresentingCreationSheet = true
+        } else {
+            addStreamDirectly()
+        }
+    }
+
+    private func addStreamDirectly() {
+        let name = nextStreamDefaultName
         let pendingID = UUID()
         pendingCreateRows.append(PendingCreateRow(id: pendingID, displayName: name))
 
@@ -679,6 +842,41 @@ struct StreamManagerSheet: View {
             return
         }
         handleSearchFocusRequest(requestID)
+    }
+
+    private func handleAppearance() {
+        refreshShortcutAvailabilityAndPublish()
+        syncSelectionWithFilteredStreams()
+        handleInitialSearchFocus(searchFocusRequestID)
+    }
+
+    private func handleDisappearance() {
+        onShortcutOwnershipChange([])
+        // R1136-ARCH-06: report focus resign on teardown so the parent's
+        // transaction reflects actual search-field state, not a stale
+        // acknowledgement that outlives the popup.
+        if isSearchFieldFocused {
+            onSearchFocusResigned(presentationID)
+        }
+        onPresentationEnded(presentationID)
+        resetInlineEditing()
+        searchQuery = ""
+        isSearchFieldFocused = false
+        isSearchFieldFocusEnabled = false
+        selectedStreamSessionKey = nil
+        didActivateSelection = false
+    }
+
+    /// R1136-ARCH-06: child focus reporting. StreamManagerSheet reports actual
+    /// search-focus applied/resigned events to the parent focus coordinator
+    /// with the active presentation ID. Children report; the parent decides
+    /// policy (e.g., whether the shortcut bridge may take first responder).
+    private func reportSearchFocus(_ focused: Bool) {
+        if focused {
+            onSearchFocusApplied(presentationID)
+        } else {
+            onSearchFocusResigned(presentationID)
+        }
     }
 
     private func syncSelectionWithFilteredStreams() {
@@ -753,12 +951,22 @@ struct StreamManagerSheet: View {
     }
 
     private func selectableShortcutSessionKeys(shortcutsAvailable: Bool) -> [String] {
+        selectableShortcutSessionKeys(
+            shortcutsAvailable: shortcutsAvailable,
+            filteredSessionKeys: filteredStreamSessionKeys
+        )
+    }
+
+    private func selectableShortcutSessionKeys(
+        shortcutsAvailable: Bool,
+        filteredSessionKeys: [String]
+    ) -> [String] {
         let renamingSessionKey: String? = {
             guard case .renaming(let sessionKey) = activeEditor else { return nil }
             return sessionKey
         }()
         return StreamSelectorShortcutMap.selectableSessionKeys(
-            filteredSessionKeys: filteredStreamSessionKeys,
+            filteredSessionKeys: filteredSessionKeys,
             shortcutsAvailable: shortcutsAvailable,
             isWorking: isWorking,
             removingSessionKeys: removingSessionKeys,
@@ -766,17 +974,18 @@ struct StreamManagerSheet: View {
         )
     }
 
-    private func shortcutLabelText(for stream: StreamSession) -> String? {
+    private func shortcutLabelText(for stream: StreamSession, selectableShortcutKeys: [String]) -> String? {
         guard selectorShortcutsAvailable,
               let slot = StreamSelectorShortcutMap.slot(
                 forSessionKey: stream.sessionKey,
-                selectableSessionKeys: selectableShortcutSessionKeys
+                selectableSessionKeys: selectableShortcutKeys
               ) else { return nil }
         return StreamSelectorShortcutMap.shortcutLabel(forSlot: slot)
     }
 
-    private func accessibilityShortcutLabel(for stream: StreamSession) -> String? {
-        shortcutLabelText(for: stream).map(StreamSelectorShortcutMap.accessibilityLabel(forShortcutLabel:))
+    private func accessibilityShortcutLabel(for stream: StreamSession, selectableShortcutKeys: [String]) -> String? {
+        shortcutLabelText(for: stream, selectableShortcutKeys: selectableShortcutKeys)
+            .map(StreamSelectorShortcutMap.accessibilityLabel(forShortcutLabel:))
     }
 
     private func renameStream(_ stream: StreamSession) async {
@@ -821,6 +1030,32 @@ struct StreamManagerSheet: View {
             .allowsHitTesting(false)
     }
 
+}
+
+/// Extracts the focus/lifecycle modifiers from `StreamManagerSheet.body` so the
+/// body's view tree stays under the SwiftUI type-checker's complexity budget.
+/// Carries the popup presentation identity (`R1136-ARCH-05`) into the search
+/// focus reports so the parent focus coordinator can decide policy.
+private struct StreamManagerSheetLifecycleModifier: ViewModifier {
+    let searchFocusRequestID: Int?
+    let isSearchFieldFocused: Bool
+    let presentationID: UInt
+    let onAppear: () -> Void
+    let onDisappear: () -> Void
+    let onSearchFocusRequestIDChange: (Int?) -> Void
+    let onSearchFocusChange: (Bool) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear(perform: onAppear)
+            .onDisappear(perform: onDisappear)
+            .onChange(of: searchFocusRequestID) { _, requestID in
+                onSearchFocusRequestIDChange(requestID)
+            }
+            .onChange(of: isSearchFieldFocused) { _, focused in
+                onSearchFocusChange(focused)
+            }
+    }
 }
 
 struct StreamPopupRowStatusDotIdentity: Hashable {
@@ -1099,24 +1334,33 @@ private struct StreamSelectorSearchField: UIViewRepresentable {
 private struct StreamSelectorShortcutKeyCommandBridge: UIViewRepresentable {
     let selectableSessionKeys: [String]
     let isSearchFieldFocused: Bool
+    /// R1136-ARCH-06 / E6: parent-owned permit. The hidden key-command bridge
+    /// may only take first responder when the popup focus coordinator says
+    /// selector shortcuts own input AND the search field is not currently
+    /// focused. During dismissal and composer restoration this is false, so
+    /// the bridge cannot opportunistically grab first responder.
+    let shouldOwnFirstResponder: Bool
 
     func makeUIView(context: Context) -> KeyCommandView {
         let view = KeyCommandView()
         view.selectableSessionKeys = selectableSessionKeys
         view.isSearchFieldFocused = isSearchFieldFocused
+        view.shouldOwnFirstResponder = shouldOwnFirstResponder
         return view
     }
 
     func updateUIView(_ uiView: KeyCommandView, context: Context) {
         uiView.selectableSessionKeys = selectableSessionKeys
         uiView.isSearchFieldFocused = isSearchFieldFocused
+        uiView.shouldOwnFirstResponder = shouldOwnFirstResponder
         uiView.refreshKeyCommandsIfNeeded()
-        uiView.activateIfSearchFieldInactive()
+        uiView.reconcileFirstResponderOwnership()
     }
 
     final class KeyCommandView: UIView {
         var selectableSessionKeys: [String] = []
         var isSearchFieldFocused = false
+        var shouldOwnFirstResponder = false
         private var keyCommandSignature: [String] = []
 
         override var canBecomeFirstResponder: Bool { true }
@@ -1135,13 +1379,20 @@ private struct StreamSelectorShortcutKeyCommandBridge: UIViewRepresentable {
 
         override func didMoveToWindow() {
             super.didMoveToWindow()
-            activateIfSearchFieldInactive()
+            reconcileFirstResponderOwnership()
         }
 
-        func activateIfSearchFieldInactive() {
-            guard !isSearchFieldFocused else { return }
+        func reconcileFirstResponderOwnership() {
+            guard shouldOwnFirstResponder, !isSearchFieldFocused else {
+                if isFirstResponder {
+                    resignFirstResponder()
+                }
+                return
+            }
             DispatchQueue.main.async { [weak self] in
-                guard let self, !self.isSearchFieldFocused else { return }
+                guard let self,
+                      self.shouldOwnFirstResponder,
+                      !self.isSearchFieldFocused else { return }
                 self.becomeFirstResponder()
             }
         }
@@ -1170,14 +1421,16 @@ private struct StreamSelectorShortcutKeyCommandBridge: UIViewRepresentable {
     }
 }
 
-private struct StreamPopupRowStatusDot: View {
+struct StreamPopupRowStatusDot: View {
     let isActive: Bool
     let dotState: StreamDotState
     let colorScheme: ColorScheme
 
     var body: some View {
-        Circle()
-            .fill(
+        Image(systemName: "circle.fill")
+            .resizable()
+            .scaledToFit()
+            .foregroundStyle(
                 StreamDotColor.resolve(
                     isActive: isActive,
                     dotState: dotState,
@@ -1186,6 +1439,7 @@ private struct StreamPopupRowStatusDot: View {
             )
             .frame(width: 8, height: 8)
             .fixedSize()
+            .accessibilityHidden(true)
             .shadow(
                 color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
                 radius: isActive ? StreamDotColor.activeOuterGlowRadius(colorScheme: colorScheme) : 0
@@ -1207,7 +1461,20 @@ struct TrackPickerSheet: View {
     @State private var selectedTrackCandidateSessionKey: String?
     @State private var trackSearchQuery = ""
     @State private var isWorking = false
+    @State private var trackPickerHighlightCache: [TrackPickerHighlightCacheKey: TrackPickerHighlightCacheValue] = [:]
     @FocusState private var isTrackSearchFieldFocused: Bool
+
+    private struct TrackPickerHighlightCacheKey: Hashable {
+        let sessionKey: String
+        let displayName: String
+        let query: String
+        let colorScheme: ColorScheme
+    }
+
+    private struct TrackPickerHighlightCacheValue {
+        let displayName: AttributedString
+        let sessionKeySnippet: AttributedString
+    }
 
     private let trackPickerRowCornerRadius: CGFloat = 12
     private let trackPickerContentHorizontalPadding: CGFloat = 20
@@ -1270,6 +1537,14 @@ struct TrackPickerSheet: View {
 
     var body: some View {
         let _ = settings.fontScaleChangeSequence
+        let trackHighlightCacheKey = filteredTrackCandidates.map {
+            TrackPickerHighlightCacheKey(
+                sessionKey: $0.sessionKey,
+                displayName: $0.displayName,
+                query: trackSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines),
+                colorScheme: colorScheme
+            )
+        }
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: trackPickerSectionSpacing) {
@@ -1294,6 +1569,8 @@ struct TrackPickerSheet: View {
                 }
             }
         }
+        .onAppear { refreshTrackPickerHighlightCache() }
+        .onChange(of: trackHighlightCacheKey) { _, _ in refreshTrackPickerHighlightCache() }
         .onChange(of: trackCandidates.map(\.sessionKey)) { _, sessionKeys in
             guard let selectedTrackCandidateSessionKey else { return }
             if !sessionKeys.contains(selectedTrackCandidateSessionKey) {
@@ -1482,6 +1759,7 @@ struct TrackPickerSheet: View {
     @ViewBuilder
     private func trackPickerRow(for candidate: ChatViewModel.UntrackedSessionCandidate) -> some View {
         let isSelected = selectedTrackCandidateSessionKey == candidate.sessionKey
+        let highlightedText = trackPickerHighlightedText(for: candidate)
 
         Button {
             selectedTrackCandidateSessionKey = candidate.sessionKey
@@ -1508,11 +1786,11 @@ struct TrackPickerSheet: View {
                 .frame(width: 22, height: 22)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    highlightedTrackPickerDisplayName(for: candidate)
+                    Text(highlightedText.displayName)
                         .font(.clawline(.uiLabel, weight: isSelected ? .semibold : .regular))
                         .lineLimit(1)
 
-                    highlightedTrackPickerSessionKey(for: candidate)
+                    Text(highlightedText.sessionKeySnippet)
                         .font(.clawline(.timestamp, design: .monospaced))
                         .lineLimit(1)
                 }
@@ -1543,38 +1821,60 @@ struct TrackPickerSheet: View {
         .buttonStyle(.plain)
     }
 
-    private func highlightedTrackPickerDisplayName(for candidate: ChatViewModel.UntrackedSessionCandidate) -> Text {
-        highlightedText(
-            candidate.displayName,
-            query: trackSearchQuery,
-            defaultColor: .primary,
-            highlightColor: trackPickerMatchHighlightColor
+    private func refreshTrackPickerHighlightCache() {
+        trackPickerHighlightCache = Dictionary(uniqueKeysWithValues: filteredTrackCandidates.map { candidate in
+            let key = trackPickerHighlightCacheKey(for: candidate)
+            return (key, makeTrackPickerHighlightValue(for: candidate))
+        })
+    }
+
+    private func trackPickerHighlightedText(for candidate: ChatViewModel.UntrackedSessionCandidate) -> TrackPickerHighlightCacheValue {
+        let key = trackPickerHighlightCacheKey(for: candidate)
+        return trackPickerHighlightCache[key] ?? makeTrackPickerHighlightValue(for: candidate)
+    }
+
+    private func trackPickerHighlightCacheKey(for candidate: ChatViewModel.UntrackedSessionCandidate) -> TrackPickerHighlightCacheKey {
+        TrackPickerHighlightCacheKey(
+            sessionKey: candidate.sessionKey,
+            displayName: candidate.displayName,
+            query: trackSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines),
+            colorScheme: colorScheme
         )
     }
 
-    private func highlightedTrackPickerSessionKey(for candidate: ChatViewModel.UntrackedSessionCandidate) -> Text {
+    private func makeTrackPickerHighlightValue(for candidate: ChatViewModel.UntrackedSessionCandidate) -> TrackPickerHighlightCacheValue {
         let snippet = sessionKeySnippet(candidate.sessionKey, query: trackSearchQuery)
-        return highlightedText(
-            snippet.text,
-            highlightedRange: snippet.highlightedRange,
-            defaultColor: .secondary,
-            highlightColor: trackPickerMatchHighlightColor
+        return TrackPickerHighlightCacheValue(
+            displayName: highlightedAttributedString(
+                candidate.displayName,
+                query: trackSearchQuery,
+                defaultColor: .primary,
+                highlightColor: trackPickerMatchHighlightColor
+            ),
+            sessionKeySnippet: highlightedAttributedString(
+                snippet.text,
+                highlightedRange: snippet.highlightedRange,
+                defaultColor: .secondary,
+                highlightColor: trackPickerMatchHighlightColor
+            )
         )
     }
 
-    private func highlightedText(
+    private func highlightedAttributedString(
         _ text: String,
         query: String,
         defaultColor: Color,
         highlightColor: Color
-    ) -> Text {
+    ) -> AttributedString {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty,
             let range = text.range(of: normalized, options: .caseInsensitive)
         else {
-            return Text(text).foregroundColor(defaultColor)
+            var attributed = AttributedString(text)
+            attributed.foregroundColor = defaultColor
+            return attributed
         }
-        return highlightedText(
+        return highlightedAttributedString(
             text,
             highlightedRange: range,
             defaultColor: defaultColor,
@@ -1582,24 +1882,24 @@ struct TrackPickerSheet: View {
         )
     }
 
-    private func highlightedText(
+    private func highlightedAttributedString(
         _ text: String,
         highlightedRange: Range<String.Index>?,
         defaultColor: Color,
         highlightColor: Color
-    ) -> Text {
+    ) -> AttributedString {
         var attributed = AttributedString(text)
         attributed.foregroundColor = defaultColor
 
         guard let highlightedRange,
             let attributedRange = Range(highlightedRange, in: attributed)
         else {
-            return Text(attributed)
+            return attributed
         }
 
         attributed[attributedRange].foregroundColor = highlightColor
         attributed[attributedRange].inlinePresentationIntent = .stronglyEmphasized
-        return Text(attributed)
+        return attributed
     }
 
     private func sessionKeySnippet(_ sessionKey: String, query: String) -> (text: String, highlightedRange: Range<String.Index>?) {

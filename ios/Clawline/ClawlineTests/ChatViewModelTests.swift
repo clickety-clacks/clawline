@@ -17,7 +17,160 @@ private final class ObservationFlag {
     var value = false
 }
 
+@Suite(.serialized)
 struct ChatViewModelTests {
+    @Test("T1673 Personal footer status follows the concrete runtime session")
+    @MainActor
+    func personalFooterStatusFollowsConcreteRuntimeSession() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let runtimeSessionKey = "agent:main:clawline:user:s_runtime"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        chatService.sessionStatusBySessionKey[runtimeSessionKey] = makeSessionStatus(
+            sessionKey: runtimeSessionKey,
+            state: .running,
+            provider: "openai",
+            model: "gpt-5.6-sol",
+            thinkingLevel: "high",
+            authMode: "oauth",
+            fastMode: true,
+            queueDepth: 0
+        )
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.activate(origin: "test.t1673.personalConcreteAuthority")
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        viewModel.inputContent = NSAttributedString(string: "Prove runtime authority")
+        #expect(viewModel.send())
+
+        for _ in 0..<50 {
+            if chatService.lastSentId != nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let clientMessageID = try #require(chatService.lastSentId)
+        chatService.resetFetchedSessionStatusKeys()
+        chatService.emitServiceEvent(
+            .agentProgress(
+                AgentProgressEvent(
+                    version: 1,
+                    sessionKey: runtimeSessionKey,
+                    runId: "run_t1673",
+                    messageId: clientMessageID,
+                    seq: 1,
+                    state: "running",
+                    summary: "Working"
+                )
+            )
+        )
+
+        for _ in 0..<100 {
+            if viewModel.sessionStatus(for: personalSessionKey)?.sessionKey == runtimeSessionKey { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(chatService.fetchedSessionStatusKeys.contains(runtimeSessionKey))
+        #expect(!chatService.fetchedSessionStatusKeys.contains(personalSessionKey))
+        #expect(viewModel.sessionStatus(for: personalSessionKey)?.sessionKey == runtimeSessionKey)
+        #expect(viewModel.sessionStatus(for: personalSessionKey)?.display.model == "gpt-5.6-sol")
+
+        let fetchCountAfterBinding = chatService.fetchSessionStatusCallCount
+        chatService.emitServiceEvent(
+            .agentProgress(
+                AgentProgressEvent(
+                    version: 1,
+                    sessionKey: runtimeSessionKey,
+                    runId: "run_t1673",
+                    messageId: clientMessageID,
+                    seq: 2,
+                    state: "running",
+                    summary: "Still working"
+                )
+            )
+        )
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(chatService.fetchSessionStatusCallCount == fetchCountAfterBinding)
+
+        viewModel.applySessionControl(
+            sessionKey: personalSessionKey,
+            action: .setFastMode,
+            enabled: true
+        )
+        for _ in 0..<50 {
+            if chatService.lastSessionControl?.sessionKey == runtimeSessionKey { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(chatService.lastSessionControl?.sessionKey == runtimeSessionKey)
+
+        chatService.emitServiceEvent(.messageAcked(id: clientMessageID))
+        let newerRuntimeSessionKey = "agent:main:clawline:user:s_newer"
+        chatService.sessionStatusBySessionKey[newerRuntimeSessionKey] = makeSessionStatus(
+            sessionKey: newerRuntimeSessionKey,
+            state: .idle,
+            provider: "openai",
+            model: "gpt-5.7",
+            thinkingLevel: "medium",
+            authMode: "oauth",
+            fastMode: false,
+            queueDepth: 0
+        )
+        viewModel.inputContent = NSAttributedString(string: "Use the newer runtime")
+        #expect(viewModel.send())
+        for _ in 0..<50 {
+            if chatService.lastSentId != clientMessageID { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let newerClientMessageID = try #require(chatService.lastSentId)
+        chatService.emitServiceEvent(
+            .agentProgress(
+                AgentProgressEvent(
+                    version: 1,
+                    sessionKey: newerRuntimeSessionKey,
+                    runId: "run_t1673_newer",
+                    messageId: newerClientMessageID,
+                    seq: 1,
+                    state: "running",
+                    summary: "Working"
+                )
+            )
+        )
+        for _ in 0..<100 {
+            if viewModel.sessionStatus(for: personalSessionKey)?.sessionKey == newerRuntimeSessionKey { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        chatService.emitServiceEvent(
+            .agentProgress(
+                AgentProgressEvent(
+                    version: 1,
+                    sessionKey: runtimeSessionKey,
+                    runId: "run_t1673",
+                    messageId: clientMessageID,
+                    seq: 2,
+                    state: "completed"
+                )
+            )
+        )
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(viewModel.sessionStatus(for: personalSessionKey)?.sessionKey == newerRuntimeSessionKey)
+        #expect(viewModel.sessionStatus(for: personalSessionKey)?.display.model == "gpt-5.7")
+    }
+
     @Test("T307 cross-chat mention sends to destination only")
     @MainActor
     func crossChatMentionSendRoutesToDestinationOnly() async throws {
@@ -75,12 +228,7 @@ struct ChatViewModelTests {
         #expect(chatService.lastSessionKey == destinationSessionKey)
         #expect(chatService.lastSentContent == "route this")
         #expect(viewModel.messages.isEmpty)
-        for _ in 0..<50 {
-            if viewModel.sessionStatus(for: destinationSessionKey)?.run.state == .running { break }
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        #expect(chatService.fetchedSessionStatusKeys.contains(destinationSessionKey))
-        #expect(viewModel.sessionStatus(for: destinationSessionKey)?.run.state == .running)
+        #expect(!chatService.fetchedSessionStatusKeys.contains(destinationSessionKey))
         #expect(viewModel.sessionStatus(for: personalSessionKey)?.run.state != .running)
     }
 
@@ -329,6 +477,205 @@ struct ChatViewModelTests {
         )
         try await Task.sleep(for: .milliseconds(20))
         #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceSessionKey] == nil)
+    }
+
+    @Test("T1355 popup interaction defers notification additions and removals until dismissal")
+    @MainActor
+    func popupInteractionDefersNotificationAdditionsAndRemovalsUntilDismissal() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let sourceA = "agent:main:clawline:user:s_popup_a"
+        let sourceB = "agent:main:clawline:user:s_popup_b"
+        let sourceC = "agent:main:clawline:user:s_popup_c"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: sourceA, displayName: "Popup A", kind: "custom", orderIndex: 1, isBuiltIn: false, trackingMode: .adopted),
+            makeStreamSession(sessionKey: sourceB, displayName: "Popup B", kind: "custom", orderIndex: 2, isBuiltIn: false, trackingMode: .adopted),
+            makeStreamSession(sessionKey: sourceC, displayName: "Popup C", kind: "custom", orderIndex: 3, isBuiltIn: false, trackingMode: .adopted)
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.activate(origin: "test.t1355.popupInteraction")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        try await setConnected(chatService: chatService, viewModel: viewModel)
+        try emitServerMessage(
+            Message(
+                id: "s_popup_a_1",
+                role: .assistant,
+                content: "first visible notification",
+                timestamp: Date(timeIntervalSince1970: 20),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: sourceA
+            ),
+            via: chatService
+        )
+        try emitServerMessage(
+            Message(
+                id: "s_popup_b_1",
+                role: .assistant,
+                content: "interacted notification",
+                timestamp: Date(timeIntervalSince1970: 10),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: sourceB
+            ),
+            via: chatService
+        )
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubbles.count == 2 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(viewModel.crossChatNotificationBubbles.map(\.sourceChatId) == [sourceA, sourceB])
+
+        viewModel.beginCrossChatNotificationPopupInteraction(sourceChatId: sourceB)
+        try emitServerMessage(
+            Message(
+                id: "s_popup_c_1",
+                role: .assistant,
+                content: "newer queued notification",
+                timestamp: Date(timeIntervalSince1970: 30),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: sourceC
+            ),
+            via: chatService
+        )
+        viewModel.dismissCrossChatNotification(sourceChatId: sourceA)
+        try await Task.sleep(for: .milliseconds(20))
+
+        #expect(viewModel.crossChatNotificationBubbles.map(\.sourceChatId) == [sourceA, sourceB])
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceB]?.entries.map(\.content) == ["interacted notification"])
+
+        viewModel.endCrossChatNotificationPopupInteraction(sourceChatId: sourceB)
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubbles.map(\.sourceChatId) == [sourceC, sourceB] { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(viewModel.crossChatNotificationBubbles.map(\.sourceChatId) == [sourceC, sourceB])
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceC]?.entries.map(\.content) == ["newer queued notification"])
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceB]?.entries.map(\.content) == ["interacted notification"])
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceA] == nil)
+    }
+
+    @Test("T1355 T1213 batch commit waits for popup dismissal before consuming epoch")
+    @MainActor
+    func popupInteractionDefersReplayBatchCommitUntilDismissal() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let sourceA = "agent:main:clawline:user:s_popup_batch_a"
+        let sourceB = "agent:main:clawline:user:s_popup_batch_b"
+        let sourceC = "agent:main:clawline:user:s_popup_batch_c"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: sourceA, displayName: "Popup Batch A", kind: "custom", orderIndex: 1, isBuiltIn: false, trackingMode: .adopted),
+            makeStreamSession(sessionKey: sourceB, displayName: "Popup Batch B", kind: "custom", orderIndex: 2, isBuiltIn: false, trackingMode: .adopted),
+            makeStreamSession(sessionKey: sourceC, displayName: "Popup Batch C", kind: "custom", orderIndex: 3, isBuiltIn: false, trackingMode: .adopted)
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.activate(origin: "test.t1355.popupReplayBatch")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: sourceA) != nil,
+               viewModel.stream(for: sourceB) != nil,
+               viewModel.stream(for: sourceC) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        try emitServerMessage(
+            Message(
+                id: "s_popup_batch_a_1",
+                role: .assistant,
+                content: "dismissed while frozen",
+                timestamp: Date(timeIntervalSince1970: 20),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: sourceA
+            ),
+            via: chatService
+        )
+        try emitServerMessage(
+            Message(
+                id: "s_popup_batch_b_1",
+                role: .assistant,
+                content: "interacted notification",
+                timestamp: Date(timeIntervalSince1970: 10),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: sourceB
+            ),
+            via: chatService
+        )
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubbles.count == 2 { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.crossChatNotificationBubbles.map(\.sourceChatId) == [sourceA, sourceB])
+
+        viewModel.beginCrossChatNotificationPopupInteraction(sourceChatId: sourceB)
+        let replayEpoch = try #require(chatService.lastStartedEpoch)
+        try emitServerMessage(
+            Message(
+                id: "s_popup_batch_c_1",
+                role: .assistant,
+                content: "replayed while popup open",
+                timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: sourceC
+            ),
+            via: chatService,
+            epoch: replayEpoch
+        )
+        chatService.emitLifecycleEvent(.init(epoch: replayEpoch, payload: .syncComplete))
+        viewModel.dismissCrossChatNotification(sourceChatId: sourceA)
+        try await Task.sleep(forDuration: .milliseconds(40))
+
+        #expect(viewModel.crossChatNotificationBubbles.map(\.sourceChatId) == [sourceA, sourceB])
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceC] == nil)
+
+        viewModel.endCrossChatNotificationPopupInteraction(sourceChatId: sourceB)
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubbles.map(\.sourceChatId) == [sourceC, sourceB] { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        #expect(viewModel.crossChatNotificationBubbles.map(\.sourceChatId) == [sourceC, sourceB])
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceC]?.entries.map(\.content) == ["replayed while popup open"])
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceB]?.entries.map(\.content) == ["interacted notification"])
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceA] == nil)
     }
 
     @Test("T307 dismissing notification clears source unread dot through read-state")
@@ -1164,6 +1511,964 @@ struct ChatViewModelTests {
         #expect(viewModel.crossChatNotificationBubbles.map(\.sourceChatId) == [sourceA, sourceB])
         #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceA]?.entries.map(\.content) == ["Replay A 2", "Replay A 1"])
         #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceB]?.entries.map(\.content) == ["Replay B 1"])
+    }
+
+    @Test("T1751 stream_history_cleared drops the local store, cache, and replay cursor for the stream")
+    @MainActor
+    func streamHistoryClearedDropsLocalStore() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_history_clear"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Cleared", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.t1751.historyClear")
+        // Establish the connection/lifecycle epoch before delivering an epoch-1
+        // message — without onAppear + setConnected the coordinator is not at
+        // epoch 1 and drops the frame (guard currentEpoch == epoch), which made
+        // this test fail solo at every SHA. Matches every reliable delivery test.
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        try await setConnected(chatService: chatService, viewModel: viewModel)
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        let message = #"{"type":"message","id":"s_history_1","role":"assistant","content":"Before clear","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(message.utf8))))
+        for _ in 0..<50 {
+            if !viewModel.messages(for: source).isEmpty { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.messages(for: source).map(\.id) == ["s_history_1"])
+
+        // Seed a replay cursor so the drop is observable (the gateway's barrier
+        // means replay must restart from scratch for this stream).
+        chatService.setReplayCursor("s_history_1", for: source)
+        #expect(chatService.replayCursorSnapshot()[source] == "s_history_1")
+
+        chatService.emitServiceEvent(.streamHistoryCleared(sessionKey: source))
+        for _ in 0..<50 {
+            if viewModel.messages(for: source).isEmpty { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.messages(for: source).isEmpty)
+        #expect(chatService.replayCursorSnapshot()[source] == nil)
+    }
+
+    @Test("F2 regression: history reset cancels a pending persist and bumps the barrier generation before the ordered cache delete")
+    @MainActor
+    func historyResetCancelsPendingPersistBeforeDelete() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_reset_cancel_fence"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Fence", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let cacheIO = TestMessageCacheIO()
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth, chatService: chatService, settings: SettingsManager(),
+            device: TestDevice(), uploadService: TestUploadService(),
+            toastManager: ToastManager(), salientHighlightService: SalientHighlightService(),
+            messageCacheIO: cacheIO
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.f2.cancelFence")
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        try await setConnected(chatService: chatService, viewModel: viewModel)
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        // Deliver a message: a persist debounce is armed (not yet fired).
+        let msg = #"{"type":"message","id":"s_pre_reset_1","role":"assistant","content":"pre-reset","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(msg.utf8))))
+        for _ in 0..<50 {
+            if viewModel.debugHasPendingPersist(for: source) { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.debugHasPendingPersist(for: source))
+        let genBefore = viewModel.debugBarrierGeneration(for: source)
+
+        // Trigger the reset BEFORE the debounce fires. It must cancel the pending
+        // persist and advance the barrier generation, so the straggler can never
+        // enqueue a resurrecting write.
+        viewModel.triggerHistoryResetForTesting(epoch: 2)
+        #expect(viewModel.debugHasPendingPersist(for: source) == false)
+        #expect(viewModel.debugBarrierGeneration(for: source) > genBefore)
+
+        // Drain the executor (the reset's clear delete). Wait past the original
+        // debounce window: no write may appear.
+        try await Task.sleep(forDuration: .milliseconds(650))
+        cacheIO.drain()
+        #expect(viewModel.debugCacheFileExists(for: source) == false)
+        #expect(chatService.replayCursorSnapshot()[source] == nil)
+
+        // A genuinely post-reset write (current generation) still persists. The
+        // reset was triggered directly, so the transport epoch is unchanged (1);
+        // deliver on that epoch so the frame is accepted by the coordinator.
+        let postReset = #"{"type":"message","id":"s_post_reset_1","role":"assistant","content":"post-reset","timestamp":1700000009000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(postReset.utf8))))
+        for _ in 0..<120 {
+            if cacheIO.pendingCount >= 1 { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        cacheIO.drain()
+        #expect(viewModel.debugCacheFileExists(for: source) == true)
+    }
+
+    @Test("F2 regression: a queued pre-reset write is serially ordered before the reset's cache delete — no on-disk resurrection")
+    @MainActor
+    func historyResetDeleteIsOrderedAfterQueuedWrite() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_reset_order_fence"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Order", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let cacheIO = TestMessageCacheIO()
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth, chatService: chatService, settings: SettingsManager(),
+            device: TestDevice(), uploadService: TestUploadService(),
+            toastManager: ToastManager(), salientHighlightService: SalientHighlightService(),
+            messageCacheIO: cacheIO
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.f2.orderFence")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        // Simulate a straggler pre-reset write that already reached the shared
+        // executor (a debounce that fired just before the reset): it writes the
+        // stream's cache file. Enqueued directly on the same injected executor.
+        let cacheURL = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Clawline", isDirectory: true)
+            .appendingPathComponent("MessageCache", isDirectory: true)
+            .appendingPathComponent(source.replacingOccurrences(of: ":", with: "-").appending(".json"))
+        cacheIO.perform {
+            try? FileManager.default.createDirectory(at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? Data("stale".utf8).write(to: cacheURL)
+        }
+
+        // The reset routes its cache delete through the SAME serial executor, so
+        // it is ordered strictly AFTER the queued write.
+        viewModel.triggerHistoryResetForTesting(epoch: 2)
+        #expect(cacheIO.pendingCount >= 2)  // straggler write + ordered delete
+
+        // Drain in submission order: write creates the file, delete removes it.
+        cacheIO.drain()
+        #expect(FileManager.default.fileExists(atPath: cacheURL.path) == false)
+    }
+
+    @Test("F1 regression: a .serverFeatures event delayed past disconnect does not re-open the tightbeam gate")
+    @MainActor
+    func delayedServerFeaturesAfterDisconnectDoesNotReopenGate() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth, chatService: chatService, settings: SettingsManager(),
+            device: TestDevice(), uploadService: TestUploadService(),
+            toastManager: ToastManager(), salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.f1.staleGate")
+        chatService.serverFeatures = ["tightbeam"]
+        chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))
+        for _ in 0..<50 {
+            if viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.isTightbeamServer)
+
+        // Socket closes. In production ProviderChatService.handleSocketClose
+        // clears the authoritative feature set on EVERY close (proven by
+        // ProviderServiceTests.socketCloseClearsServerFeatures); the stub mirrors
+        // that here so the view model re-derives from an empty service set.
+        chatService.serverFeatures = []
+        chatService.emitConnectionState(.disconnected)
+        chatService.emitServiceEvent(.serverFeatures([]))
+        for _ in 0..<50 {
+            if !viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.isTightbeamServer == false)
+
+        // A NEW link reconnects as an openclaw server (no tightbeam feature).
+        chatService.serverFeatures = []
+        chatService.emitConnectionState(.connected)
+        chatService.emitServiceEvent(.serverFeatures([]))
+        try await Task.sleep(forDuration: .milliseconds(40))
+        #expect(viewModel.isTightbeamServer == false)
+
+        // A .serverFeatures(["tightbeam"]) event delayed from the OLD link now
+        // arrives while connected to the NEW (openclaw) link. It must NOT reopen
+        // the gate — the handler re-derives from the service's authoritative
+        // current-link features (empty), never the stale payload.
+        chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))
+        try await Task.sleep(forDuration: .milliseconds(80))
+        #expect(viewModel.isTightbeamServer == false)
+    }
+
+    @Test("F1 integration: with the REAL ProviderChatService, an unexpected socket close closes the view model's tightbeam gate (no test-side manual clear)")
+    @MainActor
+    func realServiceSocketCloseClosesViewModelGate() async throws {
+        resetChatPersistence()
+        ChatViewModel.resetConnectionOwnershipForTesting()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let socket = IntegrationMockSocket()
+        let connector = IntegrationMockConnector(client: socket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL },
+            authTokenProvider: { "jwt" }
+        )
+        let viewModel = ChatViewModel(
+            auth: auth, chatService: service, settings: SettingsManager(),
+            device: TestDevice(), uploadService: TestUploadService(),
+            toastManager: ToastManager(), salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.f1.integration")
+        await viewModel.onAppear()
+        viewModel.handleSceneActiveStateChanged(isActive: true)
+
+        // The view model's lifecycle drives startConnectionAttempt -> the real
+        // service opens the mock socket and sends its auth frame.
+        for _ in 0..<200 {
+            if socket.sentTexts.contains(where: { $0.contains("\"type\":\"auth\"") }) { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(socket.sentTexts.contains(where: { $0.contains("\"type\":\"auth\"") }))
+
+        // Server authenticates the link as a Tightbeam server.
+        socket.enqueue(text: #"{ "type": "auth_result", "success": true, "features": ["tightbeam"], "sessionKeys": [], "replayCount": 0, "replayTruncated": false, "historyReset": false }"#)
+        for _ in 0..<300 {
+            if viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.isTightbeamServer)
+
+        // Unexpected socket close. The bridge here is PRODUCTION ONLY: the real
+        // service clears serverFeatures in handleSocketClose, and the view model
+        // re-derives from it — no test manually clears anything.
+        socket.simulateClose()
+        for _ in 0..<200 {
+            if !viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.isTightbeamServer == false)
+    }
+
+    @Test("F3 regression: an in-flight org-options fetch cannot repopulate a newer session after the gate closes")
+    @MainActor
+    func staleOrgOptionsFetchCannotRepopulateAfterGateCloses() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        // Session A's fetch is slow and returns STALE options.
+        chatService.orgOptionsFetchDelay = .milliseconds(150)
+        chatService.orgOptions = OrgOptions(
+            harnesses: ["stale-A"], models: [:], hosts: ["stale-host"], archetypes: []
+        )
+        let viewModel = ChatViewModel(
+            auth: auth, chatService: chatService, settings: SettingsManager(),
+            device: TestDevice(), uploadService: TestUploadService(),
+            toastManager: ToastManager(), salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.f3.aAfterB")
+        // Session A: gate opens, slow fetch begins.
+        chatService.serverFeatures = ["tightbeam"]
+        chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))
+        for _ in 0..<50 {
+            if viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        // Gate closes (A's link lost) while A's fetch is still in flight — this
+        // cancels A's task and advances the session generation.
+        chatService.serverFeatures = []
+        chatService.emitServiceEvent(.serverFeatures([]))
+        for _ in 0..<50 {
+            if !viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        // Session B connects with DIFFERENT options and a fast fetch.
+        chatService.orgOptionsFetchDelay = nil
+        chatService.orgOptions = OrgOptions(
+            harnesses: ["fresh-B"], models: [:], hosts: ["b-host"], archetypes: []
+        )
+        chatService.serverFeatures = ["tightbeam"]
+        chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))
+        for _ in 0..<80 {
+            if viewModel.orgOptions?.harnesses == ["fresh-B"] { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        // Let A's slow fetch resolve; it must NOT overwrite B's options.
+        try await Task.sleep(forDuration: .milliseconds(200))
+        #expect(viewModel.orgOptions?.harnesses == ["fresh-B"])
+        #expect(viewModel.orgOptions?.harnesses.contains("stale-A") != true)
+    }
+
+    @Test("F3 regression: prepareForReplacement cancels the in-flight org-options task")
+    @MainActor
+    func prepareForReplacementCancelsOrgOptionsTask() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.orgOptionsFetchDelay = .milliseconds(150)
+        chatService.orgOptions = OrgOptions(harnesses: ["late"], models: [:], hosts: [], archetypes: [])
+        let viewModel = ChatViewModel(
+            auth: auth, chatService: chatService, settings: SettingsManager(),
+            device: TestDevice(), uploadService: TestUploadService(),
+            toastManager: ToastManager(), salientHighlightService: SalientHighlightService()
+        )
+        await viewModel.activate(origin: "test.f3.retire")
+        chatService.serverFeatures = ["tightbeam"]
+        chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))
+        for _ in 0..<50 {
+            if viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        // Retire while the fetch is in flight — the task is cancelled.
+        viewModel.prepareForReplacement()
+        try await Task.sleep(forDuration: .milliseconds(220))
+        #expect(viewModel.orgOptions == nil)
+    }
+
+    @Test("R4 composition: RootView preserves one injected cache-IO identity across scenes — no per-view default/static escape")
+    @MainActor
+    func rootViewPreservesInjectedCacheIOIdentityAcrossScenes() {
+        // The @main App owns ONE MessageCacheIO and injects it into every scene's
+        // RootView. RootView takes it as a required `let` (no default, no @State),
+        // so it cannot substitute its own instance. Two RootViews standing in for
+        // two visionOS WindowGroup scenes, both built from the single app-owned
+        // instance, must therefore hold THAT exact identity — a per-RootView
+        // default or static would surface as a different object here.
+        let appOwned = MessageCacheIO()
+        let sceneA = RootView(uploadService: TestUploadService(), messageCacheIO: appOwned)
+        let sceneB = RootView(uploadService: TestUploadService(), messageCacheIO: appOwned)
+        #expect((sceneA.messageCacheIO as AnyObject) === (appOwned as AnyObject))
+        #expect((sceneB.messageCacheIO as AnyObject) === (appOwned as AnyObject))
+        #expect((sceneA.messageCacheIO as AnyObject) === (sceneB.messageCacheIO as AnyObject))
+        // A DIFFERENT app-owned instance is a distinct identity (sanity: identity
+        // comparison is meaningful, not trivially true).
+        let otherApp = MessageCacheIO()
+        #expect((sceneA.messageCacheIO as AnyObject) !== (otherApp as AnyObject))
+    }
+
+    @Test("R4 regression: production MessageCacheIO has no static/global executor — two instances are independent")
+    func productionCacheIOHasNoGlobalExecutor() async throws {
+        // If the executor were static/process-global, blocking one instance's
+        // queue would stall the other. Independent instances must not.
+        let a = MessageCacheIO()
+        let b = MessageCacheIO()
+        let releaseA = DispatchSemaphore(value: 0)
+        let bRan = DispatchSemaphore(value: 0)
+
+        a.perform { releaseA.wait() }        // occupies a's queue until released
+        b.perform { bRan.signal() }          // must run even while a is blocked
+
+        let bResult = bRan.wait(timeout: .now() + 2.0)
+        releaseA.signal()
+        #expect(bResult == .success)
+    }
+
+    @Test("R4 regression: one shared injected cache-IO carries cache mutations from two overlapping ChatViewModels")
+    @MainActor
+    func sharedInjectedCacheIOSerializesAcrossInstances() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_shared_identity"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Shared", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        // ONE cache-IO instance injected into BOTH view models — exactly the
+        // composition RootView provides (a single @State messageCacheIO passed
+        // to every ensureChatViewModel).
+        let sharedIO = TestMessageCacheIO()
+        func makeVM(_ tag: String) async -> (ChatViewModel, TestChatService) {
+            let svc = TestChatService(); svc.streams = streams
+            let vm = ChatViewModel(
+                auth: auth, chatService: svc, settings: SettingsManager(),
+                device: TestDevice(), uploadService: TestUploadService(),
+                toastManager: ToastManager(), salientHighlightService: SalientHighlightService(),
+                messageCacheIO: sharedIO
+            )
+            await vm.activate(origin: "test.r4.\(tag)")
+            svc.emitServiceEvent(.streamSnapshot(streams))
+            for _ in 0..<50 {
+                if vm.stream(for: source) != nil { break }
+                try? await Task.sleep(forDuration: .milliseconds(10))
+            }
+            return (vm, svc)
+        }
+
+        // Original instance, then a replacement instance (overlapping lifetimes).
+        let (vmA, svcA) = await makeVM("a")
+        let (vmB, svcB) = await makeVM("b")
+        defer { vmA.prepareForReplacement(); vmB.prepareForReplacement() }
+
+        // A history clear routes a cache-file delete through messageCacheIO
+        // synchronously (no debounce). Driving one clear on each view model must
+        // land BOTH deletes on the single injected executor — a per-instance
+        // default would leave the shared instance untouched. Serial drain proves
+        // ordering across the two instances.
+        svcA.emitServiceEvent(.streamHistoryCleared(sessionKey: source))
+        svcB.emitServiceEvent(.streamHistoryCleared(sessionKey: source))
+        try await Task.sleep(forDuration: .milliseconds(200))
+        sharedIO.drain()
+        #expect(sharedIO.performedCount >= 2)
+    }
+
+    @Test("R3 regression: placement create and set_harness are refused once the tightbeam gate closes")
+    @MainActor
+    func gatedSubmissionsRefusedAfterGateCloses() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth, chatService: chatService, settings: SettingsManager(),
+            device: TestDevice(), uploadService: TestUploadService(),
+            toastManager: ToastManager(), salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.r3.gateClose")
+        chatService.serverFeatures = ["tightbeam"]
+        chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))
+        for _ in 0..<50 {
+            if viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.isTightbeamServer)
+        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness))
+
+        // Gate closes (feature set without "tightbeam").
+        chatService.serverFeatures = []
+        chatService.emitServiceEvent(.serverFeatures([]))
+        for _ in 0..<50 {
+            if !viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.isTightbeamServer == false)
+        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness) == false)
+
+        // Actually INVOKE applySessionControl(.setHarness) after closure and
+        // assert the service was NOT called — the async task must recheck the
+        // gate at its own boundary, not just at the modal.
+        viewModel.applySessionControl(sessionKey: personalSessionKey, action: .setHarness, value: "codex")
+        try await Task.sleep(forDuration: .milliseconds(80))
+        #expect(chatService.lastSessionControl == nil)
+
+        // A NAME-ONLY create from the sheet path is refused too (the whole sheet
+        // is Tightbeam-gated), and nothing is posted to the service.
+        let nameOnly = await viewModel.createStream(
+            displayName: "Late Name Only", harness: nil, model: nil, host: nil, archetype: nil
+        )
+        #expect(nameOnly == .failed(message: "New-chat options are unavailable on this server."))
+        #expect(chatService.lastCreatePlacement == nil)
+
+        // A placement-carrying create is likewise refused and not posted.
+        let placement = await viewModel.createStream(
+            displayName: "Late Placement", harness: "codex", model: nil, host: "eezo", archetype: nil
+        )
+        #expect(placement == .failed(message: "New-chat options are unavailable on this server."))
+        #expect(chatService.lastCreatePlacement == nil)
+    }
+
+    @Test("F1 regression: a reconnecting (non-live) phase closes the tightbeam gate and refuses queued actions — the gate must not linger open through reconnect")
+    @MainActor
+    func reconnectingPhaseClosesGateAndRefusesQueuedActions() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth, chatService: chatService, settings: SettingsManager(),
+            device: TestDevice(), uploadService: TestUploadService(),
+            toastManager: ToastManager(), salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.f1.reconnecting")
+        // Authenticated tightbeam link: service holds the features and emits them.
+        chatService.serverFeatures = ["tightbeam"]
+        chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))
+        for _ in 0..<50 {
+            if viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.isTightbeamServer)
+        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness))
+
+        // The link drops: production's handleSocketClose clears the service's
+        // authoritative feature set BEFORE it drives the coordinator, so the
+        // service reads empty by the time the reconnecting phase lands. Drive the
+        // real replaying -> recovering mapping (collapses to .reconnecting) — NOT
+        // a .disconnected/.failed terminal state, and NOT a manual gate clear.
+        chatService.serverFeatures = []
+        await viewModel.debugDriveLifecyclePhaseForTesting(
+            from: .replaying, to: .recovering, epoch: 1, reason: .transportInterrupted
+        )
+
+        // The gate must close on the reconnecting phase itself, not wait for a
+        // terminal disconnect.
+        #expect(viewModel.connectionState == .reconnecting)
+        #expect(viewModel.isTightbeamServer == false)
+        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness) == false)
+
+        // A queued set_harness invoked during reconnect is refused at the async
+        // boundary and never reaches the service.
+        viewModel.applySessionControl(sessionKey: personalSessionKey, action: .setHarness, value: "codex")
+        try await Task.sleep(forDuration: .milliseconds(80))
+        #expect(chatService.lastSessionControl == nil)
+
+        // A placement-carrying create during reconnect is likewise refused/unposted.
+        let placement = await viewModel.createStream(
+            displayName: "Reconnect Placement", harness: "codex", model: nil, host: "eezo", archetype: nil
+        )
+        #expect(placement == .failed(message: "New-chat options are unavailable on this server."))
+        #expect(chatService.lastCreatePlacement == nil)
+    }
+
+    @Test("B2 regression: prepareForReplacement cancels the instance's pending cache writes")
+    @MainActor
+    func prepareForReplacementCancelsPendingCacheWork() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_retire_cache"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Retire", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        // Manually-drained cache IO double stands in for the process-wide queue.
+        let cacheIO = TestMessageCacheIO()
+        let svc = TestChatService()
+        svc.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth, chatService: svc, settings: SettingsManager(),
+            device: TestDevice(), uploadService: TestUploadService(),
+            toastManager: ToastManager(), salientHighlightService: SalientHighlightService(),
+            messageCacheIO: cacheIO
+        )
+        await viewModel.activate(origin: "test.b2.retire")
+        svc.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        // Deliver a message so a debounced persist is armed for `source`.
+        let msg = #"{"type":"message","id":"s_retire_1","role":"assistant","content":"doomed on retire","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        svc.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(msg.utf8))))
+        for _ in 0..<50 {
+            if !viewModel.messages(for: source).isEmpty { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        // Retire the instance BEFORE the 500ms debounce flushes. The pending
+        // persist must be cancelled, so no cache write is ever submitted to the
+        // shared IO — a replacement instance's later barrier delete cannot be
+        // undone by this instance.
+        viewModel.prepareForReplacement()
+        try await Task.sleep(forDuration: .milliseconds(700))
+        cacheIO.drain()
+        #expect(cacheIO.performedCount == 0)
+    }
+
+    @Test("R1 regression: history clear discards an in-flight cache restore instead of resurrecting pre-barrier history")
+    @MainActor
+    func streamHistoryClearedDiscardsInFlightRestore() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_restore_race"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Race", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.r1.restoreRace")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        // Plant a pre-barrier cache file on disk, exactly where the app's
+        // persist pipeline writes it. A large payload keeps the restore's
+        // decode in flight long enough for the barrier to land first; even if
+        // timing collapses, the post-fix assertions still hold (the barrier
+        // ordering deletes the file before a later restore can read it).
+        let cacheDirectory = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Clawline", isDirectory: true)
+            .appendingPathComponent("MessageCache", isDirectory: true)
+        try FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+        let cacheURL = cacheDirectory.appendingPathComponent(
+            source.replacingOccurrences(of: ":", with: "-").appending(".json")
+        )
+        let preBarrier = (0..<500).map { index in
+            Message(
+                id: "s_pre_barrier_\(index)",
+                role: .assistant,
+                content: "Pre-barrier message \(index) that must never come back after the clear.",
+                timestamp: Date(timeIntervalSince1970: 1_700_000_000 + Double(index)),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: source
+            )
+        }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(preBarrier).write(to: cacheURL, options: [.atomic])
+
+        // Begin a forced restore (detached disk read + decode), then land the
+        // barrier while it is in flight.
+        viewModel.setShowOnlyUserMessagesMode(true, for: source)
+        chatService.emitServiceEvent(.streamHistoryCleared(sessionKey: source))
+
+        try await Task.sleep(forDuration: .milliseconds(800))
+        #expect(viewModel.messages(for: source).isEmpty)
+        #expect(chatService.replayCursorSnapshot()[source] == nil)
+    }
+
+    @Test("R1 regression: a pending debounced persist does not recreate the message cache after a history clear")
+    @MainActor
+    func streamHistoryClearedOutlivesPendingPersist() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_persist_race"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Persist Race", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.r1.persistRace")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        // Deliver a message (arms the 500ms persist debounce), then clear the
+        // history before the debounce can flush.
+        let message = #"{"type":"message","id":"s_persist_1","role":"assistant","content":"Doomed","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(message.utf8))))
+        for _ in 0..<50 {
+            if !viewModel.messages(for: source).isEmpty { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        chatService.emitServiceEvent(.streamHistoryCleared(sessionKey: source))
+
+        // Wait past the debounce window plus the serialized IO queue drain: no
+        // write may recreate the cache file after the barrier's delete.
+        try await Task.sleep(forDuration: .milliseconds(900))
+        let cacheURL = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Clawline", isDirectory: true)
+            .appendingPathComponent("MessageCache", isDirectory: true)
+            .appendingPathComponent(source.replacingOccurrences(of: ":", with: "-").appending(".json"))
+        #expect(FileManager.default.fileExists(atPath: cacheURL.path) == false)
+        #expect(viewModel.messages(for: source).isEmpty)
+        #expect(chatService.replayCursorSnapshot()[source] == nil)
+    }
+
+    @Test("R2 regression: provenance presentation (the sizing source) is built from the stripped body on tightbeam")
+    @MainActor
+    func provenancePresentationBuildsFromStrippedBody() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.r2.strippedPresentation")
+        // Production invariant: the service property and the event always
+        // carry the same value (the property is set before the event fires).
+        chatService.serverFeatures = ["tightbeam"]
+        chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))
+        for _ in 0..<50 {
+            if viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.isTightbeamServer)
+
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
+        func markdownText(_ presentation: MessagePresentation) -> String {
+            presentation.parts.compactMap { part -> String? in
+                if case let .markdown(text) = part { return text }
+                return nil
+            }.joined(separator: "\n")
+        }
+
+        // A stamped wake message presents from the stripped body: the stamp
+        // line contributes nothing to what sizing measures.
+        let stamped = Message(
+            id: "m_provenance_stamped",
+            role: .user,
+            content: "[from user:mike]\nshort body",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: personalSessionKey,
+            sender: "user:mike"
+        )
+        let stampedText = markdownText(viewModel.presentation(for: stamped, metrics: metrics))
+        #expect(stampedText.contains("[from user:mike]") == false)
+        #expect(stampedText.contains("short body"))
+
+        // Anti-forgery: a first line that fails the sender cross-check stays
+        // in the measured/rendered body verbatim.
+        let forged = Message(
+            id: "m_provenance_forged",
+            role: .user,
+            content: "[from agent:notetaker]\nshort body",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_001),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: personalSessionKey,
+            sender: "user:mike"
+        )
+        let forgedText = markdownText(viewModel.presentation(for: forged, metrics: metrics))
+        #expect(forgedText.contains("[from agent:notetaker]"))
+
+        // A device-typed message (no sender) keeps a literal stamp-shaped
+        // first line even on tightbeam.
+        let typed = Message(
+            id: "m_provenance_typed",
+            role: .user,
+            content: "[from user:mike]\ntyped literal",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_002),
+            streaming: false,
+            attachments: [],
+            deviceId: "device-1",
+            sessionKey: personalSessionKey
+        )
+        let typedText = markdownText(viewModel.presentation(for: typed, metrics: metrics))
+        #expect(typedText.contains("[from user:mike]"))
+    }
+
+    @Test("R3 regression: a placement-carrying create reaches the service verbatim — no silent drop")
+    @MainActor
+    func placementCreateReachesServiceVerbatim() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.r3.placement")
+        chatService.serverFeatures = ["tightbeam"]
+        chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))
+        for _ in 0..<50 {
+            if viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.isTightbeamServer)
+
+        let outcome = await viewModel.createStream(
+            displayName: "Placed",
+            harness: "claude",
+            model: "sonnet",
+            host: "eezo",
+            archetype: "default"
+        )
+        if case .failed(let message) = outcome {
+            Issue.record("placement create unexpectedly failed: \(message)")
+        }
+        let placement = try #require(chatService.lastCreatePlacement)
+        #expect(placement.harness == "claude")
+        #expect(placement.model == "sonnet")
+        #expect(placement.host == "eezo")
+        #expect(placement.archetype == "default")
+    }
+
+    @Test("Gate regression: flipping the tightbeam gate invalidates already-rendered presentations")
+    @MainActor
+    func gateFlipInvalidatesRenderedPresentations() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.gate.invalidation")
+
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
+        func markdownText(_ presentation: MessagePresentation) -> String {
+            presentation.parts.compactMap { part -> String? in
+                if case let .markdown(text) = part { return text }
+                return nil
+            }.joined(separator: "\n")
+        }
+        let stamped = Message(
+            id: "m_gate_flip",
+            role: .user,
+            content: "[from user:mike]\nbody after the stamp",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: personalSessionKey,
+            sender: "user:mike"
+        )
+
+        // Cold-launch order: cached history renders BEFORE auth completes, so
+        // the first presentation is built with the gate off (stamp visible).
+        let beforeGate = markdownText(viewModel.presentation(for: stamped, metrics: metrics))
+        #expect(beforeGate.contains("[from user:mike]"))
+
+        chatService.serverFeatures = ["tightbeam"]
+        chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))
+        for _ in 0..<50 {
+            if viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.isTightbeamServer)
+
+        // The already-rendered message must re-present stripped; a stale
+        // cached presentation here is the live cold-launch defect.
+        let afterGate = markdownText(viewModel.presentation(for: stamped, metrics: metrics))
+        #expect(afterGate.contains("[from user:mike]") == false)
+        #expect(afterGate.contains("body after the stamp"))
+    }
+
+    @Test("Gate regression: tightbeam gate converges from the service's pulled features even when the serverFeatures event is never observed")
+    @MainActor
+    func tightbeamGateConvergesFromPulledFeatures() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        // The authed link already carries the feature set (as after an auth
+        // that completed before the view model subscribed to serviceEvents);
+        // no .serverFeatures event is ever emitted in this scenario.
+        chatService.serverFeatures = ["tightbeam"]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.gate.pulledFeatures")
+        #expect(viewModel.isTightbeamServer == false)
+
+        chatService.emitConnectionState(.connected)
+        for _ in 0..<50 {
+            if viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.isTightbeamServer)
     }
 
     @Test("Read replayed assistant content does not resurrect cross-chat notification")
@@ -2018,6 +3323,63 @@ struct ChatViewModelTests {
         #expect(viewModel.messages(for: customKey).map(\.id) == ["s_side_replay"])
         #expect(chatService.replayCursorSnapshot()[personalSessionKey] == nil)
         #expect(chatService.replayCursorSnapshot()[customKey] == "s_side_replay")
+    }
+
+    @Test("B4 regression: a barrier during history-reset replay does not resurrect the staged pre-barrier message")
+    @MainActor
+    func barrierDuringHistoryResetReplayPurgesStagedMessages() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let customKey = "agent:main:clawline:user:s_reset_barrier"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customKey, displayName: "Side", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth, chatService: chatService, settings: SettingsManager(),
+            device: TestDevice(), uploadService: TestUploadService(),
+            toastManager: ToastManager(), salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.b4.barrierDuringReset")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.orderedSessionKeys.contains(customKey) { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        // Force a history-reset reconnect.
+        chatService.startHistoryReset = true
+        chatService.startReplayCount = 1
+        chatService.emitSyncCompleteOnStart = false
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        try await Task.sleep(forDuration: .milliseconds(2100))
+        viewModel.handleSceneActiveStateChanged(isActive: true)
+        for _ in 0..<50 {
+            if chatService.connectCallCount >= 2 { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        // A replay frame stages a pre-barrier message in pendingHistoryResetReplay...
+        let staged = #"{"type":"message","id":"s_pre_barrier_reset","role":"assistant","content":"pre-barrier","timestamp":1700000000002,"streaming":false,"sessionKey":"\#(customKey)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .serverMessage(data: Data(staged.utf8))))
+        // ...then a barrier lands mid-replay IN-BAND on the lifecycle stream, so
+        // it is strictly ordered after the staged message (production emits the
+        // barrier in-band; a service-event barrier could reorder against it).
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .historyCleared(sessionKey: customKey)))
+        // ...and replay completes (this is where resurrection happened before the fix).
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .syncComplete))
+
+        try await Task.sleep(forDuration: .milliseconds(200))
+
+        // The staged pre-barrier message must NOT be reinserted, and the cursor
+        // must not be re-seeded from it.
+        #expect(viewModel.messages(for: customKey).map(\.id).contains("s_pre_barrier_reset") == false)
+        #expect(chatService.replayCursorSnapshot()[customKey] == nil)
     }
 
     @Test("Cache restore seeds missing cursor without replacing a live cursor")
@@ -5748,6 +7110,93 @@ struct ChatViewModelTests {
         #expect(status?.display.thinkingLevel == "high")
     }
 
+    @Test("Selected-session OAuth usage clears windows on authoritative binding failure")
+    @MainActor
+    func selectedSessionOAuthUsageClearsWindowsOnAuthoritativeBindingFailure() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        let freshUsage = SessionStatus.Display.CodexUsage(
+            freshness: .fresh,
+            fetchedAt: 1_784_000_000_000,
+            windows: [
+                .init(label: .fiveHour, remainingPercent: 64, resetAt: 1_784_003_600_000),
+                .init(label: .week, remainingPercent: 28, resetAt: 1_784_604_800_000),
+            ],
+            unavailableReason: nil
+        )
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .idle,
+            provider: "openai",
+            model: "gpt-5.6",
+            thinkingLevel: "high",
+            authMode: "oauth",
+            fastMode: true,
+            codexUsage: freshUsage,
+            queueDepth: 0
+        )
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.activate(origin: "test.t1673.oauthBindingFailure")
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        for _ in 0..<50 {
+            if viewModel.sessionStatus(for: personalSessionKey)?.display.codexUsage?.freshness == .fresh {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let fetchCount = chatService.fetchSessionStatusCallCount
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .idle,
+            provider: "openai",
+            model: "gpt-5.6",
+            thinkingLevel: "high",
+            authMode: "oauth",
+            fastMode: true,
+            codexUsage: .init(
+                freshness: .unavailable,
+                fetchedAt: nil,
+                windows: [],
+                unavailableReason: .accountBindingUnavailable
+            ),
+            queueDepth: 0
+        )
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        for _ in 0..<50 {
+            if chatService.fetchSessionStatusCallCount > fetchCount,
+               viewModel.sessionStatus(for: personalSessionKey)?.display.codexUsage?.freshness == .unavailable {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let status = try #require(viewModel.sessionStatus(for: personalSessionKey))
+        let usage = try #require(status.display.codexUsage)
+        #expect(usage.freshness == .unavailable)
+        #expect(usage.windows.isEmpty)
+        #expect(usage.unavailableReason == .accountBindingUnavailable)
+        #expect(SessionMetadataFooterCell.footerText(for: status)?.hasSuffix(
+            "OAUTH  ·  Usage unavailable"
+        ) == true)
+    }
+
     @Test("Session control applies typed provider response without chat text")
     @MainActor
     func sessionControlAppliesTypedProviderResponse() async throws {
@@ -7111,6 +8560,12 @@ struct ChatViewModelTests {
         let secondarySessionKey = "agent:main:clawline:user:s_logout_secondary"
         viewModel.debugUpsertMessage(makeTestMessage(id: "s_primary", content: "primary", sessionKey: personalSessionKey), isServer: true)
         viewModel.debugUpsertMessage(makeTestMessage(id: "s_secondary", content: "secondary", sessionKey: secondarySessionKey), isServer: true)
+        let cachedProjection = try #require(viewModel.messageProjection(
+            for: secondarySessionKey,
+            showOnlyUserMessages: false,
+            searchQuery: ""
+        ))
+        #expect(cachedProjection.count == 1)
         viewModel.logout()
 
         #expect(viewModel.messages.isEmpty)
@@ -7121,6 +8576,12 @@ struct ChatViewModelTests {
         #expect(viewModel.streamDotStateBySession.isEmpty)
         #expect(viewModel.debugSessionMessageEntryExists(personalSessionKey) == false)
         #expect(viewModel.debugSessionMessageEntryExists(secondarySessionKey) == false)
+        let clearedProjection = try #require(viewModel.messageProjection(
+            for: secondarySessionKey,
+            showOnlyUserMessages: false,
+            searchQuery: ""
+        ))
+        #expect(clearedProjection.count == 0)
         #expect(chatService.replayCursorSnapshot().isEmpty)
     }
 }
@@ -7172,9 +8633,14 @@ final class TestChatService: ChatServicing {
     var sendError: Swift.Error?
     var sendDelay: Duration?
     var createStreamError: Error?
+    var lastCreatePlacement: (harness: String?, model: String?, host: String?, archetype: String?)?
     var deleteStreamError: Error?
     var deleteStreamErrorSequence: [Error] = []
     var fetchTrackableSessionsError: Error?
+    var fetchOrgOptionsError: Error?
+    var orgOptions = OrgOptions.empty
+    var orgOptionsFetchDelay: Duration?
+    private(set) var fetchOrgOptionsCallCount: Int = 0
     var streams: [StreamSession] = []
     var trackableSessions: [TrackableSession] = []
     var sessionStatusBySessionKey: [String: SessionStatus] = [:]
@@ -7194,6 +8660,7 @@ final class TestChatService: ChatServicing {
     private(set) var fetchedSessionStatusKeys: [String] = []
     private(set) var cancelCurrentRunCallCount: Int = 0
     private(set) var lastCancelledSessionKey: String?
+    private(set) var lastStartedEpoch: Int?
     private(set) var deleteStreamCallCount: Int = 0
     private(set) var lastDeletedSessionKey: String?
     private(set) var renameStreamCallCount: Int = 0
@@ -7214,6 +8681,7 @@ final class TestChatService: ChatServicing {
         }
     }()
 
+    var serverFeatures: [String] = []
     private(set) lazy var connectionState: AsyncStream<ConnectionState> = {
         AsyncStream { continuation in
             self.stateContinuation = continuation
@@ -7246,6 +8714,7 @@ final class TestChatService: ChatServicing {
         _ = lastMessageId
         _ = token
         connectCallCount += 1
+        lastStartedEpoch = epoch
         lifecycleContinuation?.yield(.init(epoch: epoch, payload: .transportOpened))
         lifecycleContinuation?.yield(
             .init(
@@ -7387,6 +8856,13 @@ final class TestChatService: ChatServicing {
         return trackableSessions
     }
 
+    func fetchOrgOptions() async throws -> OrgOptions {
+        fetchOrgOptionsCallCount += 1
+        if let fetchOrgOptionsError { throw fetchOrgOptionsError }
+        if let orgOptionsFetchDelay { try await Task.sleep(for: orgOptionsFetchDelay) }
+        return orgOptions
+    }
+
     func fetchSessionStatus(sessionKey: String) async throws -> SessionStatus {
         fetchSessionStatusCallCount += 1
         fetchedSessionStatusKeys.append(sessionKey)
@@ -7428,6 +8904,18 @@ final class TestChatService: ChatServicing {
         )
         streams.append(stream)
         return stream
+    }
+
+    func createStream(
+        displayName: String,
+        idempotencyKey: String,
+        harness: String?,
+        model: String?,
+        host: String?,
+        archetype: String?
+    ) async throws -> StreamSession {
+        lastCreatePlacement = (harness, model, host, archetype)
+        return try await createStream(displayName: displayName, idempotencyKey: idempotencyKey)
     }
 
     func adoptStream(sessionKey: String) async throws -> StreamSession {
@@ -7574,7 +9062,72 @@ private func requireLastSentId(_ chatService: TestChatService) async throws -> S
     return try #require(chatService.lastSentId)
 }
 
-@MainActor
+private final class TestMessageCacheIO: MessageCacheIOServicing {
+    // Serial like production, but manually drained so tests are deterministic.
+    private let lock = NSLock()
+    private var queued: [@Sendable () -> Void] = []
+    private var performed = 0
+
+    var performedCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return performed
+    }
+
+    var pendingCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return queued.count
+    }
+
+    func perform(_ work: @escaping @Sendable () -> Void) {
+        lock.lock()
+        queued.append(work)
+        lock.unlock()
+    }
+
+    func drain() {
+        lock.lock()
+        let work = queued
+        queued.removeAll()
+        lock.unlock()
+        for item in work {
+            item()
+            lock.lock(); performed += 1; lock.unlock()
+        }
+    }
+}
+
+private final class IntegrationMockSocket: WebSocketClient, @unchecked Sendable {
+    private let stream: AsyncStream<String>
+    private let continuation: AsyncStream<String>.Continuation
+    private let lock = NSLock()
+    private var _sentTexts: [String] = []
+
+    var sentTexts: [String] {
+        lock.lock(); defer { lock.unlock() }
+        return _sentTexts
+    }
+
+    init() {
+        var c: AsyncStream<String>.Continuation!
+        self.stream = AsyncStream { c = $0 }
+        self.continuation = c
+    }
+
+    var incomingTextMessages: AsyncStream<String> { stream }
+    func send(text: String) async throws {
+        lock.lock(); _sentTexts.append(text); lock.unlock()
+    }
+    func close(with code: URLSessionWebSocketTask.CloseCode?) { continuation.finish() }
+    func enqueue(text: String) { continuation.yield(text) }
+    func simulateClose() { continuation.finish() }
+}
+
+private final class IntegrationMockConnector: WebSocketConnecting {
+    let client: IntegrationMockSocket
+    init(client: IntegrationMockSocket) { self.client = client }
+    func connect(to url: URL) async throws -> WebSocketClient { client }
+}
+
 private func resetChatPersistence() {
     // ChatViewModel restores per-session message caches and cursors from disk/UserDefaults.
     // Tests must start from a clean slate to avoid cross-test pollution.
@@ -7704,7 +9257,8 @@ private func makeStreamSession(
     displayName: String,
     kind: String,
     orderIndex: Int,
-    isBuiltIn: Bool
+    isBuiltIn: Bool,
+    trackingMode: StreamSession.TrackingMode = .serverManaged
 ) -> StreamSession {
     StreamSession(
         sessionKey: sessionKey,
@@ -7713,7 +9267,8 @@ private func makeStreamSession(
         orderIndex: orderIndex,
         isBuiltIn: isBuiltIn,
         createdAt: Date(),
-        updatedAt: Date()
+        updatedAt: Date(),
+        trackingMode: trackingMode
     )
 }
 
@@ -7726,6 +9281,7 @@ private func makeSessionStatus(
     thinkingLevel: String?,
     authMode: String? = nil,
     fastMode: Bool? = nil,
+    codexUsage: SessionStatus.Display.CodexUsage? = nil,
     queueDepth: Int,
     canCancelCurrentRun: Bool = false
 ) -> SessionStatus {
@@ -7741,7 +9297,8 @@ private func makeSessionStatus(
             thinkingLevel: thinkingLevel,
             fastMode: fastMode,
             mode: nil,
-            verbosity: nil
+            verbosity: nil,
+            codexUsage: codexUsage
         ),
         run: .init(
             state: state,

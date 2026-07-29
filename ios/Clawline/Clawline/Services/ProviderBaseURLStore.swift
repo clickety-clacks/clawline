@@ -113,3 +113,90 @@ enum ProviderWebSocketURLBuilder {
         return urls
     }
 }
+
+enum ProviderHTTPURLResolver {
+    static func uploadURL(fromAPIBase apiBase: URL) -> URL {
+        apiBase.appendingPathComponent("upload")
+    }
+
+    static func downloadURL(fromAPIBase apiBase: URL, assetId: String) throws -> URL {
+        guard !assetId.isEmpty else {
+            throw AttachmentError.invalidData
+        }
+        guard var components = URLComponents(url: apiBase, resolvingAgainstBaseURL: false) else {
+            throw AttachmentError.invalidData
+        }
+        guard let encodedAssetId = encodePathComponent(assetId) else {
+            throw AttachmentError.invalidData
+        }
+        let basePath = components.percentEncodedPath.hasSuffix("/")
+            ? String(components.percentEncodedPath.dropLast())
+            : components.percentEncodedPath
+        components.percentEncodedPath = "\(basePath)/download/\(encodedAssetId)"
+        guard let url = components.url else {
+            throw AttachmentError.invalidData
+        }
+        return url
+    }
+
+    static func apiBaseURL(from baseURL: URL) -> URL {
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
+              components.scheme?.lowercased() == "http",
+              let host = components.host,
+              !isLocalHTTPHost(host) else {
+            return baseURL
+        }
+
+        components.scheme = "https"
+        if host.lowercased() == "100.85.66.60" {
+            components.host = "tars.tail4105e8.ts.net"
+        }
+        if components.port == 18800 {
+            components.port = 19443
+        }
+        return components.url ?? baseURL
+    }
+
+    /// Ordered transport candidates for provider HTTP APIs: the HTTPS-mapped
+    /// front first when one applies, then the direct provider base URL.
+    /// Installs must not require the HTTPS front; callers fall back to the
+    /// next candidate on transport failure or a front gap response.
+    static func apiBaseURLCandidates(from baseURL: URL) -> [URL] {
+        let preferred = apiBaseURL(from: baseURL)
+        guard preferred != baseURL else { return [baseURL] }
+        return [preferred, baseURL]
+    }
+
+    /// A gap response comes from an HTTPS front that does not forward the
+    /// requested route (or cannot reach the provider), as opposed to a real
+    /// provider API error, which is always a JSON envelope
+    /// (`{"error":{...}}` or `{"type":"error",...}`).
+    static func isTransportGapResponse(statusCode: Int, data: Data) -> Bool {
+        switch statusCode {
+        case 502, 503, 504:
+            return true
+        case 404, 405:
+            guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return true
+            }
+            return object["error"] == nil && object["type"] == nil
+        default:
+            return false
+        }
+    }
+
+    private static func isLocalHTTPHost(_ host: String) -> Bool {
+        let normalized = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]")).lowercased()
+        return normalized == "localhost"
+            || normalized == "0.0.0.0"
+            || normalized == "::1"
+            || normalized.hasSuffix(".local")
+            || normalized.hasPrefix("127.")
+    }
+
+    private static func encodePathComponent(_ value: String) -> String? {
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "/")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed)
+    }
+}

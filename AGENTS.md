@@ -31,6 +31,12 @@ Note: "ultrathink" is appended to the prompt to enable extended thinking mode.
 - Avoid postfix force unwraps (`!`) in production code, except static URL literals with explicit code-review sign-off.
 - In protocol/message handlers, do not silently drop decode/transform failures; log or surface an explicit failure path.
 
+## Device and Simulator Testing
+
+Use XcodeBuildMCP when Clawline needs simulator or device execution, screenshots, UI hierarchy, interaction, or log capture. Read the UI hierarchy before coordinate-based interaction; do not guess coordinates from screenshots. Query the MCP server for the current tool names and parameters.
+
+When the required simulator and product path are available, do not stop after focused tests or a successful build. Launch Clawline in the simulator and smoke-test the changed behavior plus nearby user-visible behavior that shares the same screen, state, data flow, or interaction path. Choose a small, risk-based set of adjacent checks that could realistically regress from the change. Record what you exercised and the result. If simulator execution is unavailable or cannot reach the relevant production path, record the exact limitation; do not replace it with demo, mock, fixture, or bypass evidence.
+
 ## GitHub Issue Hygiene
 
 When working on GitHub issues, follow these rules:

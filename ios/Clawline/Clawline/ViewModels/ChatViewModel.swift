@@ -217,10 +217,6 @@ enum PromptProcessingStage: String, Equatable {
     case failed
 }
 
-protocol ChatViewModelHosting: AnyObject {
-    func handleSceneDidBecomeActive()
-}
-
 struct LiveAgentProgress: Equatable {
     let sessionKey: String
     let runId: String?
@@ -307,7 +303,7 @@ enum ImageAttachmentPreparer {
 
 @Observable
 @MainActor
-final class ChatViewModel: ChatViewModelHosting {
+final class ChatViewModel {
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessagePipeline")
     private let instanceId = UUID().uuidString
     @MainActor
@@ -384,11 +380,15 @@ final class ChatViewModel: ChatViewModelHosting {
     private(set) var streamDotStateBySession: [String: StreamDotState] = [:]
     private(set) var lastReadMessageIdBySession: [String: String] = [:]
     private(set) var streamTailStateBySession: [String: StreamTailState] = [:]
-    private(set) var crossChatNotificationBubblesBySourceChatId: [String: CrossChatNotificationBubble] = [:]
+    private(set) var crossChatNotificationBubblesBySourceChatId: [String: CrossChatNotificationBubble] = [:] {
+        didSet { refreshCrossChatNotificationBubbles() }
+    }
     private var notificationBatchCommitCoordinator = NotificationBatchCommitCoordinator()
     private var suppressedCrossChatNotificationEntryKeysBySourceChatId: [String: Set<String>] = [:]
     var crossChatNotificationDismissAnimator: CrossChatNotificationDismissAnimator?
     private var unavailableCrossChatNotificationSourceIds: Set<String> = []
+    private var crossChatNotificationInteractionFrozenSourceChatId: String?
+    private var deferredCrossChatNotificationMutations: [() -> Void] = []
     private var syntheticSessionKeys: Set<String> = []
     private var didRestoreActiveSessionKey = false
 
@@ -462,7 +462,28 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     var activeStream: ChatStream {
-        SessionRegistry.shared.stream(for: engineActiveSessionKey)
+        streamType(for: engineActiveSessionKey)
+    }
+
+    func streamType(for sessionKey: String) -> ChatStream {
+        switch streamsBySessionKey[sessionKey]?.kind {
+        case "dm", "global_dm":
+            return .admin
+        default:
+            return .personal
+        }
+    }
+
+    func adoptedSessionKeysForProvider() -> [String] {
+        streamsBySessionKey.values
+            .filter(\.adopted)
+            .sorted { lhs, rhs in
+                if lhs.orderIndex == rhs.orderIndex {
+                    return lhs.sessionKey < rhs.sessionKey
+                }
+                return lhs.orderIndex < rhs.orderIndex
+            }
+            .map(\.sessionKey)
     }
 
     var canUseTrackFeature: Bool {
@@ -562,6 +583,10 @@ final class ChatViewModel: ChatViewModelHosting {
         StreamSwitchTiming.log("engineActivationCompletedSequence_fired", sessionKey: sessionKey)
     }
 
+    func isEngineActivationRenderPending(for sessionKey: String) -> Bool {
+        engineActivationInFlightSessionKey == sessionKey
+    }
+
     // NOTE: keep this private.
     // Engine-active key mutation seam: all writes go through this method.
     private func setEngineActiveSessionKey(_ sessionKey: String) {
@@ -586,6 +611,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private func setUISelectedSessionKey(_ sessionKey: String) {
         uiSelectedSessionKey = sessionKey
         StreamSwitchTiming.log("uiSelectedSessionKey_set", sessionKey: sessionKey)
+        cancelSessionStatusRefreshes(except: sessionKey)
         scheduleSessionStatusRefresh(for: sessionKey, reason: "uiSelectedSession")
     }
 
@@ -593,6 +619,24 @@ final class ChatViewModel: ChatViewModelHosting {
     // Explicit test-only bypass.
     func setActiveSessionKeyForTesting(_ sessionKey: String) {
         setEngineActiveSessionKey(sessionKey)
+    }
+
+    // F2 (sixth-review) deterministic disk-cache fence proof hooks.
+    func triggerHistoryResetForTesting(epoch: Int) {
+        handleHistoryResetRequired(epoch: epoch)
+    }
+
+    func debugBarrierGeneration(for sessionKey: String) -> Int {
+        historyBarrierGenerationBySessionKey[sessionKey, default: 0]
+    }
+
+    func debugCacheFileExists(for sessionKey: String) -> Bool {
+        guard let url = messageCacheURL(for: sessionKey) else { return false }
+        return FileManager.default.fileExists(atPath: url.path)
+    }
+
+    func debugHasPendingPersist(for sessionKey: String) -> Bool {
+        persistDebounceTasks[sessionKey] != nil
     }
 #endif
 
@@ -689,7 +733,15 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     func sessionStatus(for sessionKey: String) -> SessionStatus? {
-        sessionStatusBySessionKey[sessionKey]
+        sessionStatusBySessionKey[sessionStatusAuthorityKey(for: sessionKey)]
+    }
+
+    /// Whether a Tightbeam-gated session control may be applied right now. Used
+    /// to keep a pending harness confirmation from driving set_harness after the
+    /// gate closed.
+    func canApplyTightbeamSessionControl(_ action: SessionControlAction) -> Bool {
+        guard action == .setHarness else { return true }
+        return isTightbeamServer
     }
 
     func applySessionControl(
@@ -698,10 +750,15 @@ final class ChatViewModel: ChatViewModelHosting {
         value: String? = nil,
         enabled: Bool? = nil
     ) {
-        let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedSessionKey = sessionStatusAuthorityKey(for: sessionKey)
         guard !normalizedSessionKey.isEmpty else { return }
         Task { [weak self] in
             guard let self else { return }
+            // Recheck the gate INSIDE the async boundary: the gate can close
+            // between enqueueing this task and its execution (the modal's
+            // synchronous check is not enough), and a Tightbeam-only control
+            // must never post to a link that lost the feature.
+            guard self.canApplyTightbeamSessionControl(action) else { return }
             do {
                 let response = try await self.chatService.applySessionControl(
                     sessionKey: normalizedSessionKey,
@@ -733,16 +790,64 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
 
+    /// On-demand fetch (no caching layer): loads org-options once per tightbeam
+    /// session lifetime so the footer harness picker has its options. Cleared on
+    /// disconnect/logout via `resetSessionProvisioningState`.
+    private var orgOptionsLoadGeneration = 0
+    private var orgOptionsLoadTask: Task<Void, Never>?
+
+    func loadOrgOptionsIfNeeded() {
+        guard isTightbeamServer, orgOptions == nil, !isLoadingOrgOptions else { return }
+        isLoadingOrgOptions = true
+        let generation = orgOptionsLoadGeneration
+        // Explicit cancellable handle: cancelled+niled on disconnect/session reset
+        // and before replacement, so an in-flight fetch cannot repopulate a newer
+        // session's options.
+        orgOptionsLoadTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.orgOptionsLoadGeneration == generation {
+                    self.isLoadingOrgOptions = false
+                    self.orgOptionsLoadTask = nil
+                }
+            }
+            do {
+                let fetched = try await self.chatService.fetchOrgOptions()
+                // Boundary validation: drop if cancelled, if a reset advanced the
+                // session generation, or if the gate closed while in flight.
+                guard !Task.isCancelled,
+                      self.orgOptionsLoadGeneration == generation,
+                      self.isTightbeamServer else { return }
+                self.orgOptions = fetched
+            } catch {
+                self.logger.info("org-options fetch failed error=\(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
     nonisolated static func placeholderText(displayName: String, sessionKey: String) -> String {
         guard !sessionKey.isEmpty else { return displayName }
         return "\(displayName) — \(sessionKey)"
     }
     var inputContent: NSAttributedString = NSAttributedString() {
         didSet {
+            let hasSendableContent = !inputContent.isEffectivelyEmpty
+            if inputHasSendableContent != hasSendableContent {
+                inputHasSendableContent = hasSendableContent
+            }
+            let mentionQuery = CrossChatMentionPickerLogic.query(
+                inputText: inputContent.string,
+                resolvedMention: nil
+            )
+            if inputMentionQuery != mentionQuery {
+                inputMentionQuery = mentionQuery
+            }
             pruneAttachmentData()
             pruneMessageReferenceData()
         }
     }
+    private(set) var inputHasSendableContent = false
+    private(set) var inputMentionQuery: String?
     var attachmentData: [UUID: PendingAttachment] = [:]
     private var messageReferenceData: [UUID: PendingMessageReference] = [:]
     private(set) var pendingAttachmentStageCount: Int = 0
@@ -782,7 +887,7 @@ final class ChatViewModel: ChatViewModelHosting {
         pendingAttachmentStageCount == 0
             && transportSendButtonConnectionState == .connected
             && sendProvisioningState(for: engineActiveSessionKey) == .ready
-            && !inputContent.isEffectivelyEmpty
+            && inputHasSendableContent
     }
 
     let toastManager: ToastManager
@@ -802,6 +907,14 @@ final class ChatViewModel: ChatViewModelHosting {
     private var lifecycleOutputsSubscription: AsyncStream<ConnectionLifecycleOutput>?
     private var lifecycleStartupGateDebugSubscription: AsyncStream<StartupGateDebugEvent>?
     private var sessionMessages: [String: [Message]] = [:]
+    private var messageListRevisionBySession: [String: Int] = [:]
+    private var messageProjectionIndexBySession: [String: MessageProjectionIndex] = [:]
+    private var messageSearchProjectionByKey: [MessageSearchProjectionKey: MessageSearchProjection] = [:]
+    private var messageSearchProjectionTaskByKey: [MessageSearchProjectionKey: Task<Void, Never>] = [:]
+    private var messageSearchProjectionBuildOwnership = MessageProjectionBuildOwnership<MessageSearchProjectionKey>()
+    private var selectedMessageSearchProjectionKeyBySession: [String: MessageSearchProjectionKey] = [:]
+    private var messageRemovalObservers: [UUID: (String, Set<String>) -> Void] = [:]
+    private(set) var messageProjectionPublicationSequence: Int = 0
     private var forceReReadGenerationBySession: [String: Int] = [:]
     private var pendingLocalMessages: [PendingLocalMessage] = []
     private var ackedPendingLocalMessageIDs: Set<String> = []
@@ -830,6 +943,26 @@ final class ChatViewModel: ChatViewModelHosting {
     private var persistDebounceTasks: [String: Task<Void, Never>] = [:]
     private var pendingPersistPayloads: [String: [Message]] = [:]
     private var restoreTaskBySessionKey: [String: Task<Void, Never>] = [:]
+    /// Monotonic per-stream barrier generation. `stream_history_cleared` bumps
+    /// it; every async producer of pre-barrier material (cache restores,
+    /// debounced persist writes) captures the generation when it starts and is
+    /// discarded on completion if the generation moved. This is the structural
+    /// guarantee that a barrier can never be crossed by in-flight work,
+    /// independent of task timing (spec §T-A: post-barrier replay is the only
+    /// truth).
+    private var historyBarrierGenerationBySessionKey: [String: Int] = [:]
+    /// Serial executor for message-cache file mutations. The cache files live at
+    /// one process-wide Application Support path, so ordering must hold ACROSS
+    /// view-model instances (overlapping/replaced ones), not just within one.
+    /// Injected so tests can substitute or drain it deterministically.
+    private let messageCacheIO: any MessageCacheIOServicing
+    /// All message-cache file mutations (writes and deletes) run through the
+    /// injected `messageCacheIO`, so a barrier's cache delete is strictly
+    /// ordered after any previously enqueued write — a detached write can never
+    /// land after the delete and resurrect pre-barrier history on disk. The
+    /// composition root injects ONE shared instance into every view model, so
+    /// ordering holds across overlapping/replaced instances (the cache files are
+    /// a single process-wide resource) without any static/global state.
     private var writerCurrentEpoch: Int?
     private var firstReplayAppliedEpoch: Int?
     private var pendingHistoryResetReplay: PendingHistoryResetReplay?
@@ -850,6 +983,15 @@ final class ChatViewModel: ChatViewModelHosting {
     private var restoredSessionKeys: Set<String> = []
     private var restoredStreamMetadataForUserId: String?
     private var supportsSessionProvisioning = false
+    /// Feature flags from `auth_result.features`; tightbeam-only affordances gate on this.
+    private(set) var serverFeatures: Set<String> = []
+    var isTightbeamServer: Bool { serverFeatures.contains("tightbeam") }
+    /// Org-level options (harnesses/models/hosts/archetypes) fetched on demand
+    /// from GET /api/org-options when the server is tightbeam. Feeds the footer
+    /// harness picker (T1751); the creation sheet (T1750) will read the rest.
+    private(set) var orgOptions: OrgOptions?
+    private var isLoadingOrgOptions = false
+    var orgOptionsHarnesses: [String] { orgOptions?.harnesses ?? [] }
     private var hasResolvedProvisioningCapability = true
     private var hasReceivedSessionProvisioning = false
     private var hasReceivedExplicitSessionInfo = false
@@ -860,7 +1002,14 @@ final class ChatViewModel: ChatViewModelHosting {
     private var refreshStreamsTask: Task<Void, Never>?
     private var refreshTrackableSessionsTask: Task<Void, Never>?
     private(set) var sessionStatusBySessionKey: [String: SessionStatus] = [:]
+    private var runtimeSessionKeyByRoutingSessionKey: [String: String] = [:]
+    private var latestStatusAuthorityClientMessageIDByRoutingSessionKey: [String: String] = [:]
     private var sessionStatusRefreshTasks: [String: Task<Void, Never>] = [:]
+    private var sessionStatusFailureCountBySessionKey: [String: Int] = [:]
+    private var allowsSessionStatusRefreshes = true
+    private var usageFollowUpFreshnessBySessionKey: [String: SessionStatus.Display.CodexUsage.Freshness] = [:]
+    private var usageFollowUpCountBySessionKey: [String: Int] = [:]
+    private(set) var sessionStatusUnavailableSessionKeys: Set<String> = []
     private var pendingUntrackRecovery: StreamSession?
     private var hasLoadedTrackableSessionsOnce = false
     private var hasSurfacedInitialTrackableSessionsFailure = false
@@ -868,6 +1017,179 @@ final class ChatViewModel: ChatViewModelHosting {
 
     func forceReReadGeneration(for sessionKey: String) -> Int {
         forceReReadGenerationBySession[sessionKey] ?? 0
+    }
+
+    func messageListRevision(for sessionKey: String) -> Int {
+        messageListRevisionBySession[sessionKey] ?? 0
+    }
+
+    func messageProjection(
+        for sessionKey: String,
+        showOnlyUserMessages: Bool,
+        searchQuery: String
+    ) -> MessageProjectionSnapshot? {
+        let base: MessageProjectionBase = showOnlyUserMessages ? .userOnly : .transcript
+        guard let index = messageProjectionIndexBySession[sessionKey] else {
+            let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmedQuery.isEmpty, !sessionMessages.keys.contains(sessionKey) else { return nil }
+            return MessageProjectionIndex().snapshot(base: base)
+        }
+        let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else { return index.snapshot(base: base) }
+
+        let key = MessageSearchProjectionKey(
+            sessionKey: sessionKey,
+            base: base,
+            query: trimmedQuery
+        )
+        if let cached = messageSearchProjectionByKey[key], cached.revision == index.revision {
+            return MessageProjectionSnapshot(
+                revision: cached.revision,
+                base: base,
+                transcript: index.transcript,
+                transcriptIndices: cached.transcriptIndices,
+                transcriptIndexByMessageId: index.transcriptIndexByMessageId
+            )
+        }
+
+        return nil
+    }
+
+    func requestMessageProjection(
+        for sessionKey: String,
+        showOnlyUserMessages: Bool,
+        searchQuery: String
+    ) {
+        let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else {
+            if let selectedKey = selectedMessageSearchProjectionKeyBySession.removeValue(forKey: sessionKey) {
+                cancelMessageSearchProjectionBuild(for: selectedKey)
+            }
+            return
+        }
+        let key = MessageSearchProjectionKey(
+            sessionKey: sessionKey,
+            base: showOnlyUserMessages ? .userOnly : .transcript,
+            query: trimmedQuery
+        )
+        if let previousKey = selectedMessageSearchProjectionKeyBySession[sessionKey], previousKey != key {
+            cancelMessageSearchProjectionBuild(for: previousKey)
+        }
+        selectedMessageSearchProjectionKeyBySession[sessionKey] = key
+        startMessageSearchProjectionBuildIfNeeded(key)
+    }
+
+    @discardableResult
+    func registerMessageRemovalObserver(
+        _ observer: @escaping (String, Set<String>) -> Void
+    ) -> UUID {
+        let token = UUID()
+        messageRemovalObservers[token] = observer
+        return token
+    }
+
+    func unregisterMessageRemovalObserver(_ token: UUID) {
+        messageRemovalObservers.removeValue(forKey: token)
+    }
+
+    private func startMessageSearchProjectionBuildIfNeeded(_ key: MessageSearchProjectionKey) {
+        guard let index = messageProjectionIndexBySession[key.sessionKey] else { return }
+        if messageSearchProjectionByKey[key]?.revision == index.revision { return }
+        guard messageSearchProjectionTaskByKey[key] == nil else { return }
+        let input = index.searchInput(base: key.base)
+        let buildID = messageSearchProjectionBuildOwnership.begin(for: key)
+        messageSearchProjectionTaskByKey[key] = Task.detached(priority: .userInitiated) { [weak self] in
+            let matches = input.matchingTranscriptIndices(query: key.query)
+            guard !Task.isCancelled else { return }
+            await self?.publishMessageSearchProjection(
+                key: key,
+                buildID: buildID,
+                revision: input.revision,
+                transcriptIndices: matches
+            )
+        }
+    }
+
+    private func publishMessageSearchProjection(
+        key: MessageSearchProjectionKey,
+        buildID: UUID,
+        revision: Int,
+        transcriptIndices: [Int]
+    ) {
+        guard messageSearchProjectionBuildOwnership.finish(for: key, buildID: buildID) else { return }
+        messageSearchProjectionTaskByKey.removeValue(forKey: key)
+        guard selectedMessageSearchProjectionKeyBySession[key.sessionKey] == key else { return }
+        guard messageProjectionIndexBySession[key.sessionKey]?.revision == revision else { return }
+        messageSearchProjectionByKey[key] = MessageSearchProjection(
+            revision: revision,
+            transcriptIndices: transcriptIndices
+        )
+        messageProjectionPublicationSequence &+= 1
+    }
+
+    private func cancelMessageSearchProjectionBuild(for key: MessageSearchProjectionKey) {
+        messageSearchProjectionBuildOwnership.cancel(for: key)
+        messageSearchProjectionTaskByKey.removeValue(forKey: key)?.cancel()
+    }
+
+    private func publishMessageRemovals(sessionKey: String, messageIDs: Set<String>) {
+        guard !messageIDs.isEmpty else { return }
+        for observer in messageRemovalObservers.values {
+            observer(sessionKey, messageIDs)
+        }
+    }
+
+    nonisolated private struct MessageSearchProjectionKey: Hashable, Sendable {
+        let sessionKey: String
+        let base: MessageProjectionBase
+        let query: String
+    }
+
+    private struct MessageSearchProjection: Sendable {
+        let revision: Int
+        var transcriptIndices: [Int]
+    }
+
+    /// Single entry point for the server feature gate. A cold launch renders
+    /// cached history and the footer BEFORE auth completes, so flipping the
+    /// gate must invalidate what is already on screen — otherwise provenance
+    /// chips and the harness/host footer stay missing for the whole session
+    /// and only appear for content that arrives later.
+    /// Event-stream entry: a `.serverFeatures` event may be delayed past an
+    /// unexpected socket close or a reconnect, so its PAYLOAD must never be
+    /// trusted to reopen the gate. Explicit current-link fence: the value is
+    /// always re-derived from the service's authoritative feature set, which the
+    /// service sets on auth success and CLEARS on disconnect. That property is a
+    /// per-link invariant — the service only ever holds the current link's
+    /// features — so a delayed pre-disconnect event resolves to the CURRENT
+    /// link's value: empty while disconnected, the new link's features after a
+    /// reconnect. The old gate can never reopen. (Proven by
+    /// `delayedServerFeaturesAfterDisconnectDoesNotReopenGate` across a full
+    /// disconnect -> reconnect-to-openclaw -> delayed-old-event sequence.)
+    private func applyServerFeaturesFromEvent() {
+        applyServerFeatures(chatService.serverFeatures)
+    }
+
+    private func applyServerFeatures(_ features: [String]) {
+        let updated = Set(features)
+        guard updated != serverFeatures else { return }
+        let wasTightbeam = serverFeatures.contains("tightbeam")
+        serverFeatures = updated
+        presentationCache.removeAll()
+        for key in sessionMessages.keys {
+            armForceReRead(for: key)
+        }
+        armForceReRead(for: uiSelectedSessionKey)
+        if wasTightbeam, !isTightbeamServer {
+            // The gate just closed: invalidate any in-flight org-options load and
+            // drop cached options so a stale fetch cannot land in a later session.
+            orgOptionsLoadGeneration &+= 1
+            orgOptionsLoadTask?.cancel()
+            orgOptionsLoadTask = nil
+            isLoadingOrgOptions = false
+            orgOptions = nil
+        }
+        loadOrgOptionsIfNeeded()
     }
 
     private func armForceReRead(for sessionKey: String) {
@@ -1036,6 +1358,7 @@ final class ChatViewModel: ChatViewModelHosting {
          uploadService: any UploadServicing,
          toastManager: ToastManager,
          salientHighlightService: any SalientHighlightServicing,
+         messageCacheIO: any MessageCacheIOServicing = MessageCacheIO(),
          connectionAlertGracePeriod: Duration = .seconds(2),
          nowProvider: @escaping () -> Date = Date.init,
          assistantIncomingHaptic: @escaping @MainActor () -> Void = {
@@ -1045,6 +1368,7 @@ final class ChatViewModel: ChatViewModelHosting {
              #endif
          }) {
         logger.info("ChatViewModel init id=\(self.instanceId, privacy: .public)")
+        self.messageCacheIO = messageCacheIO
         self.auth = auth
         self.chatService = chatService
         self.settings = settings
@@ -1195,6 +1519,7 @@ final class ChatViewModel: ChatViewModelHosting {
         }
         coordinatorDiag("handleAuthStateChange enter tokenPresent=\(auth.token != nil)")
         if auth.token != nil {
+            allowsSessionStatusRefreshes = true
             restoreStreamMetadataIfNeeded()
             restoreActiveSessionKeyIfNeeded()
             ensureDefaultActiveSessionIfNeeded()
@@ -1215,6 +1540,7 @@ final class ChatViewModel: ChatViewModelHosting {
             refreshStreamsFromProvider(reason: "authChanged")
             scheduleSessionStatusRefresh(for: uiSelectedSessionKey, reason: "authChanged")
         } else {
+            allowsSessionStatusRefreshes = false
             coordinatorDiag("handleAuthStateChange logout-path")
             didRestoreActiveSessionKey = false
             clearSessionStatusRefreshes()
@@ -1231,6 +1557,7 @@ final class ChatViewModel: ChatViewModelHosting {
         guard !isRetired else { return }
         guard isConnectionOwner else { return }
         isAppInForeground = true
+        allowsSessionStatusRefreshes = true
         guard hasActivatedLifecycleOwnership else {
             coordinatorDiag("sceneDidBecomeActive deferred until activate")
             return
@@ -1257,7 +1584,11 @@ final class ChatViewModel: ChatViewModelHosting {
 
     func handleSceneActiveStateChanged(isActive: Bool) {
         isAppInForeground = isActive
-        guard isActive else { return }
+        guard isActive else {
+            allowsSessionStatusRefreshes = false
+            cancelSessionStatusRefreshes()
+            return
+        }
         handleSceneDidBecomeActive()
     }
 
@@ -1364,6 +1695,18 @@ final class ChatViewModel: ChatViewModelHosting {
         guard !isRetired else { return }
         isRetired = true
         hasActivatedLifecycleOwnership = false
+        // A retired instance must not keep mutating the message cache: every
+        // ChatViewModel writes the SAME Application Support files, so a pending
+        // persist or in-flight restore from this instance could otherwise land
+        // after a replacement instance has applied a history barrier and
+        // resurrect cleared history.
+        persistDebounceTasks.values.forEach { $0.cancel() }
+        persistDebounceTasks.removeAll()
+        pendingPersistPayloads.removeAll()
+        restoreTaskBySessionKey.values.forEach { $0.cancel() }
+        restoreTaskBySessionKey.removeAll()
+        orgOptionsLoadTask?.cancel()
+        orgOptionsLoadTask = nil
         clearSessionStatusRefreshes()
         discardCrossChatNotificationBatches()
         stopObservingLifecycle(origin: "prepareForReplacement")
@@ -1418,7 +1761,7 @@ final class ChatViewModel: ChatViewModelHosting {
         guard let lifecycleOutputsSubscription else { return }
         for await output in lifecycleOutputsSubscription {
             coordinatorDiag("observeLifecycleOutputs output=\(String(describing: output))")
-            handleLifecycleOutput(output)
+            await handleLifecycleOutput(output)
         }
     }
 
@@ -1615,8 +1958,10 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
 
-    var crossChatNotificationBubbles: [CrossChatNotificationBubble] {
-        crossChatNotificationBubblesBySourceChatId.values.sorted {
+    private(set) var crossChatNotificationBubbles: [CrossChatNotificationBubble] = []
+
+    private func refreshCrossChatNotificationBubbles() {
+        crossChatNotificationBubbles = crossChatNotificationBubblesBySourceChatId.values.sorted {
             if $0.lastAssistantActivityAt == $1.lastAssistantActivityAt {
                 return $0.sourceChatId < $1.sourceChatId
             }
@@ -1624,7 +1969,37 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
 
+    func beginCrossChatNotificationPopupInteraction(sourceChatId: String) {
+        crossChatNotificationInteractionFrozenSourceChatId = sourceChatId
+    }
+
+    func endCrossChatNotificationPopupInteraction(sourceChatId: String?) {
+        guard crossChatNotificationInteractionFrozenSourceChatId == sourceChatId
+                || sourceChatId == nil else {
+            return
+        }
+        crossChatNotificationInteractionFrozenSourceChatId = nil
+        let deferredMutations = deferredCrossChatNotificationMutations
+        deferredCrossChatNotificationMutations = []
+        for mutation in deferredMutations {
+            mutation()
+        }
+    }
+
+    private func deferCrossChatNotificationMutationIfNeeded(_ mutation: @escaping () -> Void) -> Bool {
+        guard crossChatNotificationInteractionFrozenSourceChatId != nil else {
+            return false
+        }
+        deferredCrossChatNotificationMutations.append(mutation)
+        return true
+    }
+
     func dismissCrossChatNotification(sourceChatId: String, markSourceRead: Bool = true) {
+        if deferCrossChatNotificationMutationIfNeeded({ [weak self] in
+            self?.dismissCrossChatNotification(sourceChatId: sourceChatId, markSourceRead: markSourceRead)
+        }) {
+            return
+        }
         if markSourceRead {
             markSessionRead(sourceChatId, preferServerTail: true)
         }
@@ -1794,7 +2169,6 @@ final class ChatViewModel: ChatViewModelHosting {
         persistMessages([alphaMessage], for: alphaSessionKey)
         persistMessages([betaMessage], for: betaSessionKey)
         recalculateOrderedSessionKeys()
-        SessionRegistry.shared.replace(with: orderedStreams)
         ensureDefaultActiveSessionIfNeeded()
 
         crossChatNotificationBubblesBySourceChatId = [
@@ -2144,6 +2518,7 @@ final class ChatViewModel: ChatViewModelHosting {
         print("[ClawlineSendDiag] vm_begin_send_placeholder id=\(clientId) sessionKey=\(sessionKey) contentChars=\(content.count) attachments=\(pendingAttachments.count) references=\(references.count)")
         upsert(sessionKey: sessionKey, message: placeholder, sourceFlags: .local)
         pendingLocalMessages.append(PendingLocalMessage(id: clientId, sessionKey: sessionKey))
+        latestStatusAuthorityClientMessageIDByRoutingSessionKey[sessionKey] = clientId
         print("[ClawlineSendDiag] vm_begin_send_task_scheduled id=\(clientId) sessionKey=\(sessionKey) pendingLocalCount=\(pendingLocalMessages.count)")
         scheduleSessionStatusRefresh(for: sessionKey, reason: "sendDispatched")
         bumpSendIndicatorRevision()
@@ -2429,36 +2804,128 @@ final class ChatViewModel: ChatViewModelHosting {
         refreshTrackableSessions(reason: "manualRefresh")
     }
 
+    /// Outcome of a placement-aware create (T-B creation sheet). On failure the
+    /// message is the server's refusal text verbatim so the sheet can surface it
+    /// unchanged; a nil message means there was nothing to surface (empty name).
+    enum StreamCreateOutcome: Equatable {
+        case created
+        case failed(message: String?)
+    }
+
+    private enum StreamCreateResult {
+        case success
+        case emptyName
+        case failure(Swift.Error)
+    }
+
     func createStream(displayName: String) async -> Bool {
+        switch await performStreamCreate(
+            displayName: displayName,
+            harness: nil,
+            model: nil,
+            host: nil,
+            archetype: nil
+        ) {
+        case .success:
+            return true
+        case .emptyName:
+            return false
+        case .failure(let error):
+            toastManager.show(error.localizedDescription)
+            return false
+        }
+    }
+
+    /// T-B: create with optional placement provisioning. Unlike the name-only
+    /// path this returns the refusal message instead of toasting, so the
+    /// creation sheet owns presentation and shows the server's rule verbatim.
+    func createStream(
+        displayName: String,
+        harness: String?,
+        model: String?,
+        host: String?,
+        archetype: String?
+    ) async -> StreamCreateOutcome {
+        // This placement-aware create is the Tightbeam creation SHEET's only
+        // submit path (the legacy openclaw manager uses createStream(displayName:)).
+        // The whole sheet is Tightbeam-gated, so refuse ANY submission — including
+        // name-only — once the gate has closed, not just placement-bearing ones.
+        // Re-checked here at the async submission boundary as defense in depth
+        // behind the modal's onChange dismissal.
+        guard isTightbeamServer else {
+            return .failed(message: "New-chat options are unavailable on this server.")
+        }
+        switch await performStreamCreate(
+            displayName: displayName,
+            harness: harness,
+            model: model,
+            host: host,
+            archetype: archetype
+        ) {
+        case .success:
+            return .created
+        case .emptyName:
+            return .failed(message: nil)
+        case .failure(let error):
+            return .failed(message: error.localizedDescription)
+        }
+    }
+
+    private func performStreamCreate(
+        displayName: String,
+        harness: String?,
+        model: String?,
+        host: String?,
+        archetype: String?
+    ) async -> StreamCreateResult {
         let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
+        guard !trimmed.isEmpty else { return .emptyName }
         let idempotencyKey = Self.makeIdempotencyKey()
         do {
-            let stream = try await chatService.createStream(
+            let stream = try await createStreamRequestingRetry(
                 displayName: trimmed,
-                idempotencyKey: idempotencyKey
+                idempotencyKey: idempotencyKey,
+                harness: harness,
+                model: model,
+                host: host,
+                archetype: archetype
             )
             applyStreamUpsert(stream)
             setEngineActiveSessionKey(stream.sessionKey)
-            return true
+            return .success
         } catch {
-            if shouldRetryCreateOnActiveConnection(after: error) {
-                do {
-                    try await reconnectActiveTransportForControlPlane()
-                    let stream = try await chatService.createStream(
-                        displayName: trimmed,
-                        idempotencyKey: idempotencyKey
-                    )
-                    applyStreamUpsert(stream)
-                    setEngineActiveSessionKey(stream.sessionKey)
-                    return true
-                } catch {
-                    toastManager.show(error.localizedDescription)
-                    return false
-                }
-            }
-            toastManager.show(error.localizedDescription)
-            return false
+            return .failure(error)
+        }
+    }
+
+    private func createStreamRequestingRetry(
+        displayName: String,
+        idempotencyKey: String,
+        harness: String?,
+        model: String?,
+        host: String?,
+        archetype: String?
+    ) async throws -> StreamSession {
+        do {
+            return try await chatService.createStream(
+                displayName: displayName,
+                idempotencyKey: idempotencyKey,
+                harness: harness,
+                model: model,
+                host: host,
+                archetype: archetype
+            )
+        } catch {
+            guard shouldRetryCreateOnActiveConnection(after: error) else { throw error }
+            try await reconnectActiveTransportForControlPlane()
+            return try await chatService.createStream(
+                displayName: displayName,
+                idempotencyKey: idempotencyKey,
+                harness: harness,
+                model: model,
+                host: host,
+                archetype: archetype
+            )
         }
     }
 
@@ -2548,7 +3015,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private func handleIncoming(_ message: Message, notificationBatchEpoch: Int? = nil) {
         let snippet = String(message.content.prefix(80))
         logger.info(
-            "incoming id=\(message.id, privacy: .public) sessionKey=\(message.sessionKey, privacy: .public) stream=\(message.stream.rawValue, privacy: .public) role=\(String(describing: message.role), privacy: .public) streaming=\(message.streaming, privacy: .public) deviceId=\(message.deviceId ?? "nil", privacy: .public) snippet=\"\(snippet, privacy: .public)\""
+            "incoming id=\(message.id, privacy: .public) sessionKey=\(message.sessionKey, privacy: .public) stream=\(self.streamType(for: message.sessionKey).rawValue, privacy: .public) role=\(String(describing: message.role), privacy: .public) streaming=\(message.streaming, privacy: .public) deviceId=\(message.deviceId ?? "nil", privacy: .public) snippet=\"\(snippet, privacy: .public)\""
         )
 
         if shouldSuppressInteractiveCallbackEcho(message) {
@@ -2667,6 +3134,11 @@ final class ChatViewModel: ChatViewModelHosting {
             }
             return
         }
+        if deferCrossChatNotificationMutationIfNeeded({ [weak self] in
+            self?.applyCrossChatAssistantNotificationIfNeeded(for: message, batchEpoch: nil, notificationSequence: notificationSequence)
+        }) {
+            return
+        }
         notificationBatchCommitCoordinator.applyLiveCandidate(
             candidate,
             to: &crossChatNotificationBubblesBySourceChatId
@@ -2682,6 +3154,11 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func commitCrossChatNotificationBatchIfReady(epoch: Int, reachedTruncationBoundary: Bool) {
+        if deferCrossChatNotificationMutationIfNeeded({ [weak self] in
+            self?.commitCrossChatNotificationBatchIfReady(epoch: epoch, reachedTruncationBoundary: reachedTruncationBoundary)
+        }) {
+            return
+        }
         guard let committedSnapshot = notificationBatchCommitCoordinator.commitIfReady(
             epoch: epoch,
             reachedTruncationBoundary: reachedTruncationBoundary,
@@ -2802,18 +3279,15 @@ final class ChatViewModel: ChatViewModelHosting {
         return true
     }
 
-    private func handleLifecycleServerMessage(epoch: Int, payload: Data) {
+    private func handleLifecycleServerMessage(epoch: Int, payload: Data) async {
         firstReplayAppliedEpoch = epoch
         restoreTaskBySessionKey.values.forEach { $0.cancel() }
         restoreTaskBySessionKey.removeAll()
-        let decoder = JSONDecoder()
-        guard let envelope = try? decoder.decode(LifecycleEnvelope.self, from: payload) else { return }
-        guard envelope.type == "message" else { return }
-        guard let serverPayload = try? decoder.decode(ServerMessagePayload.self, from: payload),
-              let sessionKey = serverPayload.sessionKey?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !sessionKey.isEmpty else {
-            return
-        }
+        guard let decoded = try? await Self.decodeLifecycleServerMessagePayload(from: payload) else { return }
+        guard decoded.envelope.type == "message" else { return }
+        let serverPayload = decoded.payload
+        guard let sessionKey = serverPayload.sessionKey?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !sessionKey.isEmpty else { return }
         let message = Message(payload: serverPayload, sessionKey: sessionKey)
         if pendingHistoryResetReplay?.epoch == epoch {
             pendingHistoryResetReplay?.messagesBySessionKey[sessionKey, default: []].append(message)
@@ -2832,13 +3306,41 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
 
-    private struct LifecycleEnvelope: Decodable {
+    nonisolated private struct LifecycleEnvelope: Decodable, Sendable {
         let type: String
+    }
+
+    nonisolated private struct LifecycleServerMessagePayload: Sendable {
+        let envelope: LifecycleEnvelope
+        let payload: ServerMessagePayload
+    }
+
+    nonisolated private static func decodeLifecycleServerMessagePayload(from data: Data) async throws -> LifecycleServerMessagePayload {
+        try await Task.detached(priority: .userInitiated) {
+            let decoder = JSONDecoder()
+            return LifecycleServerMessagePayload(
+                envelope: try decoder.decode(LifecycleEnvelope.self, from: data),
+                payload: try decoder.decode(ServerMessagePayload.self, from: data)
+            )
+        }.value
     }
 
     private func handleHistoryResetRequired(epoch: Int) {
         restoreTaskBySessionKey.values.forEach { $0.cancel() }
         restoreTaskBySessionKey.removeAll()
+        // Fence the cache the same way a per-stream barrier does: cancel pending
+        // persist debounces, drop their payloads, and advance EVERY known
+        // stream's barrier generation so a debounce that already fired self-
+        // discards instead of re-writing pre-reset history after clearMessageCache.
+        let fencedKeys = Set(sessionMessages.keys)
+            .union(pendingPersistPayloads.keys)
+            .union(persistDebounceTasks.keys)
+        persistDebounceTasks.values.forEach { $0.cancel() }
+        persistDebounceTasks.removeAll()
+        pendingPersistPayloads.removeAll()
+        for key in fencedKeys {
+            historyBarrierGenerationBySessionKey[key, default: 0] += 1
+        }
         pendingLocalMessages.removeAll()
         ackedPendingLocalMessageIDs.removeAll()
         messageFailures.removeAll()
@@ -3076,6 +3578,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private func upsert(sessionKey: String, message: Message, sourceFlags: MessageSourceFlags) -> Bool {
         var messageList = sessionMessages[sessionKey] ?? []
         let didAppendNewMessage: Bool
+        let projectionMutation: MessageProjectionMutation
         if let existingIndex = messageList.firstIndex(where: { $0.id == message.id }) {
             if sourceFlags.isCache {
                 return false
@@ -3087,13 +3590,15 @@ final class ChatViewModel: ChatViewModelHosting {
             }
             messageList[existingIndex] = message
             didAppendNewMessage = false
+            projectionMutation = .replace(index: existingIndex, message: message)
         } else {
             let insertionIndex = TranscriptReplyAdjacencyOrdering.insertionIndex(for: message, in: messageList)
                 ?? messageList.endIndex
             messageList.insert(message, at: insertionIndex)
             didAppendNewMessage = true
+            projectionMutation = .insert(index: insertionIndex, message: message)
         }
-        applyMessagesWrite(messageList, for: sessionKey)
+        applyMessagesWrite(messageList, for: sessionKey, projectionMutation: projectionMutation)
         return didAppendNewMessage
     }
 
@@ -3104,7 +3609,7 @@ final class ChatViewModel: ChatViewModelHosting {
             return
         }
         messageList.remove(at: index)
-        applyMessagesWrite(messageList, for: sessionKey)
+        applyMessagesWrite(messageList, for: sessionKey, projectionMutation: .remove(index: index))
     }
 
     private func removePendingLocalMessage(id: String, reason: String) {
@@ -3120,18 +3625,62 @@ final class ChatViewModel: ChatViewModelHosting {
 
     private func clearSessionMessages(sessionKey: String, reason: String) {
         _ = reason
-        applyMessagesWrite([], for: sessionKey)
+        applyMessagesWrite([], for: sessionKey, projectionMutation: .replaceAll)
+    }
+
+    /// Server moved the history barrier (harness swap etc.); drop every local
+    /// trace for the stream so the post-barrier replay is the only truth. Do NOT
+    /// remove the stream itself — only its message history/cache (spec §T-A).
+    private func handleStreamHistoryCleared(sessionKey: String) {
+        let runtimeKey = sessionStatusAuthorityKey(for: sessionKey)
+        for key in Set([sessionKey, runtimeKey]) {
+            // Move the barrier FIRST: any in-flight restore or debounced
+            // persist that started before this instant is now stale by
+            // construction and self-discards when it completes.
+            historyBarrierGenerationBySessionKey[key, default: 0] += 1
+            restoreTaskBySessionKey[key]?.cancel()
+            restoreTaskBySessionKey[key] = nil
+            clearSessionMessages(sessionKey: key, reason: "stream_history_cleared")
+            removeCachedMessages(for: key)
+            chatService.setReplayCursor(nil, for: key)
+            // Also purge any pre-barrier messages staged in a pending
+            // history-reset replay for this stream. Without this, a barrier
+            // that lands mid-replay clears the visible store but
+            // applyPendingHistoryResetReplayIfNeeded would reinsert the
+            // pre-barrier messages (and re-seed the cursor) at replayCompleted,
+            // resurrecting cleared history.
+            if pendingHistoryResetReplay?.messagesBySessionKey[key] != nil {
+                let dropped = pendingHistoryResetReplay?.messagesBySessionKey.removeValue(forKey: key) ?? []
+                for message in dropped {
+                    pendingHistoryResetReplay?.notificationSequenceByMessageId.removeValue(forKey: message.id)
+                }
+            }
+        }
     }
 
     private func removeSession(sessionKey: String, reason: String) {
         _ = reason
+        publishMessageRemovals(
+            sessionKey: sessionKey,
+            messageIDs: Set(sessionMessages[sessionKey, default: []].map(\.id))
+        )
         sessionMessages.removeValue(forKey: sessionKey)
+        messageProjectionIndexBySession.removeValue(forKey: sessionKey)
+        selectedMessageSearchProjectionKeyBySession.removeValue(forKey: sessionKey)
+        let removedSearchKeys = messageSearchProjectionByKey.keys.filter { $0.sessionKey == sessionKey }
+        removedSearchKeys.forEach { messageSearchProjectionByKey.removeValue(forKey: $0) }
+        let removedSearchTaskKeys = messageSearchProjectionTaskByKey.keys.filter { $0.sessionKey == sessionKey }
+        removedSearchTaskKeys.forEach {
+            cancelMessageSearchProjectionBuild(for: $0)
+        }
         persistMessages([], for: sessionKey)
         lastReadMessageIdBySession.removeValue(forKey: sessionKey)
         streamTailStateBySession.removeValue(forKey: sessionKey)
         streamDotStateBySession.removeValue(forKey: sessionKey)
         sessionStatusBySessionKey.removeValue(forKey: sessionKey)
         sessionStatusRefreshTasks.removeValue(forKey: sessionKey)?.cancel()
+        usageFollowUpFreshnessBySessionKey.removeValue(forKey: sessionKey)
+        usageFollowUpCountBySessionKey.removeValue(forKey: sessionKey)
         let removedIDs = Set(pendingLocalMessages.filter { $0.sessionKey == sessionKey }.map(\.id))
         pendingLocalMessages.removeAll { $0.sessionKey == sessionKey }
         ackedPendingLocalMessageIDs.subtract(removedIDs)
@@ -3157,6 +3706,12 @@ final class ChatViewModel: ChatViewModelHosting {
 
     private func clearAllForLogout(reason: String) {
         _ = reason
+        for (sessionKey, sessionMessageList) in sessionMessages {
+            publishMessageRemovals(
+                sessionKey: sessionKey,
+                messageIDs: Set(sessionMessageList.map(\.id))
+            )
+        }
         let sessionKeysToClear = Set(sessionMessages.keys)
             .union(streamsBySessionKey.keys)
             .union(lastReadMessageIdBySession.keys)
@@ -3167,6 +3722,13 @@ final class ChatViewModel: ChatViewModelHosting {
             persistMessages([], for: key)
         }
         sessionMessages.removeAll()
+        messageProjectionIndexBySession.removeAll()
+        messageSearchProjectionByKey.removeAll()
+        selectedMessageSearchProjectionKeyBySession.removeAll()
+        messageSearchProjectionTaskByKey.values.forEach { $0.cancel() }
+        messageSearchProjectionTaskByKey.removeAll()
+        messageSearchProjectionBuildOwnership.cancelAll()
+        messageProjectionPublicationSequence &+= 1
         streamsBySessionKey.removeAll()
         orderedSessionKeys = []
         syntheticSessionKeys.removeAll()
@@ -3187,9 +3749,64 @@ final class ChatViewModel: ChatViewModelHosting {
         bumpSendIndicatorRevision()
     }
 
-    private func applyMessagesWrite(_ newMessages: [Message], for sessionKey: String) {
-        let oldCount = sessionMessages[sessionKey]?.count ?? 0
+    private func applyMessagesWrite(
+        _ newMessages: [Message],
+        for sessionKey: String,
+        projectionMutation: MessageProjectionMutation
+    ) {
+        let previousMessages = sessionMessages[sessionKey] ?? []
+        let oldCount = previousMessages.count
         sessionMessages[sessionKey] = newMessages
+        messageListRevisionBySession[sessionKey, default: 0] &+= 1
+        let revision = messageListRevisionBySession[sessionKey] ?? 0
+        var projectionIndex = messageProjectionIndexBySession[sessionKey]
+            ?? MessageProjectionIndex()
+        projectionIndex.update(
+            messages: newMessages,
+            revision: revision,
+            mutation: projectionMutation
+        )
+        messageProjectionIndexBySession[sessionKey] = projectionIndex
+        let appendIndex: Int? = {
+            guard case let .insert(index, message) = projectionMutation,
+                  index == newMessages.count - 1,
+                  message.id == newMessages.last?.id else { return nil }
+            return index
+        }()
+        if let appendIndex, let appendedMessage = newMessages.last {
+            for key in messageSearchProjectionByKey.keys where key.sessionKey == sessionKey {
+                guard var cached = messageSearchProjectionByKey[key], cached.revision == revision - 1 else { continue }
+                let matchesBase = key.base == .transcript || appendedMessage.role == .user
+                if matchesBase, appendedMessage.content.localizedStandardContains(key.query) {
+                    cached.transcriptIndices.append(appendIndex)
+                }
+                cached = MessageSearchProjection(revision: revision, transcriptIndices: cached.transcriptIndices)
+                messageSearchProjectionByKey[key] = cached
+            }
+        }
+        let staleSearchKeys = messageSearchProjectionByKey.keys.filter { key in
+            key.sessionKey == sessionKey && messageSearchProjectionByKey[key]?.revision != revision
+        }
+        staleSearchKeys.forEach { messageSearchProjectionByKey.removeValue(forKey: $0) }
+        let staleTaskKeys = messageSearchProjectionTaskByKey.keys.filter { $0.sessionKey == sessionKey }
+        staleTaskKeys.forEach {
+            cancelMessageSearchProjectionBuild(for: $0)
+        }
+        if let selectedKey = selectedMessageSearchProjectionKeyBySession[sessionKey] {
+            startMessageSearchProjectionBuildIfNeeded(selectedKey)
+        }
+        if case .remove = projectionMutation {
+            publishMessageRemovals(
+                sessionKey: sessionKey,
+                messageIDs: Set(previousMessages.map(\.id)).subtracting(newMessages.map(\.id))
+            )
+        } else if case .replaceAll = projectionMutation {
+            publishMessageRemovals(
+                sessionKey: sessionKey,
+                messageIDs: Set(previousMessages.map(\.id)).subtracting(newMessages.map(\.id))
+            )
+        }
+        messageProjectionPublicationSequence &+= 1
         let newCount = newMessages.count
         if oldCount > 0, newCount == 0 {
             StreamSwitchTiming.log("stream_messages_unloaded oldCount=\(oldCount) newCount=0", sessionKey: sessionKey)
@@ -3207,7 +3824,7 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
 
-    private func handleLifecycleOutput(_ output: ConnectionLifecycleOutput) {
+    private func handleLifecycleOutput(_ output: ConnectionLifecycleOutput) async {
         switch output {
         case .phaseTransition(_, let to, let epoch, let reason):
             if writerCurrentEpoch != epoch {
@@ -3258,7 +3875,9 @@ final class ChatViewModel: ChatViewModelHosting {
         case .replayStarted(let epoch, _, let replayTruncated, _):
             beginCrossChatNotificationBatch(epoch: epoch, waitsForTruncationBoundary: replayTruncated)
         case .serverMessage(let epoch, let payload):
-            handleLifecycleServerMessage(epoch: epoch, payload: payload)
+            await handleLifecycleServerMessage(epoch: epoch, payload: payload)
+        case .historyCleared(_, let sessionKey):
+            handleStreamHistoryCleared(sessionKey: sessionKey)
         case .replayCompleted(let epoch):
             applyPendingHistoryResetReplayIfNeeded()
             markMissingFinalsAfterReplay()
@@ -3740,7 +4359,16 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     func presentation(for message: Message, metrics: ChatFlowTheme.Metrics) -> MessagePresentation {
-        let key = PresentationCacheKey(messageID: message.id, isCompact: metrics.isCompact)
+        // Provenance messages present (and are therefore measured, sized, and
+        // copied) from the STRIPPED body on tightbeam servers — the same seam
+        // the bubble renders from, so V1/V2 sizing can never classify off the
+        // hidden stamp line (spec §T-D strip rule).
+        let displayMessage = isTightbeamServer ? message.strippingProvenanceStampForDisplay() : message
+        let key = PresentationCacheKey(
+            messageID: message.id,
+            isCompact: metrics.isCompact,
+            stripsProvenance: displayMessage.content != message.content
+        )
         let fingerprint = presentationFingerprint(for: message)
         if let cached = presentationCache[key], cached.fingerprint == fingerprint {
             return cached.presentation
@@ -3748,7 +4376,7 @@ final class ChatViewModel: ChatViewModelHosting {
 
         var state = tableParseStates[message.id] ?? StreamingTableParseState()
         let presentation = MessagePresentationBuilder.build(
-            from: message,
+            from: displayMessage,
             metrics: metrics,
             streamingState: &state
         )
@@ -3757,7 +4385,7 @@ final class ChatViewModel: ChatViewModelHosting {
         if !message.streaming, state.isDirty {
             var canonicalState = StreamingTableParseState()
             resolvedPresentation = MessagePresentationBuilder.build(
-                from: message,
+                from: displayMessage,
                 metrics: metrics,
                 streamingState: &canonicalState
             )
@@ -3919,6 +4547,8 @@ final class ChatViewModel: ChatViewModelHosting {
             refreshStreamsFromProvider(reason: "streamDeleted")
             refreshTrackableSessions(reason: "streamDeleted")
             attemptPendingProvisionedSendIfPossible()
+        case .streamHistoryCleared(let sessionKey):
+            handleStreamHistoryCleared(sessionKey: sessionKey)
         case .streamReadStateSnapshot(let snapshot):
             applyStreamReadStateSnapshot(snapshot)
         case .streamReadStateUpdated(let sessionKey, let lastReadMessageId):
@@ -3931,6 +4561,8 @@ final class ChatViewModel: ChatViewModelHosting {
             hasResolvedProvisioningCapability = true
             supportsSessionProvisioning = supported
             attemptPendingProvisionedSendIfPossible()
+        case .serverFeatures:
+            applyServerFeaturesFromEvent()
         case .sessionInfo(let info):
             hasResolvedProvisioningCapability = true
             supportsSessionProvisioning = true
@@ -3943,6 +4575,10 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func handlePromptTurnState(_ event: PromptTurnStateEvent) {
+        bindRuntimeSessionAuthority(
+            runtimeSessionKey: event.payload.sessionKey,
+            clientMessageID: event.payload.messageId
+        )
         let state = event.payload.state.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let terminalState = event.payload.terminalState?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let messageId = event.payload.messageId
@@ -4030,6 +4666,10 @@ final class ChatViewModel: ChatViewModelHosting {
     private func handleAgentProgress(_ event: AgentProgressEvent) {
         let sessionKey = event.sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !sessionKey.isEmpty else { return }
+        bindRuntimeSessionAuthority(
+            runtimeSessionKey: sessionKey,
+            clientMessageID: event.messageId
+        )
         ensureStreamEntry(for: sessionKey)
 
         let state = event.state?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -4288,6 +4928,7 @@ final class ChatViewModel: ChatViewModelHosting {
         logger.info("connectionState transition id=\(self.instanceId, privacy: .public) source=\(source.rawValue, privacy: .public) state=\(String(describing: state), privacy: .public)")
         switch state {
         case .connected:
+            allowsSessionStatusRefreshes = true
             connectionStableTask?.cancel()
             connectionStableTask = nil
             isAssistantTyping = false
@@ -4295,13 +4936,34 @@ final class ChatViewModel: ChatViewModelHosting {
             clearAllLiveProgress()
             clearAllTypingIndicatorMorphTargets()
             auth.refreshAdminStatusFromToken()
+            // Pull the authed link's feature set from the service on every
+            // connected transition. The `.serverFeatures` service event and
+            // this connectionState stream are separate AsyncStreams with no
+            // cross-stream ordering, so the event alone can be lost to a late
+            // subscription or wiped by a reset that lands after it; the pull
+            // makes the gate converge on the service's authoritative value.
+            applyServerFeatures(chatService.serverFeatures)
             attemptPendingProvisionedSendIfPossible()
+            scheduleSessionStatusRefresh(for: uiSelectedSessionKey, reason: "connectionRestored")
         case .connecting, .reconnecting:
+            // No authenticated link exists in any non-live phase the coordinator
+            // collapses into .reconnecting (.connecting/.authenticating/.recovering).
+            // Re-derive the gate from the service's authoritative feature set, which
+            // `handleSocketClose` clears BEFORE it drives this transition, so the
+            // Tightbeam gate closes the instant the link drops instead of lingering
+            // open through reconnect. The service still holds the current link's
+            // features during the authenticated .replaying phase (also mapped to
+            // .reconnecting), so a live replay keeps the gate open with no flicker.
+            // This only touches the feature gate + its org-options; unrelated
+            // session/provisioning state is left intact for the reconnect.
+            applyServerFeatures(chatService.serverFeatures)
             isAssistantTyping = false
             typingSessionKey = nil
             clearAllLiveProgress()
             clearAllTypingIndicatorMorphTargets()
         case .disconnected, .failed:
+            allowsSessionStatusRefreshes = false
+            cancelSessionStatusRefreshes()
             connectionStableTask?.cancel()
             connectionStableTask = nil
             resetSessionProvisioningState(clearPendingSend: true)
@@ -4315,6 +4977,14 @@ final class ChatViewModel: ChatViewModelHosting {
 
     private func resetSessionProvisioningState(clearPendingSend: Bool) {
         supportsSessionProvisioning = false
+        serverFeatures.removeAll()
+        orgOptions = nil
+        isLoadingOrgOptions = false
+        // Invalidate AND cancel any in-flight org-options fetch from the prior
+        // session so its result cannot land in the next session's picker.
+        orgOptionsLoadGeneration &+= 1
+        orgOptionsLoadTask?.cancel()
+        orgOptionsLoadTask = nil
         hasResolvedProvisioningCapability = false
         hasReceivedSessionProvisioning = false
         hasReceivedExplicitSessionInfo = false
@@ -4421,9 +5091,11 @@ final class ChatViewModel: ChatViewModelHosting {
         reason: String,
         delay: Duration = .zero
     ) {
-        let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedSessionKey = sessionStatusAuthorityKey(for: sessionKey)
         guard !normalizedSessionKey.isEmpty else { return }
         guard auth.token != nil else { return }
+        guard allowsSessionStatusRefreshes, !isRetired else { return }
+        guard normalizedSessionKey == sessionStatusAuthorityKey(for: uiSelectedSessionKey) else { return }
 
         sessionStatusRefreshTasks[normalizedSessionKey]?.cancel()
         sessionStatusRefreshTasks[normalizedSessionKey] = Task { [weak self] in
@@ -4446,6 +5118,7 @@ final class ChatViewModel: ChatViewModelHosting {
                     requestedSessionKey: normalizedSessionKey
                 )
                 self.sessionStatusRefreshTasks[normalizedSessionKey] = nil
+                self.recordSessionStatusFetchSuccess(for: normalizedSessionKey)
                 self.sessionStatusBySessionKey[normalizedSessionKey] = displayStatus
                 if displayStatus.sessionKey != normalizedSessionKey {
                     self.sessionStatusBySessionKey[displayStatus.sessionKey] = displayStatus
@@ -4457,7 +5130,79 @@ final class ChatViewModel: ChatViewModelHosting {
                 self.logger.debug(
                     "session status refresh failed reason=\(reason, privacy: .public) sessionKey=\(normalizedSessionKey, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
                 )
+                if let retryDelay = self.recordSessionStatusFetchFailure(for: normalizedSessionKey) {
+                    self.scheduleSessionStatusRefresh(
+                        for: normalizedSessionKey,
+                        reason: "failure_retry",
+                        delay: retryDelay
+                    )
+                }
             }
+        }
+    }
+
+    // MARK: - Session status failure state
+    //
+    // The footer must never spin on "loading" forever: after
+    // `sessionStatusFailureThreshold` consecutive fetch failures the session is
+    // marked unavailable (rendered truthfully by the footer) while a slow
+    // steady retry keeps it self-healing. Any success clears the state.
+
+    static let sessionStatusFailureThreshold = 3
+
+    func isSessionStatusUnavailable(for sessionKey: String) -> Bool {
+        sessionStatusUnavailableSessionKeys.contains(sessionStatusAuthorityKey(for: sessionKey))
+    }
+
+    private func sessionStatusAuthorityKey(for sessionKey: String) -> String {
+        let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        return runtimeSessionKeyByRoutingSessionKey[normalizedSessionKey] ?? normalizedSessionKey
+    }
+
+    private func bindRuntimeSessionAuthority(runtimeSessionKey: String, clientMessageID: String?) {
+        let runtimeKey = runtimeSessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !runtimeKey.isEmpty,
+              let clientMessageID = normalizedAgentProgressText(clientMessageID),
+              let routingKey = localMessageSessionKey(for: clientMessageID),
+              latestStatusAuthorityClientMessageIDByRoutingSessionKey[routingKey] == clientMessageID,
+              routingKey != runtimeKey,
+              runtimeSessionKeyByRoutingSessionKey[routingKey] != runtimeKey else {
+            return
+        }
+
+        runtimeSessionKeyByRoutingSessionKey[routingKey] = runtimeKey
+        sessionStatusRefreshTasks.removeValue(forKey: routingKey)?.cancel()
+        sessionStatusBySessionKey.removeValue(forKey: routingKey)
+        sessionStatusFailureCountBySessionKey.removeValue(forKey: routingKey)
+        sessionStatusUnavailableSessionKeys.remove(routingKey)
+        usageFollowUpFreshnessBySessionKey.removeValue(forKey: routingKey)
+        usageFollowUpCountBySessionKey.removeValue(forKey: routingKey)
+        scheduleSessionStatusRefresh(for: runtimeKey, reason: "runtimeSessionResolved")
+    }
+
+    func recordSessionStatusFetchSuccess(for sessionKey: String) {
+        sessionStatusFailureCountBySessionKey.removeValue(forKey: sessionKey)
+        if sessionStatusUnavailableSessionKeys.contains(sessionKey) {
+            sessionStatusUnavailableSessionKeys.remove(sessionKey)
+        }
+    }
+
+    /// Records one fetch failure and returns the delay before the next retry.
+    /// Failures below the threshold back off quickly; at or past the threshold
+    /// the session is marked unavailable and retried on a slow steady cadence.
+    func recordSessionStatusFetchFailure(for sessionKey: String) -> Duration? {
+        let count = (sessionStatusFailureCountBySessionKey[sessionKey] ?? 0) + 1
+        sessionStatusFailureCountBySessionKey[sessionKey] = count
+        switch count {
+        case 1:
+            return .seconds(2)
+        case 2:
+            return .seconds(8)
+        default:
+            if !sessionStatusUnavailableSessionKeys.contains(sessionKey) {
+                sessionStatusUnavailableSessionKeys.insert(sessionKey)
+            }
+            return .seconds(30)
         }
     }
 
@@ -4483,6 +5228,16 @@ final class ChatViewModel: ChatViewModelHosting {
             resolvedThinkingLevel = cached.display.thinkingLevel
             resolvedReasoningLevel = cached.display.reasoningLevel
         }
+        if incoming.metadataContextGeneration != cached.metadataContextGeneration {
+            usageFollowUpFreshnessBySessionKey.removeValue(forKey: requestedSessionKey)
+            usageFollowUpCountBySessionKey.removeValue(forKey: requestedSessionKey)
+        }
+        let resolvedCodexUsage = Self.resolvedCodexUsageForMetadataAuthority(
+            incoming: incoming.display.codexUsage,
+            incomingGeneration: incoming.metadataContextGeneration,
+            cached: cached.display.codexUsage,
+            cachedGeneration: cached.metadataContextGeneration
+        )
 
         return SessionStatus(
             sessionKey: incoming.sessionKey,
@@ -4491,18 +5246,52 @@ final class ChatViewModel: ChatViewModelHosting {
                 fallbackModels: incoming.display.fallbackModels,
                 provider: incoming.display.provider,
                 harness: incoming.display.harness,
+                host: incoming.display.host,
                 authMode: incoming.display.authMode,
                 reasoningLevel: resolvedReasoningLevel,
                 thinkingLevel: resolvedThinkingLevel,
                 fastMode: incoming.display.fastMode ?? cached.display.fastMode,
                 mode: incoming.display.mode,
-                verbosity: incoming.display.verbosity
+                verbosity: incoming.display.verbosity,
+                codexUsage: resolvedCodexUsage
             ),
             run: incoming.run,
             context: incoming.context,
             approval: incoming.approval,
             capabilities: incoming.capabilities,
-            modelCatalog: incoming.modelCatalog ?? cached.modelCatalog
+            modelCatalog: incoming.modelCatalog ?? cached.modelCatalog,
+            metadataContextGeneration: incoming.metadataContextGeneration
+        )
+    }
+
+    static func resolvedCodexUsageForMetadataAuthority(
+        incoming: SessionStatus.Display.CodexUsage?,
+        incomingGeneration: String?,
+        cached: SessionStatus.Display.CodexUsage?,
+        cachedGeneration: String?
+    ) -> SessionStatus.Display.CodexUsage? {
+        guard let incomingGeneration,
+              !incomingGeneration.isEmpty,
+              incomingGeneration == cachedGeneration,
+              let cached,
+              cached.freshness == .fresh || cached.freshness == .stale,
+              !cached.windows.isEmpty else {
+            return incoming
+        }
+        let retainsLastKnownUsage: Bool = switch incoming?.freshness {
+        case .loading:
+            true
+        case .unavailable:
+            incoming?.unavailableReason == .staleExpired || incoming?.unavailableReason == .resetElapsed
+        case .fresh, .stale, nil:
+            false
+        }
+        guard retainsLastKnownUsage else { return incoming }
+        return .init(
+            freshness: .stale,
+            fetchedAt: cached.fetchedAt,
+            windows: cached.windows,
+            unavailableReason: nil
         )
     }
 
@@ -4516,25 +5305,91 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func scheduleSessionStatusFollowUpIfNeeded(_ status: SessionStatus, requestedSessionKey: String) {
-        guard uiSelectedSessionKey == requestedSessionKey || engineActiveSessionKey == requestedSessionKey else {
+        let authorityKey = sessionStatusAuthorityKey(for: requestedSessionKey)
+        guard sessionStatusAuthorityKey(for: uiSelectedSessionKey) == authorityKey
+                || sessionStatusAuthorityKey(for: engineActiveSessionKey) == authorityKey else {
             return
         }
-        switch status.run.state {
-        case .running, .queued:
-            scheduleSessionStatusRefresh(
-                for: requestedSessionKey,
-                reason: "runStateFollowUp",
-                delay: .seconds(5)
-            )
-        case .idle, .unknown:
-            break
+        let usage = status.display.codexUsage
+        let usageFollowUpCount: Int
+        if let freshness = usage?.freshness, freshness != .fresh {
+            if usageFollowUpFreshnessBySessionKey[requestedSessionKey] == freshness {
+                usageFollowUpCount = (usageFollowUpCountBySessionKey[requestedSessionKey] ?? 0) + 1
+            } else {
+                usageFollowUpCount = 1
+            }
+            usageFollowUpFreshnessBySessionKey[requestedSessionKey] = freshness
+            usageFollowUpCountBySessionKey[requestedSessionKey] = usageFollowUpCount
+        } else {
+            usageFollowUpFreshnessBySessionKey.removeValue(forKey: requestedSessionKey)
+            usageFollowUpCountBySessionKey.removeValue(forKey: requestedSessionKey)
+            usageFollowUpCount = 0
+        }
+
+        guard let delay = Self.sessionStatusFollowUpDelay(
+            usage: usage,
+            usageFollowUpCount: usageFollowUpCount,
+            runState: status.run.state
+        ) else {
+            return
+        }
+        scheduleSessionStatusRefresh(
+            for: requestedSessionKey,
+            reason: "sessionStatusFollowUp",
+            delay: delay
+        )
+    }
+
+    static func sessionStatusFollowUpDelay(
+        usage: SessionStatus.Display.CodexUsage?,
+        usageFollowUpCount: Int,
+        runState: SessionStatus.Run.State
+    ) -> Duration? {
+        let usageDelay: Duration?
+        switch usage?.freshness {
+        case .loading:
+            usageDelay = .seconds(usageFollowUpCount <= 1 ? 2 : 5)
+        case .stale:
+            usageDelay = .seconds(usageFollowUpCount <= 1 ? 5 : 30)
+        case .unavailable:
+            usageDelay = .seconds(30)
+        case .fresh, nil:
+            usageDelay = nil
+        }
+        let runDelay: Duration? = switch runState {
+        case .running, .queued: .seconds(5)
+        case .idle, .unknown: nil
+        }
+        switch (usageDelay, runDelay) {
+        case (.some(let usageDelay), .some(let runDelay)):
+            return min(usageDelay, runDelay)
+        case (.some(let usageDelay), .none):
+            return usageDelay
+        case (.none, .some(let runDelay)):
+            return runDelay
+        case (.none, .none):
+            return nil
         }
     }
 
     private func clearSessionStatusRefreshes() {
-        sessionStatusRefreshTasks.values.forEach { $0.cancel() }
-        sessionStatusRefreshTasks.removeAll()
+        cancelSessionStatusRefreshes()
         sessionStatusBySessionKey.removeAll()
+        runtimeSessionKeyByRoutingSessionKey.removeAll()
+        latestStatusAuthorityClientMessageIDByRoutingSessionKey.removeAll()
+    }
+
+    private func cancelSessionStatusRefreshes(except retainedSessionKey: String? = nil) {
+        let normalizedRetainedKey = retainedSessionKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cancelledKeys = sessionStatusRefreshTasks.keys.filter { $0 != normalizedRetainedKey }
+        for sessionKey in cancelledKeys {
+            sessionStatusRefreshTasks.removeValue(forKey: sessionKey)?.cancel()
+            usageFollowUpFreshnessBySessionKey.removeValue(forKey: sessionKey)
+            usageFollowUpCountBySessionKey.removeValue(forKey: sessionKey)
+        }
+        guard normalizedRetainedKey == nil else { return }
+        usageFollowUpFreshnessBySessionKey.removeAll()
+        usageFollowUpCountBySessionKey.removeAll()
     }
 
     private func normalizeSessionKeyList(_ sessionKeys: [String]) -> [String] {
@@ -4670,7 +5525,8 @@ final class ChatViewModel: ChatViewModelHosting {
         }
         guard let url = messageCacheURL(for: sessionKey) else { return }
         restoreTaskBySessionKey[sessionKey]?.cancel()
-        let restoreTask = Task.detached { [weak self, sessionKey, url] in
+        let barrierGeneration = historyBarrierGenerationBySessionKey[sessionKey, default: 0]
+        let restoreTask = Task.detached { [weak self, sessionKey, url, barrierGeneration] in
             guard let self else { return }
             guard let data = try? Data(contentsOf: url) else {
                 return
@@ -4690,6 +5546,11 @@ final class ChatViewModel: ChatViewModelHosting {
                 await MainActor.run { [weak self, filtered] in
                     guard let self else { return }
                     guard self.restoreTaskBySessionKey[sessionKey] != nil else { return }
+                    // Barrier guard: a history clear that landed while this
+                    // restore was reading disk moved the generation; applying
+                    // the cached (pre-barrier) messages or re-seeding the
+                    // replay cursor now would resurrect cleared history.
+                    guard self.historyBarrierGenerationBySessionKey[sessionKey, default: 0] == barrierGeneration else { return }
                     if let epoch {
                         guard self.writerCurrentEpoch == epoch else { return }
                         guard self.firstReplayAppliedEpoch != epoch else { return }
@@ -4724,7 +5585,11 @@ final class ChatViewModel: ChatViewModelHosting {
         persistDebounceTasks[sessionKey]?.cancel()
         persistDebounceTasks[sessionKey] = nil
         pendingPersistPayloads.removeValue(forKey: sessionKey)
-        try? FileManager.default.removeItem(at: url)
+        // Same serial queue as cache writes: this delete is ordered after any
+        // write already enqueued, so pre-barrier payloads cannot land after it.
+        messageCacheIO.perform {
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 
     private func persistMessages(_ messages: [Message], for sessionKey: String) {
@@ -4732,12 +5597,19 @@ final class ChatViewModel: ChatViewModelHosting {
         let payload = trimMessagesForCache(messages, for: sessionKey)
         pendingPersistPayloads[sessionKey] = payload
         persistDebounceTasks[sessionKey]?.cancel()
-        persistDebounceTasks[sessionKey] = Task { [weak self] in
+        let barrierGeneration = historyBarrierGenerationBySessionKey[sessionKey, default: 0]
+        persistDebounceTasks[sessionKey] = Task { [weak self, barrierGeneration] in
             guard let self else { return }
-            try? await Task.sleep(for: .milliseconds(500))
+            do { try await Task.sleep(for: .milliseconds(500)) } catch is CancellationError { return } catch { return }
+            // Barrier guard: never enqueue a write of material captured before
+            // a history clear (the payload predates the barrier by definition).
+            guard self.historyBarrierGenerationBySessionKey[sessionKey, default: 0] == barrierGeneration else {
+                self.pendingPersistPayloads[sessionKey] = nil
+                return
+            }
             guard let pendingPayload = self.pendingPersistPayloads[sessionKey] else { return }
             self.pendingPersistPayloads[sessionKey] = nil
-            Task.detached { [pendingPayload, url, sessionKey] in
+            messageCacheIO.perform { [pendingPayload, url, sessionKey] in
                 let encoder = JSONEncoder()
                 encoder.dateEncodingStrategy = .iso8601
                 do {
@@ -4790,13 +5662,18 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func clearMessageCache() {
-        let fileManager = FileManager.default
         guard let directoryURL = messageCacheDirectoryURL() else { return }
-        guard let contents = try? fileManager.contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: nil) else {
-            return
-        }
-        for fileURL in contents {
-            try? fileManager.removeItem(at: fileURL)
+        // Route deletes through the shared serial executor (same queue as writes)
+        // so a history-reset wipe is strictly ordered after any previously
+        // enqueued persist — a straggler write cannot recreate the files after.
+        messageCacheIO.perform {
+            let fileManager = FileManager.default
+            guard let contents = try? fileManager.contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: nil) else {
+                return
+            }
+            for fileURL in contents {
+                try? fileManager.removeItem(at: fileURL)
+            }
         }
     }
 
@@ -4873,6 +5750,11 @@ final class ChatViewModel: ChatViewModelHosting {
 
     private func ensureStreamEntry(for sessionKey: String) {
         guard !sessionKey.isEmpty else { return }
+        if messageProjectionIndexBySession[sessionKey] == nil {
+            messageProjectionIndexBySession[sessionKey] = MessageProjectionIndex(
+                revision: messageListRevision(for: sessionKey)
+            )
+        }
         guard streamsBySessionKey[sessionKey] == nil else { return }
         let synthesized = StreamSession(
             sessionKey: sessionKey,
@@ -4886,7 +5768,6 @@ final class ChatViewModel: ChatViewModelHosting {
         streamsBySessionKey[sessionKey] = synthesized
         syntheticSessionKeys.insert(sessionKey)
         recalculateOrderedSessionKeys()
-        SessionRegistry.shared.upsert(synthesized)
     }
 
     private func applyStreamSnapshot(_ streams: [StreamSession]) {
@@ -4904,6 +5785,11 @@ final class ChatViewModel: ChatViewModelHosting {
                 .map(\.sessionKey)
         )
         streamsBySessionKey = byKey
+        for sessionKey in byKey.keys where messageProjectionIndexBySession[sessionKey] == nil {
+            messageProjectionIndexBySession[sessionKey] = MessageProjectionIndex(
+                revision: messageListRevision(for: sessionKey)
+            )
+        }
         let validSessionKeys = Set(byKey.keys)
         let removedSessionKeys = previousSessionKeys.subtracting(validSessionKeys)
         unavailableCrossChatNotificationSourceIds.subtract(validSessionKeys)
@@ -4924,19 +5810,22 @@ final class ChatViewModel: ChatViewModelHosting {
         } else {
             messages = sessionMessages[engineActiveSessionKey] ?? []
         }
-        SessionRegistry.shared.replace(with: orderedStreams)
         persistStreamMetadata()
     }
 
     private func applyStreamUpsert(_ stream: StreamSession) {
         unavailableCrossChatNotificationSourceIds.remove(stream.sessionKey)
+        if messageProjectionIndexBySession[stream.sessionKey] == nil {
+            messageProjectionIndexBySession[stream.sessionKey] = MessageProjectionIndex(
+                revision: messageListRevision(for: stream.sessionKey)
+            )
+        }
         streamsBySessionKey[stream.sessionKey] = stream
         syntheticSessionKeys.remove(stream.sessionKey)
         recalculateOrderedSessionKeys()
         restoreLastReadMessageIdIfNeeded(for: stream.sessionKey)
         restoreCachedMessagesIfNeeded(for: stream.sessionKey)
         ensureDefaultActiveSessionIfNeeded()
-        SessionRegistry.shared.upsert(stream)
         persistStreamMetadata()
     }
 
@@ -4960,7 +5849,6 @@ final class ChatViewModel: ChatViewModelHosting {
         } else if !engineActiveSessionKey.isEmpty {
             messages = sessionMessages[engineActiveSessionKey] ?? []
         }
-        SessionRegistry.shared.remove(sessionKey: sessionKey)
         persistStreamMetadata()
     }
 
@@ -4998,6 +5886,8 @@ final class ChatViewModel: ChatViewModelHosting {
         syntheticSessionKeys.remove(sessionKey)
         sessionStatusBySessionKey.removeValue(forKey: sessionKey)
         sessionStatusRefreshTasks.removeValue(forKey: sessionKey)?.cancel()
+        usageFollowUpFreshnessBySessionKey.removeValue(forKey: sessionKey)
+        usageFollowUpCountBySessionKey.removeValue(forKey: sessionKey)
         recalculateOrderedSessionKeys()
 
         if typingSessionKey == sessionKey {
@@ -5021,7 +5911,6 @@ final class ChatViewModel: ChatViewModelHosting {
             messages = sessionMessages[engineActiveSessionKey] ?? []
         }
 
-        SessionRegistry.shared.remove(sessionKey: sessionKey)
         persistStreamMetadata()
     }
 
@@ -5120,7 +6009,6 @@ final class ChatViewModel: ChatViewModelHosting {
             streamsBySessionKey = Dictionary(uniqueKeysWithValues: streams.map { ($0.sessionKey, $0) })
             syntheticSessionKeys.removeAll()
             recalculateOrderedSessionKeys()
-            SessionRegistry.shared.replace(with: orderedStreams)
         }
     }
 
@@ -5337,6 +6225,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private struct PresentationCacheKey: Hashable {
         let messageID: String
         let isCompact: Bool
+        let stripsProvenance: Bool
     }
 
     private struct PresentationCacheEntry {
@@ -5554,6 +6443,103 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
 #if DEBUG
+    struct DebugMessageSearchProjectionBuild {
+        let buildID: UUID
+        let revision: Int
+    }
+
+    func debugBeginMessageSearchProjectionBuild(
+        sessionKey: String,
+        showOnlyUserMessages: Bool,
+        searchQuery: String
+    ) -> DebugMessageSearchProjectionBuild? {
+        let key = MessageSearchProjectionKey(
+            sessionKey: sessionKey,
+            base: showOnlyUserMessages ? .userOnly : .transcript,
+            query: searchQuery
+        )
+        guard let revision = messageProjectionIndexBySession[sessionKey]?.revision else { return nil }
+        selectedMessageSearchProjectionKeyBySession[sessionKey] = key
+        let buildID = messageSearchProjectionBuildOwnership.begin(for: key)
+        messageSearchProjectionTaskByKey[key] = Task {}
+        return DebugMessageSearchProjectionBuild(buildID: buildID, revision: revision)
+    }
+
+    func debugPublishMessageSearchProjection(
+        sessionKey: String,
+        showOnlyUserMessages: Bool,
+        searchQuery: String,
+        build: DebugMessageSearchProjectionBuild,
+        transcriptIndices: [Int]
+    ) {
+        publishMessageSearchProjection(
+            key: MessageSearchProjectionKey(
+                sessionKey: sessionKey,
+                base: showOnlyUserMessages ? .userOnly : .transcript,
+                query: searchQuery
+            ),
+            buildID: build.buildID,
+            revision: build.revision,
+            transcriptIndices: transcriptIndices
+        )
+    }
+
+    func debugSelectMessageSearchProjection(
+        sessionKey: String,
+        showOnlyUserMessages: Bool,
+        searchQuery: String?
+    ) {
+        guard let searchQuery else {
+            selectedMessageSearchProjectionKeyBySession.removeValue(forKey: sessionKey)
+            return
+        }
+        selectedMessageSearchProjectionKeyBySession[sessionKey] = MessageSearchProjectionKey(
+            sessionKey: sessionKey,
+            base: showOnlyUserMessages ? .userOnly : .transcript,
+            query: searchQuery
+        )
+    }
+
+    func debugHasMessageSearchProjectionTask(
+        sessionKey: String,
+        showOnlyUserMessages: Bool,
+        searchQuery: String
+    ) -> Bool {
+        messageSearchProjectionTaskByKey[MessageSearchProjectionKey(
+            sessionKey: sessionKey,
+            base: showOnlyUserMessages ? .userOnly : .transcript,
+            query: searchQuery
+        )] != nil
+    }
+
+    func debugSetPromptStageIndicator(sessionKey: String, visible: Bool) {
+        if visible {
+            recordLiveProgress(
+                sessionKey: sessionKey,
+                runId: "t1738-debug",
+                messageId: nil,
+                seq: nil,
+                stage: .modelActive,
+                summary: "T1738 bounded fan-out probe",
+                isFailure: false
+            )
+        } else {
+            clearLiveProgress(sessionKey: sessionKey, runId: "t1738-debug", messageId: nil)
+        }
+    }
+
+    /// Drives the real coordinator-output path so a test can exercise the exact
+    /// production phase mapping (e.g. an unexpected drop's replaying -> recovering,
+    /// which collapses to .reconnecting) without standing up a live socket.
+    func debugDriveLifecyclePhaseForTesting(
+        from: ConnectionLifecyclePhase,
+        to: ConnectionLifecyclePhase,
+        epoch: Int,
+        reason: ConnectionLifecycleReason
+    ) async {
+        await handleLifecycleOutput(.phaseTransition(from: from, to: to, epoch: epoch, reason: reason))
+    }
+
     func debugConnectionSnapshot() -> (token: String?, lastMessageId: String?) {
         connectionSnapshot()
     }
@@ -5568,6 +6554,10 @@ final class ChatViewModel: ChatViewModelHosting {
 
     func debugClearSessionMessages(_ sessionKey: String) {
         clearSessionMessages(sessionKey: sessionKey, reason: "debug")
+    }
+
+    func debugEnsureStreamEntry(_ sessionKey: String) {
+        ensureStreamEntry(for: sessionKey)
     }
 
     func debugRemoveSessionMessages(_ sessionKey: String) {

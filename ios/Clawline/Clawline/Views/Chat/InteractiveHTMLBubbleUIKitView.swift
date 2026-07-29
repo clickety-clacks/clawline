@@ -30,7 +30,8 @@ final class InteractiveHTMLBubbleUIKitView: UIView {
     private var isInitialLoadInProgress = false
     private var heightLocked = false
     private var resizeUsed = false
-    private var webContentProcessReloadedAfterTermination = false
+    private var webContentProcessRecoveryInProgress = false
+    private weak var recoveryWebView: WKWebView?
 
     private var callbackWindowStart: CFAbsoluteTime = 0
     private var callbackWindowCount: Int = 0
@@ -99,7 +100,8 @@ final class InteractiveHTMLBubbleUIKitView: UIView {
         isInitialLoadInProgress = false
         heightLocked = false
         resizeUsed = false
-        webContentProcessReloadedAfterTermination = false
+        webContentProcessRecoveryInProgress = false
+        recoveryWebView = nil
         callbackWindowStart = 0
         callbackWindowCount = 0
         geometryRevision = 0
@@ -124,7 +126,8 @@ final class InteractiveHTMLBubbleUIKitView: UIView {
         self.heightLocked = false
         self.resizeUsed = false
         self.geometryRevision = 0
-        self.webContentProcessReloadedAfterTermination = false
+        self.webContentProcessRecoveryInProgress = false
+        self.recoveryWebView = nil
         self.summaryLabel.isHidden = true
         self.errorLabel.isHidden = true
         self.placeholder.startAnimating()
@@ -206,6 +209,7 @@ final class InteractiveHTMLBubbleUIKitView: UIView {
 
     private func teardownWebView() {
         activeUserContentController = nil
+        recoveryWebView = nil
         webViewHeightConstraint?.isActive = false
         webViewHeightConstraint = nil
         if let webView {
@@ -293,7 +297,6 @@ private final class InteractiveHTMLWebKit: NSObject {
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "InteractiveHTMLWebKit")
 
     private var cachedRuleList: WKContentRuleList?
-    private let processPool = WKProcessPool()
     private var compiling = false
     private var pending: [() -> Void] = []
 
@@ -341,8 +344,10 @@ private final class InteractiveHTMLWebKit: NSObject {
 
     private func makeWebView(ruleList: WKContentRuleList?, handler: WKScriptMessageHandler) -> WKWebView {
         let configuration = WKWebViewConfiguration()
+        // WebKit owns the shared web-content process pool on supported OS versions; selecting a
+        // client-created pool is deprecated and has no effect. Keep every interactive bubble on
+        // this coordinator while preserving per-bubble storage and script-handler isolation.
         configuration.websiteDataStore = .nonPersistent()
-        configuration.processPool = processPool
 
         let userContent = WKUserContentController()
         userContent.removeAllUserScripts()
@@ -378,6 +383,10 @@ private final class InteractiveHTMLWebKit: NSObject {
 extension InteractiveHTMLBubbleUIKitView: WKNavigationDelegate, WKUIDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard self.webView === webView else { return }
+        if recoveryWebView === webView {
+            webContentProcessRecoveryInProgress = false
+            recoveryWebView = nil
+        }
         placeholder.stopAnimating()
 
         guard let descriptor else { return }
@@ -457,12 +466,12 @@ extension InteractiveHTMLBubbleUIKitView: WKNavigationDelegate, WKUIDelegate {
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         guard self.webView === webView else { return }
-        guard !webContentProcessReloadedAfterTermination else {
+        guard !webContentProcessRecoveryInProgress else {
             showError("Content crashed.")
             return
         }
 
-        webContentProcessReloadedAfterTermination = true
+        webContentProcessRecoveryInProgress = true
         isInitialLoadInProgress = true
         heightLocked = false
         placeholder.startAnimating()
@@ -474,6 +483,7 @@ extension InteractiveHTMLBubbleUIKitView: WKNavigationDelegate, WKUIDelegate {
             guard let self, let webView else { return }
             guard self.configureNonce == nonce, self.webView === webView else { return }
             self.attach(webView: replacement)
+            self.recoveryWebView = replacement
             self.loadHTML(isDark: self.pendingIsDark)
         }
     }

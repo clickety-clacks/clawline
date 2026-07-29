@@ -36,6 +36,9 @@ struct InteractiveHTMLBubbleUIKitViewTests {
         #expect(contents.contains("guard activeUserContentController === userContentController else { return }"))
         #expect(contents.contains("activeUserContentController = nil"))
         #expect(contents.contains("self.attach(webView: replacement)"))
+        #expect(contents.contains("if recoveryWebView === webView"))
+        #expect(!contents.contains("WKProcessPool"))
+        #expect(!contents.contains(".processPool"))
     }
 
     @Test("Interactive bubble waits for non-zero width before loading and renders visible content")
@@ -160,8 +163,8 @@ struct InteractiveHTMLBubbleUIKitViewTests {
         #expect(firstWebView(in: bubble) == nil)
     }
 
-    @Test("Interactive bubble reloads once after web content process termination, then shows permanent crash error")
-    func interactiveBubbleReloadsOnceAfterWebContentProcessTermination() async throws {
+    @Test("Interactive bubbles recover after repeated shared process terminations")
+    func interactiveBubblesRecoverAfterRepeatedSharedProcessTerminations() async throws {
         guard let windowScene = UIApplication.shared.connectedScenes
             .compactMap({ $0 as? UIWindowScene })
             .first
@@ -170,78 +173,92 @@ struct InteractiveHTMLBubbleUIKitViewTests {
             return
         }
 
-        let window = UIWindow(windowScene: windowScene)
-        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
-        let host = UIViewController()
-        host.view.frame = window.bounds
-        window.rootViewController = host
-        window.makeKeyAndVisible()
+        let pair = makeInteractiveBubblePair(windowScene: windowScene)
         defer {
-            window.isHidden = true
+            pair.window.isHidden = true
         }
 
-        try await warmUpInteractiveWebKit(in: host.view)
-
-        let bubble = InteractiveHTMLBubbleUIKitView()
-        bubble.translatesAutoresizingMaskIntoConstraints = false
-        host.view.addSubview(bubble)
-        NSLayoutConstraint.activate([
-            bubble.leadingAnchor.constraint(equalTo: host.view.leadingAnchor, constant: 16),
-            bubble.topAnchor.constraint(equalTo: host.view.topAnchor, constant: 16),
-            bubble.widthAnchor.constraint(equalToConstant: 320),
-            bubble.heightAnchor.constraint(equalToConstant: 44)
-        ])
-        host.view.layoutIfNeeded()
-
-        bubble.configure(
-            descriptor: viewportDrivenDescriptor(),
-            messageId: "msg-crash-reload",
-            isDark: false
-        )
-
-        try await waitFor(timeout: .seconds(3), poll: .milliseconds(25)) {
-            guard let webView = firstWebView(in: bubble) else { return false }
-            return webView.alpha >= 0.99
-        }
-
-        guard let webView = firstWebView(in: bubble) else {
-            Issue.record("Expected WKWebView before process termination")
+        try await warmUpInteractiveWebKit(in: pair.host.view)
+        guard let initialWebViews = try await loadInteractiveBubblePair(
+            pair,
+            firstDescriptor: staticDescriptor(),
+            secondDescriptor: scriptedDescriptor()
+        ) else {
             return
         }
-        #expect(heightConstraintConstant(for: webView) > 100)
 
-        try await evaluateNoResult(
-            webView: webView,
-            js: "setTimeout(function(){ window.webkit.messageHandlers.clawline.postMessage({action:'_resize',height:320}); }, 100); 0"
+        let firstBubble = pair.firstBubble
+        let secondBubble = pair.secondBubble
+        let lockedHeights = assertInteractiveBubbleProcessArchitecture(
+            first: initialWebViews.first,
+            second: initialWebViews.second
         )
+        try await assertRecoveredContent(in: initialWebViews)
 
-        bubble.webViewWebContentProcessDidTerminate(webView)
-        #expect(visibleLabelText(in: bubble)?.contains("Content crashed") != true)
+        // A shared WebKit process exit notifies each affected web view. Exercise both delegates
+        // together, then repeat after both replacement documents finish loading.
+        firstBubble.webViewWebContentProcessDidTerminate(initialWebViews.first)
+        secondBubble.webViewWebContentProcessDidTerminate(initialWebViews.second)
+        #expect(visibleLabelText(in: firstBubble)?.contains("Content crashed") != true)
+        #expect(visibleLabelText(in: secondBubble)?.contains("Content crashed") != true)
 
+        guard let firstRecovery = try await waitForInteractiveBubblePair(
+            pair,
+            replacing: initialWebViews
+        ) else {
+            return
+        }
+        assertLockedHeights(lockedHeights, in: firstRecovery)
+        try await assertRecoveredContent(in: firstRecovery)
+
+        firstBubble.webViewWebContentProcessDidTerminate(firstRecovery.first)
+        secondBubble.webViewWebContentProcessDidTerminate(firstRecovery.second)
+        #expect(visibleLabelText(in: firstBubble)?.contains("Content crashed") != true)
+        #expect(visibleLabelText(in: secondBubble)?.contains("Content crashed") != true)
+
+        guard let secondRecovery = try await waitForInteractiveBubblePair(
+            pair,
+            replacing: firstRecovery
+        ) else {
+            return
+        }
+        assertLockedHeights(lockedHeights, in: secondRecovery)
+        try await assertRecoveredContent(in: secondRecovery)
+    }
+
+    @Test("Interactive bubble stops a replacement that terminates before loading")
+    func interactiveBubbleStopsFailedRecoveryLoop() async throws {
+        guard let windowScene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first
+        else {
+            Issue.record("No UIWindowScene available for interactive bubble test")
+            return
+        }
+
+        let pair = makeInteractiveBubblePair(windowScene: windowScene)
+        defer {
+            pair.window.isHidden = true
+        }
+
+        try await warmUpInteractiveWebKit(in: pair.host.view)
+        pair.firstBubble.configure(
+            descriptor: staticDescriptor(),
+            messageId: "msg-failed-recovery",
+            isDark: false
+        )
         try await waitFor(timeout: .seconds(3), poll: .milliseconds(25)) {
-            guard let replacement = firstWebView(in: bubble) else { return false }
-            return replacement !== webView
-                && replacement.alpha >= 0.99
-                && heightConstraintConstant(for: replacement) > 100
-        }
-        let replacement = try #require(firstWebView(in: bubble))
-        try await Task.sleep(forDuration: .milliseconds(150))
-        #expect(heightConstraintConstant(for: replacement) > 100)
-        #expect(abs(heightConstraintConstant(for: replacement) - 320) > 0.5)
-        let reloadedText = try await evaluateString(webView: replacement, js: "document.body.innerText || ''")
-        #expect(reloadedText.contains("Visible Content"))
-
-        try await evaluateNoResult(
-            webView: replacement,
-            js: "window.webkit.messageHandlers.clawline.postMessage({action:'_resize',height:260}); 0"
-        )
-        try await waitFor(timeout: .seconds(1), poll: .milliseconds(25)) {
-            abs(heightConstraintConstant(for: replacement) - 260) <= 0.5
+            (firstWebView(in: pair.firstBubble)?.alpha ?? 0) >= 0.99
         }
 
-        bubble.webViewWebContentProcessDidTerminate(replacement)
-        #expect(firstWebView(in: bubble) == nil)
-        #expect(visibleLabelText(in: bubble)?.contains("Content crashed") == true)
+        let initialWebView = try #require(firstWebView(in: pair.firstBubble))
+        pair.firstBubble.webViewWebContentProcessDidTerminate(initialWebView)
+        let replacement = try #require(firstWebView(in: pair.firstBubble))
+        #expect(replacement !== initialWebView)
+
+        pair.firstBubble.webViewWebContentProcessDidTerminate(replacement)
+        #expect(firstWebView(in: pair.firstBubble) == nil)
+        #expect(visibleLabelText(in: pair.firstBubble)?.contains("Content crashed") == true)
     }
 
     @Test("T1377: Interactive HTML commits didFinish geometry and one explicit resize")
@@ -311,6 +328,163 @@ struct InteractiveHTMLBubbleUIKitViewTests {
 }
 
 @MainActor
+private struct InteractiveBubblePair {
+    let window: UIWindow
+    let host: UIViewController
+    let firstBubble: InteractiveHTMLBubbleUIKitView
+    let secondBubble: InteractiveHTMLBubbleUIKitView
+}
+
+@MainActor
+private func makeInteractiveBubblePair(windowScene: UIWindowScene) -> InteractiveBubblePair {
+    let window = UIWindow(windowScene: windowScene)
+    window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+    let host = UIViewController()
+    host.view.frame = window.bounds
+    window.rootViewController = host
+    window.makeKeyAndVisible()
+
+    let firstBubble = InteractiveHTMLBubbleUIKitView()
+    let secondBubble = InteractiveHTMLBubbleUIKitView()
+    for bubble in [firstBubble, secondBubble] {
+        bubble.translatesAutoresizingMaskIntoConstraints = false
+        host.view.addSubview(bubble)
+    }
+    NSLayoutConstraint.activate([
+        firstBubble.leadingAnchor.constraint(equalTo: host.view.leadingAnchor, constant: 16),
+        firstBubble.topAnchor.constraint(equalTo: host.view.topAnchor, constant: 16),
+        firstBubble.widthAnchor.constraint(equalToConstant: 320),
+        firstBubble.heightAnchor.constraint(equalToConstant: 44),
+        secondBubble.leadingAnchor.constraint(equalTo: firstBubble.leadingAnchor),
+        secondBubble.topAnchor.constraint(equalTo: firstBubble.bottomAnchor, constant: 240),
+        secondBubble.widthAnchor.constraint(equalTo: firstBubble.widthAnchor),
+        secondBubble.heightAnchor.constraint(equalToConstant: 44)
+    ])
+    host.view.layoutIfNeeded()
+
+    return InteractiveBubblePair(
+        window: window,
+        host: host,
+        firstBubble: firstBubble,
+        secondBubble: secondBubble
+    )
+}
+
+@MainActor
+private func loadInteractiveBubblePair(
+    _ pair: InteractiveBubblePair,
+    firstDescriptor: InteractiveHTMLDescriptor,
+    secondDescriptor: InteractiveHTMLDescriptor
+) async throws -> (first: WKWebView, second: WKWebView)? {
+    pair.firstBubble.configure(
+        descriptor: firstDescriptor,
+        messageId: "msg-shared-process-static",
+        isDark: false
+    )
+    pair.secondBubble.configure(
+        descriptor: secondDescriptor,
+        messageId: "msg-shared-process-scripted",
+        isDark: false
+    )
+
+    try await waitFor(timeout: .seconds(3), poll: .milliseconds(25)) {
+        guard let firstWebView = firstWebView(in: pair.firstBubble),
+              let secondWebView = firstWebView(in: pair.secondBubble)
+        else {
+            return false
+        }
+        return firstWebView.alpha >= 0.99
+            && secondWebView.alpha >= 0.99
+            && heightConstraintConstant(for: firstWebView) > 100
+            && heightConstraintConstant(for: secondWebView) > 100
+    }
+
+    guard let firstWebView = firstWebView(in: pair.firstBubble),
+          let secondWebView = firstWebView(in: pair.secondBubble)
+    else {
+        Issue.record("Expected two WKWebViews before shared process termination")
+        return nil
+    }
+    return (firstWebView, secondWebView)
+}
+
+@MainActor
+private func waitForInteractiveBubblePair(
+    _ pair: InteractiveBubblePair,
+    replacing previous: (first: WKWebView, second: WKWebView)
+) async throws -> (first: WKWebView, second: WKWebView)? {
+    try await waitFor(timeout: .seconds(3), poll: .milliseconds(25)) {
+        guard let firstWebView = firstWebView(in: pair.firstBubble),
+              let secondWebView = firstWebView(in: pair.secondBubble)
+        else {
+            return false
+        }
+        return firstWebView !== previous.first
+            && secondWebView !== previous.second
+            && firstWebView.alpha >= 0.99
+            && secondWebView.alpha >= 0.99
+            && heightConstraintConstant(for: firstWebView) > 100
+            && heightConstraintConstant(for: secondWebView) > 100
+    }
+
+    guard let firstWebView = firstWebView(in: pair.firstBubble),
+          let secondWebView = firstWebView(in: pair.secondBubble)
+    else {
+        Issue.record("Expected two replacement WKWebViews after process termination")
+        return nil
+    }
+    return (firstWebView, secondWebView)
+}
+
+@MainActor
+private func assertInteractiveBubbleProcessArchitecture(
+    first: WKWebView,
+    second: WKWebView
+) -> (first: CGFloat, second: CGFloat) {
+    #expect(first !== second)
+    #expect(first.configuration.websiteDataStore !== second.configuration.websiteDataStore)
+    #expect(first.configuration.userContentController !== second.configuration.userContentController)
+    #expect(!first.configuration.websiteDataStore.isPersistent)
+    #expect(!second.configuration.websiteDataStore.isPersistent)
+
+    let firstHeight = heightConstraintConstant(for: first)
+    let secondHeight = heightConstraintConstant(for: second)
+    #expect(firstHeight > 100)
+    #expect(secondHeight > 100)
+    return (firstHeight, secondHeight)
+}
+
+@MainActor
+private func assertLockedHeights(
+    _ expected: (first: CGFloat, second: CGFloat),
+    in webViews: (first: WKWebView, second: WKWebView)
+) {
+    #expect(abs(heightConstraintConstant(for: webViews.first) - expected.first) <= 0.5)
+    #expect(abs(heightConstraintConstant(for: webViews.second) - expected.second) <= 0.5)
+}
+
+@MainActor
+private func assertRecoveredContent(
+    in webViews: (first: WKWebView, second: WKWebView)
+) async throws {
+    let staticText = try await evaluateString(
+        webView: webViews.first,
+        js: "document.body.innerText || ''"
+    )
+    let scriptedText = try await evaluateString(
+        webView: webViews.second,
+        js: "document.body.innerText || ''"
+    )
+    let scriptMarker = try await evaluateString(
+        webView: webViews.second,
+        js: "String(window.clawlineRecoveryMarker || '')"
+    )
+    #expect(staticText.contains("Static Content"))
+    #expect(scriptedText.contains("JavaScript Content"))
+    #expect(scriptMarker == "ready")
+}
+
+@MainActor
 private func warmUpInteractiveWebKit(in container: UIView) async throws {
     let warmup = InteractiveHTMLBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 320, height: 44))
     container.addSubview(warmup)
@@ -332,6 +506,48 @@ private func viewportDrivenDescriptor() -> InteractiveHTMLDescriptor {
       <div style="height:calc(100vw * 0.6);background:#0A84FF;color:#FFFFFF;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:600;">
         Visible Content
       </div>
+    </body>
+    </html>
+    """
+
+    return InteractiveHTMLDescriptor(
+        version: 1,
+        html: html,
+        metadata: .init(title: nil, height: .auto, maxHeight: 400, backgroundColor: nil)
+    )
+}
+
+private func staticDescriptor() -> InteractiveHTMLDescriptor {
+    let html = """
+    <!doctype html>
+    <html>
+    <body style="margin:0;">
+      <div style="height:calc(100vw * 0.6);background:#0A84FF;color:#FFFFFF;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:600;">
+        Static Content
+      </div>
+    </body>
+    </html>
+    """
+
+    return InteractiveHTMLDescriptor(
+        version: 1,
+        html: html,
+        metadata: .init(title: nil, height: .auto, maxHeight: 400, backgroundColor: nil)
+    )
+}
+
+private func scriptedDescriptor() -> InteractiveHTMLDescriptor {
+    let html = """
+    <!doctype html>
+    <html>
+    <body style="margin:0;">
+      <div id="content" style="height:calc(100vw * 0.6);background:#30D158;color:#000000;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:600;">
+        Loading
+      </div>
+      <script>
+        window.clawlineRecoveryMarker = "ready";
+        document.getElementById("content").textContent = "JavaScript Content";
+      </script>
     </body>
     </html>
     """

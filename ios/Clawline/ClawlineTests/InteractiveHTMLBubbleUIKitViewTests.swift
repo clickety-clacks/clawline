@@ -226,7 +226,7 @@ struct InteractiveHTMLBubbleUIKitViewTests {
         try await assertRecoveredContent(in: secondRecovery)
     }
 
-    @Test("Interactive bubble stops a replacement that terminates before loading")
+    @Test("Failed recovery stops only the affected interactive bubble")
     func interactiveBubbleStopsFailedRecoveryLoop() async throws {
         guard let windowScene = UIApplication.shared.connectedScenes
             .compactMap({ $0 as? UIWindowScene })
@@ -247,11 +247,28 @@ struct InteractiveHTMLBubbleUIKitViewTests {
             messageId: "msg-failed-recovery",
             isDark: false
         )
+        pair.secondBubble.configure(
+            descriptor: scriptedDescriptor(),
+            messageId: "msg-failed-recovery-sibling",
+            isDark: false
+        )
         try await waitFor(timeout: .seconds(3), poll: .milliseconds(25)) {
-            (firstWebView(in: pair.firstBubble)?.alpha ?? 0) >= 0.99
+            guard let firstCandidate = firstWebView(in: pair.firstBubble),
+                  let sibling = firstWebView(in: pair.secondBubble)
+            else {
+                return false
+            }
+            return firstCandidate.alpha >= 0.99
+                && sibling.alpha >= 0.99
+                && heightConstraintConstant(for: firstCandidate) > 100
+                && heightConstraintConstant(for: sibling) > 100
         }
 
         let initialWebView = try #require(firstWebView(in: pair.firstBubble))
+        let sibling = try #require(firstWebView(in: pair.secondBubble))
+        let siblingHeight = heightConstraintConstant(for: sibling)
+        try await assertRecoveredContent(in: (initialWebView, sibling))
+
         pair.firstBubble.webViewWebContentProcessDidTerminate(initialWebView)
         let replacement = try #require(firstWebView(in: pair.firstBubble))
         #expect(replacement !== initialWebView)
@@ -259,6 +276,20 @@ struct InteractiveHTMLBubbleUIKitViewTests {
         pair.firstBubble.webViewWebContentProcessDidTerminate(replacement)
         #expect(firstWebView(in: pair.firstBubble) == nil)
         #expect(visibleLabelText(in: pair.firstBubble)?.contains("Content crashed") == true)
+        #expect(firstWebView(in: pair.secondBubble) === sibling)
+        #expect(visibleLabelText(in: pair.secondBubble)?.contains("Content crashed") != true)
+        #expect(abs(heightConstraintConstant(for: sibling) - siblingHeight) <= 0.5)
+
+        let siblingText = try await evaluateString(
+            webView: sibling,
+            js: "document.body.innerText || ''"
+        )
+        let siblingMarker = try await evaluateString(
+            webView: sibling,
+            js: "String(window.clawlineRecoveryMarker || '')"
+        )
+        #expect(siblingText.contains("JavaScript Content"))
+        #expect(siblingMarker == "ready")
     }
 
     @Test("T1377: Interactive HTML commits didFinish geometry and one explicit resize")

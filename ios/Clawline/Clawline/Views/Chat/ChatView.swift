@@ -512,6 +512,7 @@ struct ChatView: View {
     @State private var streamSelectorShortcutSessionKeys: [String] = []
     @State private var isPhotosPickerPresented = false
     @State private var isFileImporterPresented = false
+    @State private var pendingAttachmentPickerPresentation: PendingAttachmentPickerPresentation?
     @State private var isCancelCurrentPromptDialogPresented = false
     @State private var isLogoutConfirmationPresented = false
     @State private var pendingHarnessChange: PendingHarnessChange?
@@ -665,6 +666,14 @@ struct ChatView: View {
                 return "camera"
             }
         }
+    }
+
+    // Deferred until the attachment popover's .onDisappear fires, so the
+    // Catalyst out-of-process picker sheet never starts connecting its scene
+    // while the popover's own scene/window teardown is still in flight.
+    private enum PendingAttachmentPickerPresentation {
+        case photos
+        case files
     }
 
     private struct ScrollButtonState: Equatable {
@@ -2563,14 +2572,17 @@ struct ChatView: View {
                                 presentCamera()
                             },
                             onPhotos: {
+                                pendingAttachmentPickerPresentation = .photos
                                 isAttachmentMenuPresented = false
-                                presentPhotoPicker()
                             },
                             onFiles: {
+                                pendingAttachmentPickerPresentation = .files
                                 isAttachmentMenuPresented = false
-                                presentFileImporter()
                             }
                         )
+                        .onDisappear {
+                            presentPendingAttachmentPickerIfNeeded()
+                        }
                     )
                 },
                 // ⚠️ This callback is how focus state survives view recreation.
@@ -3629,23 +3641,29 @@ struct ChatView: View {
     }
 
     @MainActor
+    private func presentPendingAttachmentPickerIfNeeded() {
+        guard let pending = pendingAttachmentPickerPresentation else { return }
+        pendingAttachmentPickerPresentation = nil
+        switch pending {
+        case .photos:
+            presentPhotoPicker()
+        case .files:
+            presentFileImporter()
+        }
+    }
+
+    @MainActor
     private func presentPhotoPicker() {
         prepareForAttachmentPicker()
         activeSheet = nil
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(150))
-            isPhotosPickerPresented = true
-        }
+        isPhotosPickerPresented = true
     }
 
     @MainActor
     private func presentFileImporter() {
         prepareForAttachmentPicker()
         activeSheet = nil
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(150))
-            isFileImporterPresented = true
-        }
+        isFileImporterPresented = true
     }
 
     private func handleCapturedImage(_ image: UIImage) async {

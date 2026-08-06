@@ -795,10 +795,28 @@ final class ChatViewModel {
     /// disconnect/logout via `resetSessionProvisioningState`.
     private var orgOptionsLoadGeneration = 0
     private var orgOptionsLoadTask: Task<Void, Never>?
+    private var orgOptionsLoadFailed = false
+
+    /// Honest projection of the org-options fetch for UI consumers (the create
+    /// panel): a decode/network failure must read as `.failed`, never collapse
+    /// into `.loaded` with an empty catalog — those are different situations
+    /// (broken fetch vs. genuinely nothing to offer for this harness/host).
+    enum OrgOptionsState: Equatable {
+        case loading
+        case loaded(OrgOptions)
+        case failed
+    }
+
+    var orgOptionsState: OrgOptionsState {
+        if let orgOptions { return .loaded(orgOptions) }
+        if orgOptionsLoadFailed { return .failed }
+        return .loading
+    }
 
     func loadOrgOptionsIfNeeded() {
         guard isTightbeamServer, orgOptions == nil, !isLoadingOrgOptions else { return }
         isLoadingOrgOptions = true
+        orgOptionsLoadFailed = false
         let generation = orgOptionsLoadGeneration
         // Explicit cancellable handle: cancelled+niled on disconnect/session reset
         // and before replacement, so an in-flight fetch cannot repopulate a newer
@@ -821,8 +839,22 @@ final class ChatViewModel {
                 self.orgOptions = fetched
             } catch {
                 self.logger.info("org-options fetch failed error=\(error.localizedDescription, privacy: .public)")
+                // Same boundary validation as the success path: a superseded or
+                // cancelled attempt must not paint a failure over a newer load.
+                guard !Task.isCancelled,
+                      self.orgOptionsLoadGeneration == generation,
+                      self.isTightbeamServer else { return }
+                self.orgOptionsLoadFailed = true
             }
         }
+    }
+
+    /// Re-arms the fetch after a failure. `loadOrgOptionsIfNeeded` already
+    /// no-ops once `orgOptions` is populated or a load is in flight, and a
+    /// failed attempt leaves `orgOptions == nil`, so calling it again is the
+    /// retry.
+    func retryOrgOptionsLoad() {
+        loadOrgOptionsIfNeeded()
     }
 
     nonisolated static func placeholderText(displayName: String, sessionKey: String) -> String {
@@ -1188,6 +1220,7 @@ final class ChatViewModel {
             orgOptionsLoadTask = nil
             isLoadingOrgOptions = false
             orgOptions = nil
+            orgOptionsLoadFailed = false
         }
         loadOrgOptionsIfNeeded()
     }
@@ -2867,8 +2900,28 @@ final class ChatViewModel {
         case .emptyName:
             return .failed(message: nil)
         case .failure(let error):
-            return .failed(message: error.localizedDescription)
+            return .failed(message: Self.humaneCreateRefusalMessage(for: error))
         }
+    }
+
+    /// A placement refusal (an archetype/host rule the server names) is shown
+    /// verbatim by design — see the doc comment above. A catalog-staleness /
+    /// routing refusal is a substrate-internal condition, not a user-actionable
+    /// rule, and must never leak its raw text (e.g. "cannot route
+    /// claude-sonnet-5 on Gibson: the claude catalog on Gibson is STALE...").
+    /// The wire carries no structured staleness signal today (the Lane-B
+    /// freshness field is planned, not built), so this degrades on the only
+    /// observable signal available now — the refusal text — and should be
+    /// replaced with a structured check once that field lands.
+    private static func humaneCreateRefusalMessage(for error: Swift.Error) -> String {
+        if let apiError = error as? StreamAPIError,
+           let message = apiError.message {
+            let lowered = message.lowercased()
+            if lowered.contains("stale") || lowered.contains("cannot route") {
+                return "That harness's catalog needs to be refreshed on the server before you can create here. Try again shortly, or ask an admin to re-onboard it."
+            }
+        }
+        return error.localizedDescription
     }
 
     private func performStreamCreate(
@@ -4980,6 +5033,7 @@ final class ChatViewModel {
         serverFeatures.removeAll()
         orgOptions = nil
         isLoadingOrgOptions = false
+        orgOptionsLoadFailed = false
         // Invalidate AND cancel any in-flight org-options fetch from the prior
         // session so its result cannot land in the next session's picker.
         orgOptionsLoadGeneration &+= 1

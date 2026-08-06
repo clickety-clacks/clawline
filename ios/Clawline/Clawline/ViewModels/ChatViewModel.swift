@@ -2913,10 +2913,24 @@ final class ChatViewModel {
     /// freshness field is planned, not built), so this degrades on the only
     /// observable signal available now — the refusal text — and should be
     /// replaced with a structured check once that field lands.
+    ///
+    /// On the real transport, `ProviderChatService.mapStreamAPIError` wraps
+    /// every `StreamAPIError` into its own `Error.serverError(code:message:)`
+    /// before this ever sees it, so both shapes must be read here — matching
+    /// only the bare `StreamAPIError` leaves this dead code on the production
+    /// path (unit tests that throw `StreamAPIError` directly would still pass).
     private static func humaneCreateRefusalMessage(for error: Swift.Error) -> String {
-        if let apiError = error as? StreamAPIError,
-           let message = apiError.message {
-            let lowered = message.lowercased()
+        let refusalMessage: String?
+        switch error {
+        case let apiError as StreamAPIError:
+            refusalMessage = apiError.message
+        case ProviderChatService.Error.serverError(_, let mappedMessage):
+            refusalMessage = mappedMessage
+        default:
+            refusalMessage = nil
+        }
+        if let refusalMessage {
+            let lowered = refusalMessage.lowercased()
             if lowered.contains("stale") || lowered.contains("cannot route") {
                 return "That harness's catalog needs to be refreshed on the server before you can create here. Try again shortly, or ask an admin to re-onboard it."
             }

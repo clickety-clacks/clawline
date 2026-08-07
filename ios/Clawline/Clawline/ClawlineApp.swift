@@ -22,6 +22,8 @@ struct ClawlineApp: App {
     // injected into every scene's RootView (and thereby every ChatViewModel) so
     // cache ordering holds across scenes and overlapping view models.
     @State private var messageCacheIO: any MessageCacheIOServicing = MessageCacheIO()
+    // Owns which message (if any) the detail viewer is currently showing.
+    @State private var detailPresentation = MessageDetailPresentation()
 
     private let deviceIdentifier: any DeviceIdentifying
     private let connectionService: any ConnectionServicing
@@ -71,9 +73,29 @@ struct ClawlineApp: App {
                     .environment(\.deviceIdentifier, deviceIdentifier)
                     .environment(\.chatService, chatService)
                     .environment(\.settingsManager, settingsManager)
+                    .environment(\.messageDetailPresentation, detailPresentation)
+                    .environment(\.openDetail, MessageDetailAction { message in
+                        detailPresentation.message = message
+                    })
+                    .overlay {
+                        if let message = detailPresentation.message {
+                            MessageDetailViewer(message: message) {
+                                detailPresentation.message = nil
+                            }
+                        }
+                    }
                     .sheet(isPresented: $settingsManager.isSettingsPresented) {
                         SettingsView(settings: settingsManager)
                     }
+#if DEBUG
+                    // Verification hook for the Goal B detail-viewer layout, ahead of Goal A's
+                    // bubble tap wiring into openDetail. Not reachable outside DEBUG builds.
+                    .task {
+                        if ProcessInfo.processInfo.environment["CLAWLINE_DEBUG_PREVIEW_MESSAGE_DETAIL"] == "1" {
+                            detailPresentation.message = .debugPreviewLongMessage
+                        }
+                    }
+#endif
                     // Clear first responders before the app backgrounds.
                     // UITextView.becomeFirstResponder triggers a synchronous pasteboard XPC call
                     // (UIKeyboardStateManager.canInsertAdaptiveImageGlyph). If the device locks

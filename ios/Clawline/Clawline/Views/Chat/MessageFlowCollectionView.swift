@@ -476,6 +476,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     private var messagesById: [String: Message] = [:]
     private var dateSeparatorTextByItemId: [String: String] = [:]
+    /// Substrate run-collapse (step 2): synthetic item id -> the message ids
+    /// it summarizes, computed fresh each snapshot build (view-model DATA).
+    private var substrateRunMemberIdsByItemId: [String: [String]] = [:]
+    /// Transient UI state (never persisted): which collapsed-run anchor ids
+    /// are currently expanded. Keyed by the run's synthetic item id.
+    private var expandedSubstrateRunItemIds: Set<String> = []
+    /// Message ids currently shown individually because their run is
+    /// expanded (drives SubstrateRowCell's indent-under-run presentation).
+    private var expandedRunMemberMessageIds: Set<String> = []
     private struct PerStreamRuntimeState {
         typealias MessageLoadCallback = @MainActor () -> Void
 
@@ -3486,7 +3495,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let snapshotItemIds = isShowingOnlyUserMessages
             ? snapshotMessageIds
             : snapshotItemsWithWebBubbles(
-                from: snapshotItemsWithDateSeparators(from: snapshotMessages),
+                from: snapshotItemsWithSubstrateRunCollapse(from: snapshotItemsWithDateSeparators(from: snapshotMessages)),
                 stream: effectiveStream
             )
         logScrollRestore(
@@ -3945,6 +3954,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         id == TypingIndicatorCell.itemId
             || id == SessionMetadataFooterCell.itemId
             || DateSeparatorCell.isDateSeparatorItemID(id)
+            || id.hasPrefix(Self.substrateRunItemIdPrefix)
+            || messagesById[id]?.messageKind == .substrate
     }
 
     private func snapshotItemsWithDateSeparators(from messages: [Message]) -> [String] {
@@ -3974,6 +3985,81 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
         dateSeparatorTextByItemId = separatorTextByItemID
         return items
+    }
+
+    private static let substrateRunItemIdPrefix = "__substrate_run__|"
+
+    /// Collapse RUNS of 2+ consecutive .substrate classified message ids
+    /// into one synthetic collapsed-run item id, unless that run is
+    /// currently expanded (transient state). Non-message ids (date
+    /// separators, etc) break a run, same as a visible interruption would.
+    /// Grouping is computed fresh here each snapshot build (view-model DATA,
+    /// no measurement/layout work) so step-2's chrome never adds main-thread
+    /// churn to the MessageFlow hotspot.
+    private func snapshotItemsWithSubstrateRunCollapse(from itemIds: [String]) -> [String] {
+        guard !itemIds.isEmpty else {
+            substrateRunMemberIdsByItemId = [:]
+            expandedRunMemberMessageIds = []
+            return itemIds
+        }
+
+        var result: [String] = []
+        result.reserveCapacity(itemIds.count)
+        var runMembers: [String: [String]] = [:]
+        var expandedMembers: Set<String> = []
+        var pendingRun: [String] = []
+
+        func flushPendingRun() {
+            guard !pendingRun.isEmpty else { return }
+            if pendingRun.count == 1 {
+                result.append(pendingRun[0])
+            } else {
+                let anchorId = Self.substrateRunItemIdPrefix + pendingRun[0]
+                runMembers[anchorId] = pendingRun
+                if expandedSubstrateRunItemIds.contains(anchorId) {
+                    result.append(contentsOf: pendingRun)
+                    expandedMembers.formUnion(pendingRun)
+                } else {
+                    result.append(anchorId)
+                }
+            }
+            pendingRun = []
+        }
+
+        for id in itemIds {
+            // messagesById[id] is nil for every synthetic id (typing
+            // indicator, footer, date separator) -- no need to also consult
+            // isNonMessageItemID here (and doing so would be circular: that
+            // function now excludes substrate messages FROM bubble-sizing
+            // purposes by consulting this same classification).
+            guard let message = messagesById[id], message.messageKind == .substrate else {
+                flushPendingRun()
+                result.append(id)
+                continue
+            }
+            pendingRun.append(id)
+        }
+        flushPendingRun()
+
+        substrateRunMemberIdsByItemId = runMembers
+        expandedRunMemberMessageIds = expandedMembers
+        return result
+    }
+
+    /// Toggle a collapsed run's transient expansion state and reapply the
+    /// snapshot. applySnapshotForWebBubbles() already recomputes the full
+    /// item list via snapshotItemsWithSubstrateRunCollapse (wired into its
+    /// pipeline above) under its existing isUpdatePassInFlight /
+    /// isSnapshotApplyInFlight reentrancy guard -- reused here rather than a
+    /// second ad hoc snapshot-mutation path in this crash-scarred file
+    /// (#140 reentrant snapshot-apply, #148/#149 freezes).
+    private func toggleSubstrateRunExpansion(anchorItemId: String) {
+        if expandedSubstrateRunItemIds.contains(anchorItemId) {
+            expandedSubstrateRunItemIds.remove(anchorItemId)
+        } else {
+            expandedSubstrateRunItemIds.insert(anchorItemId)
+        }
+        applySnapshotForWebBubbles()
     }
 
     private static func dateSeparatorText(for day: Date, now: Date) -> String {
@@ -4858,6 +4944,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         collectionView.register(TypingIndicatorCell.self, forCellWithReuseIdentifier: TypingIndicatorCell.reuseIdentifier)
         collectionView.register(DateSeparatorCell.self, forCellWithReuseIdentifier: DateSeparatorCell.reuseIdentifier)
         collectionView.register(SessionMetadataFooterCell.self, forCellWithReuseIdentifier: SessionMetadataFooterCell.reuseIdentifier)
+        collectionView.register(SubstrateRowCell.self, forCellWithReuseIdentifier: SubstrateRowCell.reuseIdentifier)
+        collectionView.register(SubstrateRunCollapseCell.self, forCellWithReuseIdentifier: SubstrateRunCollapseCell.reuseIdentifier)
 
         view.addSubview(collectionView)
         // Frame will be set in viewDidLayoutSubviews to extend to window bounds
@@ -5053,7 +5141,40 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 return cell
             }
 
+            if id.hasPrefix(Self.substrateRunItemIdPrefix) {
+                let cell = collectionView.dequeueReusableCell(
+                    withReuseIdentifier: SubstrateRunCollapseCell.reuseIdentifier,
+                    for: indexPath
+                ) as? SubstrateRunCollapseCell
+                let memberCount = self.substrateRunMemberIdsByItemId[id]?.count ?? 0
+                cell?.configure(
+                    noticeCount: memberCount,
+                    isExpanded: false,
+                    isDark: self.currentIsDark,
+                    onTap: { [weak self] in
+                        self?.toggleSubstrateRunExpansion(anchorItemId: id)
+                    }
+                )
+                return cell
+            }
+
             guard let message = self.messagesById[id] else { return nil }
+
+            if message.messageKind == .substrate {
+                let cell = collectionView.dequeueReusableCell(
+                    withReuseIdentifier: SubstrateRowCell.reuseIdentifier,
+                    for: indexPath
+                ) as? SubstrateRowCell
+                let displayMessage = message.strippingProvenanceStampForDisplay()
+                cell?.configure(
+                    leadLabel: "tightbeam",
+                    detail: displayMessage.content,
+                    style: .liveVoice,
+                    isDark: self.currentIsDark,
+                    isIndentedUnderRun: self.expandedRunMemberMessageIds.contains(id)
+                )
+                return cell
+            }
             let metrics = ChatFlowTheme.Metrics(isCompact: self.isCompact)
             let presentation = viewModel.presentation(for: message, metrics: metrics)
             let hideHeader = shouldHideHeader(for: message, presentation: presentation)
@@ -5646,9 +5767,31 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             return CGSize(width: availableWidth, height: height)
         }
 
+        if id.hasPrefix(Self.substrateRunItemIdPrefix) {
+            let rowWidth = availableContentWidth()
+            let lineHeight = UIFont.clawline(.secondaryLabel, weight: .semibold).lineHeight
+            return CGSize(width: rowWidth, height: ceil(lineHeight) + 12)
+        }
+
         guard let message = messagesById[id] else {
             return .zero
         }
+
+        if message.messageKind == .substrate {
+            let rowWidth = availableContentWidth()
+            let displayMessage = message.strippingProvenanceStampForDisplay()
+            let avatarAndSpacing: CGFloat = SubstrateRowCell.leadingIndent + 22 + 8 + 12
+            let textWidth = max(rowWidth - avatarAndSpacing, 0)
+            let font = UIFont.clawline(.secondaryLabel)
+            let measured = ("tightbeam \u{00B7} " + displayMessage.content as NSString).boundingRect(
+                with: CGSize(width: textWidth, height: .greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                attributes: [.font: font],
+                context: nil
+            )
+            return CGSize(width: rowWidth, height: ceil(measured.height) + 12)
+        }
+
         if bubbleSizingV2Enabled {
             let presentation = viewModel.presentation(for: message, metrics: metrics)
             let hideHeader = shouldHideHeader(for: message, presentation: presentation)
@@ -7420,7 +7563,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
         let snapshotMessages = lastMessages
         let desiredItemIds = snapshotItemsWithWebBubbles(
-            from: snapshotItemsWithDateSeparators(from: snapshotMessages),
+            from: snapshotItemsWithSubstrateRunCollapse(from: snapshotItemsWithDateSeparators(from: snapshotMessages)),
             stream: stream
         )
         snapshot.deleteAllItems()

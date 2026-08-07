@@ -3844,6 +3844,14 @@ enum ChatFlowUIKitTheme {
     static func textMuted(isDark: Bool) -> UIColor {
         palette(isDark: isDark).textMuted
     }
+
+    /// Substrate ghost-row text color: one step darker than textMuted so
+    /// de-emphasis never costs readability (bubble-additions.html Substrate spec).
+    static func textSubstrate(isDark: Bool) -> UIColor {
+        isDark
+            ? UIColor(red: 0.651, green: 0.604, blue: 0.549, alpha: 1)
+            : UIColor(red: 0.431, green: 0.380, blue: 0.329, alpha: 1)
+    }
 }
 
 final class TruncationFadeView: UIView {

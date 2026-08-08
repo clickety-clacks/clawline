@@ -34,20 +34,6 @@ final class StreamRenameFocusReviewUITests: XCTestCase {
         (element.value(forKey: "hasKeyboardFocus") as? Bool) ?? false
     }
 
-    private func waitForKeyboardFocus(
-        _ element: XCUIElement,
-        expected: Bool = true,
-        timeout: TimeInterval = 6
-    ) -> Bool {
-        let expectation = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in
-                self.hasKeyboardFocus(element) == expected
-            },
-            object: nil
-        )
-        return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
-    }
-
     private func waitForExistence(
         _ element: XCUIElement,
         expected: Bool,
@@ -58,6 +44,23 @@ final class StreamRenameFocusReviewUITests: XCTestCase {
             object: nil
         )
         return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    private func sampleFilterFocusSteals(
+        _ app: XCUIApplication,
+        duration: TimeInterval,
+        interval: TimeInterval = 0.1
+    ) -> Int {
+        let filter = filterField(in: app)
+        var steals = 0
+        let deadline = Date().addingTimeInterval(duration)
+        while Date() < deadline {
+            if filter.exists, hasKeyboardFocus(filter) {
+                steals += 1
+            }
+            Thread.sleep(forTimeInterval: interval)
+        }
+        return steals
     }
 
     @MainActor
@@ -76,11 +79,12 @@ final class StreamRenameFocusReviewUITests: XCTestCase {
     }
 
     private func assertPickerReadyAfterSubmit(_ app: XCUIApplication) {
+        Thread.sleep(forTimeInterval: 3.0)
         let rename = renameField(in: app)
         let filter = filterField(in: app)
         XCTAssertTrue(rename.waitForExistence(timeout: 6), "Failed or empty submit should preserve the draft")
-        XCTAssertTrue(waitForKeyboardFocus(rename, expected: false), "Submitted rename should release focus")
-        XCTAssertTrue(waitForKeyboardFocus(filter), "Filter should regain focus after submit")
+        XCTAssertFalse(hasKeyboardFocus(rename), "Submitted rename should release focus")
+        XCTAssertTrue(hasKeyboardFocus(filter), "Filter should hold focus after submit")
 
         let addStream = app.buttons["Add stream"].firstMatch
         XCTAssertTrue(addStream.waitForExistence(timeout: 6))
@@ -90,6 +94,9 @@ final class StreamRenameFocusReviewUITests: XCTestCase {
         if track.exists {
             XCTAssertTrue(track.isEnabled, "Track should be enabled after inline editing finishes")
         }
+
+        app.typeText("zz")
+        XCTAssertEqual(filter.value as? String, "zz", "Keystrokes after submit must reach the filter")
     }
 
     @MainActor
@@ -99,7 +106,7 @@ final class StreamRenameFocusReviewUITests: XCTestCase {
 
         let filter = filterField(in: app)
         XCTAssertTrue(filter.waitForExistence(timeout: 10), "Picker open should render the filter field")
-        XCTAssertTrue(waitForKeyboardFocus(filter), "Picker open should auto-focus the filter field")
+        XCTAssertTrue(hasKeyboardFocus(filter), "Picker open should auto-focus the filter field")
 
         app.typeText("ab")
         XCTAssertEqual(filter.value as? String, "ab", "Keystrokes after open should land in the filter")
@@ -112,18 +119,23 @@ final class StreamRenameFocusReviewUITests: XCTestCase {
 
         let filter = filterField(in: app)
         XCTAssertTrue(filter.waitForExistence(timeout: 10))
-        XCTAssertTrue(waitForKeyboardFocus(filter), "Precondition: filter is focused on open")
+        XCTAssertTrue(hasKeyboardFocus(filter), "Precondition: filter is focused on open")
 
         beginRename(in: app)
 
+        let handoffSteals = sampleFilterFocusSteals(app, duration: 2.5)
+        XCTAssertEqual(handoffSteals, 0, "Filter must never hold focus during rename handoff")
+
         let rename = renameField(in: app)
-        XCTAssertTrue(rename.waitForExistence(timeout: 6), "Inline rename field should appear")
-        XCTAssertTrue(waitForKeyboardFocus(rename), "Rename should take focus when editing begins")
+        XCTAssertTrue(rename.exists, "Inline rename field should appear")
+        XCTAssertTrue(hasKeyboardFocus(rename), "Rename should own focus after handoff")
 
         for character in ["X", "Y", "Z"] {
             app.typeText(character)
-            XCTAssertTrue(waitForKeyboardFocus(rename), "Rename must retain focus after typing \(character)")
+            XCTAssertTrue(hasKeyboardFocus(rename), "Rename must retain focus after typing \(character)")
             XCTAssertFalse(hasKeyboardFocus(filter), "Filter must not steal focus after typing \(character)")
+            let steals = sampleFilterFocusSteals(app, duration: 0.8)
+            XCTAssertEqual(steals, 0, "Filter must not bounce into focus after typing \(character)")
         }
 
         XCTAssertEqual(rename.value as? String, Self.fixtureStreamName + "XYZ")
@@ -176,7 +188,7 @@ final class StreamRenameFocusReviewUITests: XCTestCase {
         openPicker(app)
         let filter = filterField(in: app)
         XCTAssertTrue(filter.waitForExistence(timeout: 10))
-        XCTAssertTrue(waitForKeyboardFocus(filter), "Reopened picker should auto-focus the filter")
+        XCTAssertTrue(hasKeyboardFocus(filter), "Reopened picker should auto-focus the filter")
 
         let addStream = app.buttons["Add stream"].firstMatch
         XCTAssertTrue(addStream.waitForExistence(timeout: 6))

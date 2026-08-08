@@ -1027,6 +1027,12 @@ final class ChatViewModel {
     private var hasResolvedProvisioningCapability = true
     private var hasReceivedSessionProvisioning = false
     private var hasReceivedExplicitSessionInfo = false
+    // The only structurally reliable client-visible boundary signal today.
+    // No model or harness identity exists on the wire, so the divider uses
+    // the .sessionInfo firing time and message position without inventing a
+    // semantic kind or parsing message text.
+    private(set) var lastReliableBoundaryTimestamp: Date?
+
     private var accessibleSessionKeys: Set<String> = []
     private var accessibleSessionKeyOrder: [String] = []
     private var trackableSessionsBySessionKey: [String: TrackableSession] = [:]
@@ -4635,6 +4641,7 @@ final class ChatViewModel {
             supportsSessionProvisioning = true
             hasReceivedSessionProvisioning = true
             hasReceivedExplicitSessionInfo = true
+            lastReliableBoundaryTimestamp = Date()
             replaceAccessibleSessionKeys(with: info.sessionKeys)
             refreshTrackableSessions(reason: "sessionInfo")
             attemptPendingProvisionedSendIfPossible()
@@ -5056,6 +5063,7 @@ final class ChatViewModel {
         hasResolvedProvisioningCapability = false
         hasReceivedSessionProvisioning = false
         hasReceivedExplicitSessionInfo = false
+        lastReliableBoundaryTimestamp = nil
         accessibleSessionKeys.removeAll()
         accessibleSessionKeyOrder.removeAll()
         trackableSessionsBySessionKey.removeAll()

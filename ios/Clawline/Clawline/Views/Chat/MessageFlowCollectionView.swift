@@ -3495,7 +3495,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let snapshotItemIds = isShowingOnlyUserMessages
             ? snapshotMessageIds
             : snapshotItemsWithWebBubbles(
-                from: snapshotItemsWithSubstrateRunCollapse(from: snapshotItemsWithDateSeparators(from: snapshotMessages)),
+                from: snapshotItemsWithSubstrateRunCollapse(
+                    from: snapshotItemsWithMarkerDivider(
+                        from: snapshotItemsWithDateSeparators(from: snapshotMessages),
+                        messages: snapshotMessages
+                    )
+                ),
                 stream: effectiveStream
             )
         logScrollRestore(
@@ -3955,6 +3960,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             || id == SessionMetadataFooterCell.itemId
             || DateSeparatorCell.isDateSeparatorItemID(id)
             || id.hasPrefix(Self.substrateRunItemIdPrefix)
+            || MarkerDividerCell.isMarkerDividerItemID(id)
             || messagesById[id]?.messageKind == .substrate
     }
 
@@ -3985,6 +3991,25 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
         dateSeparatorTextByItemId = separatorTextByItemID
         return items
+    }
+
+    /// Insert one divider at the first message strictly after the latest
+    /// .sessionInfo firing. The boundary must fall inside the visible
+    /// transcript so the divider always separates real messages on both
+    /// sides. No semantic marker kind is inferred from message text.
+    private func snapshotItemsWithMarkerDivider(from items: [String], messages: [Message]) -> [String] {
+        guard let boundaryTimestamp = viewModel?.lastReliableBoundaryTimestamp else { return items }
+        guard let firstAfterIndex = messages.firstIndex(where: { $0.timestamp > boundaryTimestamp }),
+              firstAfterIndex > 0
+        else {
+            return items
+        }
+        let anchorMessageID = messages[firstAfterIndex].id
+        let dividerID = MarkerDividerCell.itemID(before: anchorMessageID)
+        guard let insertionIndex = items.firstIndex(of: anchorMessageID) else { return items }
+        var result = items
+        result.insert(dividerID, at: insertionIndex)
+        return result
     }
 
     private static let substrateRunItemIdPrefix = "__substrate_run__|"
@@ -4946,6 +4971,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         collectionView.register(SessionMetadataFooterCell.self, forCellWithReuseIdentifier: SessionMetadataFooterCell.reuseIdentifier)
         collectionView.register(SubstrateRowCell.self, forCellWithReuseIdentifier: SubstrateRowCell.reuseIdentifier)
         collectionView.register(SubstrateRunCollapseCell.self, forCellWithReuseIdentifier: SubstrateRunCollapseCell.reuseIdentifier)
+        collectionView.register(MarkerDividerCell.self, forCellWithReuseIdentifier: MarkerDividerCell.reuseIdentifier)
 
         view.addSubview(collectionView)
         // Frame will be set in viewDidLayoutSubviews to extend to window bounds
@@ -5065,6 +5091,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 ) as? DateSeparatorCell
                 let text = self.dateSeparatorTextByItemId[id] ?? ""
                 cell?.configure(text: text, isDark: self.currentIsDark)
+                return cell
+            }
+
+            if MarkerDividerCell.isMarkerDividerItemID(id) {
+                let cell = collectionView.dequeueReusableCell(
+                    withReuseIdentifier: MarkerDividerCell.reuseIdentifier,
+                    for: indexPath
+                ) as? MarkerDividerCell
+                cell?.configure(content: .sessionBoundary, isDark: self.currentIsDark)
                 return cell
             }
 
@@ -5476,6 +5511,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         guard id != TypingIndicatorCell.itemId,
               id != SessionMetadataFooterCell.itemId,
               !DateSeparatorCell.isDateSeparatorItemID(id),
+              !MarkerDividerCell.isMarkerDividerItemID(id),
               !id.hasPrefix("web_") else {
             return false
         }
@@ -5497,6 +5533,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if DateSeparatorCell.isDateSeparatorItemID(id) { return 3 }
         if id.hasPrefix("web_") { return 4 }
         if messagesById[id] != nil { return 5 }
+        if MarkerDividerCell.isMarkerDividerItemID(id) { return 6 }
         return 0
     }
 
@@ -5717,6 +5754,17 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             return CGSize(
                 width: rowWidth,
                 height: ceil(lineHeight + DateSeparatorCell.topPadding + DateSeparatorCell.bottomPadding)
+            )
+        }
+
+        if MarkerDividerCell.isMarkerDividerItemID(id) {
+            let rowWidth = availableContentWidth()
+            let lineHeight = UIFont.clawline(.timestamp, weight: .semibold).lineHeight
+            let iconHeight: CGFloat = 18
+            let contentHeight = max(lineHeight, iconHeight)
+            return CGSize(
+                width: rowWidth,
+                height: ceil(contentHeight + MarkerDividerCell.verticalPadding * 2)
             )
         }
 
@@ -7563,7 +7611,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
         let snapshotMessages = lastMessages
         let desiredItemIds = snapshotItemsWithWebBubbles(
-            from: snapshotItemsWithSubstrateRunCollapse(from: snapshotItemsWithDateSeparators(from: snapshotMessages)),
+            from: snapshotItemsWithSubstrateRunCollapse(
+                from: snapshotItemsWithMarkerDivider(
+                    from: snapshotItemsWithDateSeparators(from: snapshotMessages),
+                    messages: snapshotMessages
+                )
+            ),
             stream: stream
         )
         snapshot.deleteAllItems()

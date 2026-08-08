@@ -54,9 +54,16 @@ struct ClawlineApp: App {
         )
         self.deviceIdentifier = coreServices.deviceIdentifier
         self.connectionService = coreServices.connectionService
-        let chatService = coreServices.chatService
-        self.chatService = chatService
         self.uploadService = coreServices.uploadService
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--debug-goalA-fixture-transcript") {
+            self.chatService = GoalAFixtureChatService()
+        } else {
+            self.chatService = coreServices.chatService
+        }
+#else
+        self.chatService = coreServices.chatService
+#endif
     }
 
     var body: some Scene {

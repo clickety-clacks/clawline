@@ -2,10 +2,11 @@
 //  MarkerDividerCell.swift
 //  Clawline
 //
-//  A session-info firing is the only structurally reliable boundary signal
-//  available on the wire today. The collection view places this divider at
-//  that boundary and supplies the minimal honest presentation below. Rich
-//  kind/from/to labels stay deferred until a typed marker payload exists.
+//  Dormant: the wire carries no marker signal today (no messageType, no
+//  boundary event a client can trust), so nothing currently inserts this
+//  divider into a snapshot. It renders correctly and stays ready for a
+//  future typed marker payload to wire it back up (MessageKindClassifier
+//  already treats .marker as reachable only via an explicit wire type).
 //
 
 import UIKit

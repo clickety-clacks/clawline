@@ -184,12 +184,13 @@ final class GoalAFixtureChatService: ChatServicing {
     /// `[from <sender>]` first-line stamp -- the same convention
     /// MessageKindClassifierTests / MessageProvenanceTests validate),
     /// timed with real delays so the collection view's normal
-    /// insert/animate path runs, not a single frozen batch. Two
-    /// consecutive substrate rows early (run-collapse), a .sessionInfo
-    /// firing partway through (marker-divider anchor / segment-anchor entry
-    /// point), a substrate row and an agent-compact line after it --
-    /// covering ghost rows, run-collapse, the marker boundary, and the
-    /// agent-compact seam in one real transcript.
+    /// insert/animate path runs, not a single frozen batch. Two consecutive
+    /// substrate rows early plus a third after a .sessionInfo firing
+    /// (run-collapse growing from 2 to 3 members), a substrate row and an
+    /// agent-compact line after it -- covering ghost rows, run-collapse,
+    /// and the agent-compact seam in one real transcript. No marker
+    /// boundary: the wire carries no marker signal today, so production
+    /// correctly renders no divider here.
     private func emitFixtureTranscript() async {
         // Real ingestion path (see the messagesContinuation note above): encode
         // each Message as the same ServerMessagePayload/"message" envelope shape

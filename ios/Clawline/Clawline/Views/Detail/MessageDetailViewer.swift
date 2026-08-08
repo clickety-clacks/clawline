@@ -123,16 +123,27 @@ struct MessageDetailContentView: View {
     private var metrics: ChatFlowTheme.Metrics { ChatFlowTheme.Metrics(isCompact: false) }
     private var bodyFont: UIFont { UIFont.clawline(.bodyText) }
 
+    private var renderedBlocks: [RenderedMarkdownBlock] {
+        Self.renderedBlocks(for: message, baseFont: bodyFont, colorScheme: colorScheme, metrics: metrics)
+    }
+
     /// Stamp-stripped so the raw `[from <sender>]` first line (present on
     /// substrate/agent messages) never duplicates what `header` already
-    /// shows via `message.displayName`.
-    private var renderedBlocks: [RenderedMarkdownBlock] {
+    /// shows via `message.displayName`. A static func (same convention as
+    /// ExpandedMessageSheet.renderedBlocks) so this is unit-testable without
+    /// a SwiftUI view instance.
+    static func renderedBlocks(
+        for message: Message,
+        baseFont: UIFont,
+        colorScheme: ColorScheme,
+        metrics: ChatFlowTheme.Metrics
+    ) -> [RenderedMarkdownBlock] {
         let displayMessage = message.strippingProvenanceStampForDisplay()
         let context = MarkdownMessageRenderContext(role: message.role, messageID: message.id, metrics: metrics)
         let rendered = UnifiedMarkdownRenderer.makeContent(
             messageText: displayMessage.content,
             context: context,
-            baseFont: bodyFont,
+            baseFont: baseFont,
             inkColor: UIColor(ChatFlowTheme.ink(colorScheme)),
             lineSpacing: 4,
             stripDetectedURLs: false,

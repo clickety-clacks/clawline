@@ -5862,6 +5862,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
 
         if message.messageKind == .substrate {
+            // Same cache seam the regular bubble path below uses (readSizeState/
+            // writeMeasuredSize, keyed by messageId) -- an uncached boundingRect
+            // on every layout pass is the exact main-thread measurement churn
+            // the MessageFlow hotspot's performance gate forbids. Invalidation
+            // (.messageChanged) already clears this cache per messageId, so
+            // reusing it here needs no new invalidation wiring.
+            if let cached = readSizeState(messageId: id, env: env) {
+                return cached.size
+            }
             let rowWidth = availableContentWidth()
             let displayMessage = message.strippingProvenanceStampForDisplay()
             let avatarAndSpacing: CGFloat = SubstrateRowCell.leadingIndent + 22 + 8 + 12
@@ -5873,7 +5882,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 attributes: [.font: font],
                 context: nil
             )
-            return CGSize(width: rowWidth, height: ceil(measured.height) + 12)
+            let size = CGSize(width: rowWidth, height: ceil(measured.height) + 12)
+            _ = writeMeasuredSize(messageId: id, measurement: size)
+            return size
         }
 
         if message.messageKind == .agent {

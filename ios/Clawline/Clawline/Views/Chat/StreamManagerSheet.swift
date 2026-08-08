@@ -180,6 +180,7 @@ struct StreamManagerSheet: View {
             && selectorShortcutsAvailable
             && searchFocusRequestID == nil
             && !isSearchFieldFocused
+            && activeEditor == nil
     }
 
     private var shouldRenderSearchTextField: Bool {
@@ -189,7 +190,8 @@ struct StreamManagerSheet: View {
     }
 
     private var activeSearchFocusRequestID: Int? {
-        searchFocusRequestID ?? (localSearchFocusRequestID > 0 ? localSearchFocusRequestID : nil)
+        guard activeEditor == nil else { return nil }
+        return searchFocusRequestID ?? (localSearchFocusRequestID > 0 ? localSearchFocusRequestID : nil)
     }
 
     private var selectableShortcutSessionKeys: [String] {

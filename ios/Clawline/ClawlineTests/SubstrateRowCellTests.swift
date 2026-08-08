@@ -49,10 +49,29 @@ struct SubstrateRowCellTests {
             detail: displayMessage.content,
             style: .liveVoice,
             isDark: false,
-            isIndentedUnderRun: false
+            isIndentedUnderRun: false,
+            onTap: {}
         )
         #expect(displayMessage.content == "check-in: the design assignment has an open obligation and no filing this turn")
-        #expect(cell.accessibilityLabel == "tightbeam. check-in: the design assignment has an open obligation and no filing this turn")
+        #expect(cell.accessibilityLabel == "tightbeam. check-in: the design assignment has an open obligation and no filing this turn. Open full content.")
+    }
+
+    @Test("SubstrateRowCell tap invokes the supplied click-to-detail closure")
+    @MainActor
+    func substrateRowTapInvokesClosure() {
+        let message = substrateMessage(content: "escalation: helper session missed two check-ins")
+        let cell = SubstrateRowCell()
+        var tapped = false
+        cell.configure(
+            leadLabel: "tightbeam",
+            detail: message.strippingProvenanceStampForDisplay().content,
+            style: .liveVoice,
+            isDark: false,
+            isIndentedUnderRun: false,
+            onTap: { tapped = true }
+        )
+        cell.handleTap()
+        #expect(tapped)
     }
 
     @Test("SubstrateRunCollapseCell renders the tightbeam N notices label and exposes expanded state via accessibility")

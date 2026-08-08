@@ -557,6 +557,7 @@ struct ChatView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.settingsManager) private var settings
+    @Environment(\.openDetail) private var openDetail
 
     @State private var inputBarHeight: CGFloat = 0
     @State private var settledInputBarHeight: CGFloat = 0
@@ -2828,6 +2829,9 @@ struct ChatView: View {
             onExpand: { message in
                 activeSheet = .expandedMessage(message)
             },
+            onOpenDetail: { message in
+                openDetail(for: message)
+            },
             layoutCoordinator: layoutCoordinator,
             sessionKey: sessionKey,
             sessionStatus: viewModel.sessionStatus(for: sessionKey),
@@ -3022,6 +3026,7 @@ struct ChatView: View {
                 firstUnreadMessageId: nil,
                 unreadCount: 0,
                 onExpand: nil,
+                onOpenDetail: nil,
                 layoutCoordinator: layoutCoordinator,
                 // Do not register prewarm shells as live session list views.
                 shouldRegisterWithLayoutCoordinator: false,

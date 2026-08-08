@@ -181,6 +181,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     var firstUnreadMessageId: String?
     var unreadCount: Int
     var onExpand: ((Message) -> Void)?
+    var onOpenDetail: ((Message) -> Void)?
     var layoutCoordinator: ChatLayoutCoordinator
     var shouldRegisterWithLayoutCoordinator: Bool = true
     /// Optional session override - if provided, shows messages for this session instead of activeSessionKey
@@ -237,6 +238,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             firstUnreadMessageId: firstUnreadMessageId,
             unreadCount: unreadCount,
             onExpand: onExpand,
+            onOpenDetail: onOpenDetail,
             sessionKey: sessionKey,
             sessionStatus: sessionStatus,
             sessionStatusUnavailable: sessionStatusUnavailable,
@@ -280,6 +282,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             firstUnreadMessageId: firstUnreadMessageId,
             unreadCount: unreadCount,
             onExpand: onExpand,
+            onOpenDetail: onOpenDetail,
             sessionKey: sessionKey,
             sessionStatus: sessionStatus,
             sessionStatusUnavailable: sessionStatusUnavailable,
@@ -326,6 +329,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let firstUnreadMessageId: String?
         let unreadCount: Int
         let onExpand: ((Message) -> Void)?
+        let onOpenDetail: ((Message) -> Void)?
         let sessionKey: String?
         let sessionStatus: SessionStatus?
         let sessionStatusUnavailable: Bool
@@ -485,6 +489,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     /// Message ids currently shown individually because their run is
     /// expanded (drives SubstrateRowCell's indent-under-run presentation).
     private var expandedRunMemberMessageIds: Set<String> = []
+    /// Segment-anchor (step 3b): transient UI state (never persisted), toggled
+    /// by tapping the marker divider. When true, everything before the last
+    /// reliable boundary (ChatViewModel.lastReliableBoundaryTimestamp) is
+    /// hidden from the snapshot.
+    private var isSegmentAnchorActive: Bool = false
     private struct PerStreamRuntimeState {
         typealias MessageLoadCallback = @MainActor () -> Void
 
@@ -606,6 +615,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var currentHarnessOptions: [String]?
     private var currentFontScaleChangeSequence: Int = 0
     private var onExpand: ((Message) -> Void)?
+    private var onOpenDetail: ((Message) -> Void)?
     private var onScrollEvent: (@MainActor (MessageFlowScrollEvent) -> Void)?
     private var onTypingIndicatorTap: (@MainActor (CGRect) -> Void)?
     private var onTypingIndicatorAnchorFrameChanged: (@MainActor (CGRect?) -> Void)?
@@ -1772,6 +1782,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 firstUnreadMessageId: firstUnreadMessageId,
                 unreadCount: unreadCount,
                 onExpand: onExpand,
+                onOpenDetail: onOpenDetail,
                 sessionKey: channelOverride,
                 sessionStatus: sessionStatus,
                 forceReReadGeneration: 0,
@@ -2477,6 +2488,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             firstUnreadMessageId: firstUnreadMessageId,
             unreadCount: unreadCount,
             onExpand: onExpand,
+            onOpenDetail: onOpenDetail,
             sessionKey: channelOverride,
             sessionStatus: sessionStatus,
             sessionStatusUnavailable: sessionStatusUnavailable,
@@ -2736,6 +2748,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             firstUnreadMessageId: firstUnreadMessageId,
             unreadCount: unreadCount,
             onExpand: onExpand,
+            onOpenDetail: onOpenDetail,
             sessionKey: channelOverride,
             sessionStatus: sessionStatus,
             sessionStatusUnavailable: sessionStatusUnavailable,
@@ -2960,6 +2973,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 firstUnreadMessageId: request.firstUnreadMessageId,
                 unreadCount: request.unreadCount,
                 onExpand: request.onExpand,
+                onOpenDetail: request.onOpenDetail,
                 sessionKey: request.sessionKey,
                 sessionStatus: request.sessionStatus,
                 sessionStatusUnavailable: request.sessionStatusUnavailable,
@@ -3085,6 +3099,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         firstUnreadMessageId: String?,
         unreadCount: Int,
         onExpand: ((Message) -> Void)? = nil,
+        onOpenDetail: ((Message) -> Void)? = nil,
         sessionKey: String? = nil,
         sessionStatus: SessionStatus? = nil,
         sessionStatusUnavailable: Bool = false,
@@ -3119,6 +3134,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             firstUnreadMessageId: firstUnreadMessageId,
             unreadCount: unreadCount,
             onExpand: onExpand,
+            onOpenDetail: onOpenDetail,
             sessionKey: sessionKey,
             sessionStatus: sessionStatus,
             sessionStatusUnavailable: sessionStatusUnavailable,
@@ -3207,6 +3223,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         self.liveProgress = nextLiveProgress
         self.currentSendIndicatorRevision = request.sendIndicatorRevision
         self.onExpand = onExpand
+        self.onOpenDetail = onOpenDetail
         self.truncationBottomInset = truncationBottomInset
         self.onScrollEvent = onScrollEvent
         self.onTypingIndicatorTap = onTypingIndicatorTap
@@ -3496,9 +3513,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             ? snapshotMessageIds
             : snapshotItemsWithWebBubbles(
                 from: snapshotItemsWithSubstrateRunCollapse(
-                    from: snapshotItemsWithMarkerDivider(
-                        from: snapshotItemsWithDateSeparators(from: snapshotMessages),
-                        messages: snapshotMessages
+                    from: snapshotItemsWithSegmentAnchor(
+                        from: snapshotItemsWithMarkerDivider(
+                            from: snapshotItemsWithDateSeparators(from: snapshotMessages),
+                            messages: snapshotMessages
+                        )
                     )
                 ),
                 stream: effectiveStream
@@ -3962,6 +3981,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             || id.hasPrefix(Self.substrateRunItemIdPrefix)
             || MarkerDividerCell.isMarkerDividerItemID(id)
             || messagesById[id]?.messageKind == .substrate
+            || messagesById[id]?.messageKind == .agent
     }
 
     private func snapshotItemsWithDateSeparators(from messages: [Message]) -> [String] {
@@ -3997,7 +4017,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     /// .sessionInfo firing. The boundary must fall inside the visible
     /// transcript so the divider always separates real messages on both
     /// sides. No semantic marker kind is inferred from message text.
+    ///
+    /// OpenClaw invariant: `.sessionInfo` fires on auth success for ANY
+    /// backend, tightbeam or OpenClaw -- it is not itself a tightbeam-only
+    /// signal, unlike the classifier's provenance-origin heuristic. Gate on
+    /// `isTightbeamServer` (the same flag `showsProvenanceChrome` already
+    /// uses for this exact concern) so an OpenClaw session never grows a
+    /// divider it didn't have before.
     private func snapshotItemsWithMarkerDivider(from items: [String], messages: [Message]) -> [String] {
+        guard viewModel?.isTightbeamServer == true else { return items }
         guard let boundaryTimestamp = viewModel?.lastReliableBoundaryTimestamp else { return items }
         guard let firstAfterIndex = messages.firstIndex(where: { $0.timestamp > boundaryTimestamp }),
               firstAfterIndex > 0
@@ -4010,6 +4038,29 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         var result = items
         result.insert(dividerID, at: insertionIndex)
         return result
+    }
+
+    /// Segment-anchor (step 3b): when active, hides everything STRICTLY
+    /// BEFORE the marker divider -- a transient VIEW of the already-built
+    /// item list, not a reclassification, so it adds no new measurement or
+    /// grouping work. A no-op when no divider is present (nothing to anchor
+    /// on yet). The divider itself is deliberately KEPT (not sliced away):
+    /// it is the only tap target that toggles this state, so dropping it
+    /// once anchored would strand the user with no affordance to un-anchor.
+    private func snapshotItemsWithSegmentAnchor(from items: [String]) -> [String] {
+        guard isSegmentAnchorActive,
+              let dividerIndex = items.firstIndex(where: { MarkerDividerCell.isMarkerDividerItemID($0) })
+        else {
+            return items
+        }
+        return Array(items[dividerIndex...])
+    }
+
+    /// Toggle segment-anchor and reapply the snapshot, same reentrancy-safe
+    /// path as toggleSubstrateRunExpansion (crash history #140/#148/#149).
+    private func toggleSegmentAnchor() {
+        isSegmentAnchorActive.toggle()
+        applySnapshotForWebBubbles()
     }
 
     private static let substrateRunItemIdPrefix = "__substrate_run__|"
@@ -4972,6 +5023,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         collectionView.register(SubstrateRowCell.self, forCellWithReuseIdentifier: SubstrateRowCell.reuseIdentifier)
         collectionView.register(SubstrateRunCollapseCell.self, forCellWithReuseIdentifier: SubstrateRunCollapseCell.reuseIdentifier)
         collectionView.register(MarkerDividerCell.self, forCellWithReuseIdentifier: MarkerDividerCell.reuseIdentifier)
+        collectionView.register(AgentCompactCell.self, forCellWithReuseIdentifier: AgentCompactCell.reuseIdentifier)
 
         view.addSubview(collectionView)
         // Frame will be set in viewDidLayoutSubviews to extend to window bounds
@@ -5099,7 +5151,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                     withReuseIdentifier: MarkerDividerCell.reuseIdentifier,
                     for: indexPath
                 ) as? MarkerDividerCell
-                cell?.configure(content: .sessionBoundary, isDark: self.currentIsDark)
+                cell?.configure(
+                    content: .sessionBoundary,
+                    isDark: self.currentIsDark,
+                    isSegmentAnchorActive: self.isSegmentAnchorActive,
+                    onTap: { [weak self] in
+                        self?.toggleSegmentAnchor()
+                    }
+                )
                 return cell
             }
 
@@ -5206,7 +5265,27 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                     detail: displayMessage.content,
                     style: .liveVoice,
                     isDark: self.currentIsDark,
-                    isIndentedUnderRun: self.expandedRunMemberMessageIds.contains(id)
+                    isIndentedUnderRun: self.expandedRunMemberMessageIds.contains(id),
+                    onTap: { [weak self] in
+                        self?.onOpenDetail?(message)
+                    }
+                )
+                return cell
+            }
+
+            if message.messageKind == .agent, case let .agent(handle)? = message.provenanceOrigin {
+                let cell = collectionView.dequeueReusableCell(
+                    withReuseIdentifier: AgentCompactCell.reuseIdentifier,
+                    for: indexPath
+                ) as? AgentCompactCell
+                let displayMessage = message.strippingProvenanceStampForDisplay()
+                cell?.configure(
+                    senderLine: AgentCompactCell.displaySenderLine(forHandle: handle),
+                    previewText: AgentCompactCell.firstLine(of: displayMessage.content),
+                    isDark: self.currentIsDark,
+                    onTap: { [weak self] in
+                        self?.onOpenDetail?(message)
+                    }
                 )
                 return cell
             }
@@ -5838,6 +5917,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 context: nil
             )
             return CGSize(width: rowWidth, height: ceil(measured.height) + 12)
+        }
+
+        if message.messageKind == .agent {
+            let rowWidth = availableContentWidth()
+            let lineHeight = UIFont.clawline(.secondaryLabel, weight: .semibold).lineHeight
+            return CGSize(width: rowWidth, height: ceil(lineHeight) + 10)
         }
 
         if bubbleSizingV2Enabled {
@@ -7612,9 +7697,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let snapshotMessages = lastMessages
         let desiredItemIds = snapshotItemsWithWebBubbles(
             from: snapshotItemsWithSubstrateRunCollapse(
-                from: snapshotItemsWithMarkerDivider(
-                    from: snapshotItemsWithDateSeparators(from: snapshotMessages),
-                    messages: snapshotMessages
+                from: snapshotItemsWithSegmentAnchor(
+                    from: snapshotItemsWithMarkerDivider(
+                        from: snapshotItemsWithDateSeparators(from: snapshotMessages),
+                        messages: snapshotMessages
+                    )
                 )
             ),
             stream: stream

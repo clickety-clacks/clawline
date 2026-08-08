@@ -7,6 +7,12 @@
 //  that boundary and supplies the minimal honest presentation below. Rich
 //  kind/from/to labels stay deferred until a typed marker payload exists.
 //
+//  Cycle-3 Goal A, step 3b. The divider doubles as the segment-anchor's
+//  entry point: tapping it toggles show-only-since-this-boundary. No
+//  separate chrome is added for this -- the divider is already the one
+//  place in the UI that names the boundary, so it is the natural (and
+//  minimal) place to act on it.
+//
 
 import UIKit
 
@@ -33,15 +39,17 @@ final class MarkerDividerCell: UICollectionViewCell {
     private let flagView = MarkerFlagView()
     private let label = UILabel()
     private let stack = UIStackView()
+    private var onTap: (() -> Void)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         contentView.backgroundColor = .clear
         backgroundColor = .clear
+        contentView.isUserInteractionEnabled = true
+        contentView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap)))
 
         configureRule(leadingRule)
         configureRule(trailingRule)
-        leadingRule.widthAnchor.constraint(equalTo: trailingRule.widthAnchor).isActive = true
 
         flagView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -68,6 +76,12 @@ final class MarkerDividerCell: UICollectionViewCell {
         stack.addArrangedSubview(trailingRule)
         contentView.addSubview(stack)
 
+        // Activated only now: leadingRule/trailingRule need a common ancestor
+        // (the stack, via addArrangedSubview above) before a cross-view
+        // constraint between them can activate -- doing this earlier crashes
+        // ("no common ancestor") the instant a divider is instantiated.
+        leadingRule.widthAnchor.constraint(equalTo: trailingRule.widthAnchor).isActive = true
+
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
@@ -76,14 +90,25 @@ final class MarkerDividerCell: UICollectionViewCell {
         ])
 
         isAccessibilityElement = true
-        accessibilityTraits = .header
+        accessibilityTraits = .button
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func configure(content: MarkerDividerContent, isDark: Bool) {
+    /// - Parameters:
+    ///   - isSegmentAnchorActive: current transient show-only-since-this-boundary
+    ///     state, drives the accessibility value (grouping/boundary detection
+    ///     itself is unaffected -- this cell only reports and toggles it).
+    ///   - onTap: toggles segment-anchor; caller re-applies the snapshot.
+    func configure(
+        content: MarkerDividerContent,
+        isDark: Bool,
+        isSegmentAnchorActive: Bool,
+        onTap: @escaping () -> Void
+    ) {
+        self.onTap = onTap
         let borderColor = isDark
             ? UIColor(red: 0.651, green: 0.565, blue: 0.439, alpha: 0.38)
             : UIColor(red: 0.486, green: 0.376, blue: 0.235, alpha: 0.30)
@@ -99,12 +124,22 @@ final class MarkerDividerCell: UICollectionViewCell {
             attributes: [.font: label.font as Any, .foregroundColor: textColor, .kern: 0.6]
         )
         accessibilityLabel = content.accessibilityLabel
+        accessibilityValue = isSegmentAnchorActive ? "Showing only since this boundary" : nil
     }
 
     override func prepareForReuse() {
         super.prepareForReuse()
         label.attributedText = nil
         accessibilityLabel = nil
+        accessibilityValue = nil
+        onTap = nil
+    }
+
+    /// Internal (not private) so the tap path is directly unit-testable
+    /// without simulating a UIGestureRecognizer from the test target
+    /// (same convention as SubstrateRunCollapseCell.handleTap()).
+    @objc func handleTap() {
+        onTap?()
     }
 
     static func itemID(before messageID: String) -> String {

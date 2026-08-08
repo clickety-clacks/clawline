@@ -3852,6 +3852,21 @@ enum ChatFlowUIKitTheme {
             ? UIColor(red: 0.651, green: 0.604, blue: 0.549, alpha: 1)
             : UIColor(red: 0.431, green: 0.380, blue: 0.329, alpha: 1)
     }
+
+    /// Harbor accent: agent sender name + trailing affordance on the
+    /// agent-compact line (bubble-additions.html --agent-accent).
+    static func agentAccent(isDark: Bool) -> UIColor {
+        isDark
+            ? UIColor(red: 0.561, green: 0.698, blue: 0.776, alpha: 1)
+            : UIColor(red: 0.243, green: 0.365, blue: 0.447, alpha: 1)
+    }
+
+    /// Agent-compact preview text (bubble-additions.html --text-agent-line).
+    static func textAgentLine(isDark: Bool) -> UIColor {
+        isDark
+            ? UIColor(red: 0.624, green: 0.694, blue: 0.741, alpha: 1)
+            : UIColor(red: 0.290, green: 0.365, blue: 0.416, alpha: 1)
+    }
 }
 
 final class TruncationFadeView: UIView {

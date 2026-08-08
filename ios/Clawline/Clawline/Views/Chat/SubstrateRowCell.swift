@@ -99,9 +99,13 @@ final class SubstrateStoneAvatarView: UIView {
 }
 
 /// A single substrate ghost row: one classified message rendered chromeless,
-/// full width, 13pt text. Not interactive — only the collapsed-run summary
-/// row (SubstrateRunCollapseCell) is a tap target; an individual row (lone
-/// message or an expanded member of a run) is static text.
+/// full width, 13pt text. Cycle-3 Goal A step 5: the whole row is a real
+/// button -- tapping opens the message's full contents via the
+/// click-to-detail bridge (MessageDetailAction.swift), same contract as
+/// SubstrateRunCollapseCell's tap-to-expand and AgentCompactCell's
+/// tap-to-detail. This applies whether the row is a lone message or an
+/// expanded member of a run; only the collapsed-run SUMMARY row
+/// (SubstrateRunCollapseCell) has the separate expand/collapse tap.
 final class SubstrateRowCell: UICollectionViewCell {
     static let reuseIdentifier = "SubstrateRowCell"
     static let leadingIndent: CGFloat = 12
@@ -110,11 +114,14 @@ final class SubstrateRowCell: UICollectionViewCell {
     private let avatarView = SubstrateStoneAvatarView()
     private let textLabel = UILabel()
     private var indentConstraint: NSLayoutConstraint?
+    private var onTap: (() -> Void)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         contentView.backgroundColor = .clear
         backgroundColor = .clear
+        contentView.isUserInteractionEnabled = true
+        contentView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap)))
 
         avatarView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(avatarView)
@@ -140,7 +147,7 @@ final class SubstrateRowCell: UICollectionViewCell {
         ])
 
         isAccessibilityElement = true
-        accessibilityTraits = .staticText
+        accessibilityTraits = .button
     }
 
     required init?(coder: NSCoder) {
@@ -157,13 +164,16 @@ final class SubstrateRowCell: UICollectionViewCell {
     ///   - isIndentedUnderRun: true when this row is a member of an EXPANDED
     ///     run, stacked under the shared waypoint (bubble-additions.html
     ///     "Collapsed Run" — expanded rows indent under the run's avatar).
+    ///   - onTap: opens full contents via the click-to-detail bridge.
     func configure(
         leadLabel: String,
         detail: String,
         style: SubstrateRowStyle,
         isDark: Bool,
-        isIndentedUnderRun: Bool
+        isIndentedUnderRun: Bool,
+        onTap: @escaping () -> Void
     ) {
+        self.onTap = onTap
         avatarView.configure(style: style)
         avatarView.isHidden = isIndentedUnderRun
         indentConstraint?.constant = isIndentedUnderRun ? Self.expandedStackIndent : Self.leadingIndent
@@ -185,7 +195,7 @@ final class SubstrateRowCell: UICollectionViewCell {
         )
         lead.append(rest)
         textLabel.attributedText = lead
-        accessibilityLabel = "\(leadLabel). \(detail)"
+        accessibilityLabel = "\(leadLabel). \(detail). Open full content."
     }
 
     override func prepareForReuse() {
@@ -193,5 +203,12 @@ final class SubstrateRowCell: UICollectionViewCell {
         textLabel.attributedText = nil
         avatarView.isHidden = false
         indentConstraint?.constant = Self.leadingIndent
+        onTap = nil
+    }
+
+    /// Internal (not private) so the tap path is directly unit-testable,
+    /// same convention as SubstrateRunCollapseCell.handleTap().
+    @objc func handleTap() {
+        onTap?()
     }
 }

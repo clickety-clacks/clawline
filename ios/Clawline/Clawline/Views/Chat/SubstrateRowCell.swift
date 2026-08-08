@@ -195,7 +195,18 @@ final class SubstrateRowCell: UICollectionViewCell {
         )
         lead.append(rest)
         textLabel.attributedText = lead
-        accessibilityLabel = "\(leadLabel). \(detail). Open full content."
+        // Leads with the kind (bubble-additions.html: "Screen reader labels
+        // lead with the kind" -- "notice from tightbeam substrate" for live
+        // voice, "event: <name>" for records), same requirement AgentCompactCell
+        // already meets with "Agent report from <sender>. Open full content."
+        let kindPrefix: String
+        switch style {
+        case .liveVoice:
+            kindPrefix = "Notice from tightbeam substrate"
+        case .record:
+            kindPrefix = "Event: \(leadLabel)"
+        }
+        accessibilityLabel = "\(kindPrefix). \(detail). Open full content."
     }
 
     override func prepareForReuse() {

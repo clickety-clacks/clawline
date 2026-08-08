@@ -121,11 +121,18 @@ final class AgentCompactCell: UICollectionViewCell {
     static let reuseIdentifier = "AgentCompactCell"
     static let leadingIndent: CGFloat = 12
 
+    private let washView = UIView()
     private let avatarView = AgentRelayAvatarView()
     private let senderLabel = UILabel()
     private let previewLabel = UILabel()
     private let moreLabel = UILabel()
     private var onTap: (() -> Void)?
+    /// Trackpad/mouse hover on iPad and Catalyst -- UICollectionViewCell's
+    /// own isHighlighted already covers the press state; this tracks the
+    /// separate hover state UIHoverGestureRecognizer reports.
+    private var isHovered = false {
+        didSet { updateWashVisibility() }
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -133,11 +140,25 @@ final class AgentCompactCell: UICollectionViewCell {
         backgroundColor = .clear
         contentView.isUserInteractionEnabled = true
         contentView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap)))
+        contentView.addGestureRecognizer(UIHoverGestureRecognizer(target: self, action: #selector(handleHover(_:))))
+
+        // Faint harbor wash on hover/press (bubble-additions.html: 8-10%
+        // alpha, 12px radius). Inserted below every other subview so it
+        // never paints over the avatar/text/affordance.
+        washView.translatesAutoresizingMaskIntoConstraints = false
+        washView.isUserInteractionEnabled = false
+        washView.layer.cornerRadius = 12
+        washView.alpha = 0
+        contentView.insertSubview(washView, at: 0)
 
         contentView.addSubview(avatarView)
 
         senderLabel.translatesAutoresizingMaskIntoConstraints = false
-        senderLabel.font = UIFont.clawline(.secondaryLabel, weight: .semibold)
+        // 12px/600 per spec -- .senderName already bakes in exactly that
+        // (caption1 + semibold), same role ExpandedMessageSheet uses for
+        // sender display. .secondaryLabel here was the 13px preview-text
+        // size, one step too large for the sender role.
+        senderLabel.font = UIFont.clawline(.senderName)
         senderLabel.adjustsFontForContentSizeCategory = true
         senderLabel.numberOfLines = 1
         senderLabel.setContentHuggingPriority(.required, for: .horizontal)
@@ -160,6 +181,10 @@ final class AgentCompactCell: UICollectionViewCell {
         contentView.addSubview(moreLabel)
 
         NSLayoutConstraint.activate([
+            washView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            washView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            washView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            washView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             avatarView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Self.leadingIndent),
             avatarView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
             senderLabel.leadingAnchor.constraint(equalTo: avatarView.trailingAnchor, constant: 10),
@@ -196,6 +221,7 @@ final class AgentCompactCell: UICollectionViewCell {
         previewLabel.text = previewText
         previewLabel.textColor = ChatFlowUIKitTheme.textAgentLine(isDark: isDark)
         moreLabel.textColor = accent
+        washView.backgroundColor = accent.withAlphaComponent(0.09)
         accessibilityLabel = "Agent report from \(senderLine). Open full content."
     }
 
@@ -205,6 +231,24 @@ final class AgentCompactCell: UICollectionViewCell {
         previewLabel.text = nil
         accessibilityLabel = nil
         onTap = nil
+        isHovered = false
+    }
+
+    override var isHighlighted: Bool {
+        didSet { updateWashVisibility() }
+    }
+
+    private func updateWashVisibility() {
+        washView.alpha = (isHighlighted || isHovered) ? 1 : 0
+    }
+
+    @objc private func handleHover(_ recognizer: UIHoverGestureRecognizer) {
+        switch recognizer.state {
+        case .began, .changed:
+            isHovered = true
+        default:
+            isHovered = false
+        }
     }
 
     /// Internal (not private) so the tap path is directly unit-testable,

@@ -53,7 +53,7 @@ struct SubstrateRowCellTests {
             onTap: {}
         )
         #expect(displayMessage.content == "check-in: the design assignment has an open obligation and no filing this turn")
-        #expect(cell.accessibilityLabel == "tightbeam. check-in: the design assignment has an open obligation and no filing this turn. Open full content.")
+        #expect(cell.accessibilityLabel == "Notice from tightbeam substrate. check-in: the design assignment has an open obligation and no filing this turn. Open full content.")
     }
 
     @Test("SubstrateRowCell tap invokes the supplied click-to-detail closure")

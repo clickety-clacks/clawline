@@ -22,6 +22,8 @@ struct ClawlineApp: App {
     // injected into every scene's RootView (and thereby every ChatViewModel) so
     // cache ordering holds across scenes and overlapping view models.
     @State private var messageCacheIO: any MessageCacheIOServicing = MessageCacheIO()
+    // Owns which message (if any) the detail viewer is currently showing.
+    @State private var detailPresentation = MessageDetailPresentation()
 
     private let deviceIdentifier: any DeviceIdentifying
     private let connectionService: any ConnectionServicing
@@ -54,9 +56,17 @@ struct ClawlineApp: App {
         )
         self.deviceIdentifier = coreServices.deviceIdentifier
         self.connectionService = coreServices.connectionService
-        let chatService = coreServices.chatService
-        self.chatService = chatService
         self.uploadService = coreServices.uploadService
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--debug-goalA-fixture-transcript") {
+            Self.configureDebugGoalAFixtureBypassIfNeeded(authManager: authManager)
+            self.chatService = GoalAFixtureChatService()
+        } else {
+            self.chatService = coreServices.chatService
+        }
+#else
+        self.chatService = coreServices.chatService
+#endif
     }
 
     var body: some Scene {
@@ -71,9 +81,29 @@ struct ClawlineApp: App {
                     .environment(\.deviceIdentifier, deviceIdentifier)
                     .environment(\.chatService, chatService)
                     .environment(\.settingsManager, settingsManager)
+                    .environment(\.messageDetailPresentation, detailPresentation)
+                    .environment(\.openDetail, MessageDetailAction { message in
+                        detailPresentation.message = message
+                    })
+                    .overlay {
+                        if let message = detailPresentation.message {
+                            MessageDetailViewer(message: message) {
+                                detailPresentation.message = nil
+                            }
+                        }
+                    }
                     .sheet(isPresented: $settingsManager.isSettingsPresented) {
                         SettingsView(settings: settingsManager)
                     }
+#if DEBUG
+                    // Verification hook for the Goal B detail-viewer layout, ahead of Goal A's
+                    // bubble tap wiring into openDetail. Not reachable outside DEBUG builds.
+                    .task {
+                        if ProcessInfo.processInfo.environment["CLAWLINE_DEBUG_PREVIEW_MESSAGE_DETAIL"] == "1" {
+                            detailPresentation.message = .debugPreviewLongMessage
+                        }
+                    }
+#endif
                     // Clear first responders before the app backgrounds.
                     // UITextView.becomeFirstResponder triggers a synchronous pasteboard XPC call
                     // (UIKeyboardStateManager.canInsertAdaptiveImageGlyph). If the device locks
@@ -118,6 +148,21 @@ private extension ClawlineApp {
         }
         authManager.updateAdminStatus(true)
         logger.info("Debug admin now active? \(authManager.isAdmin, privacy: .public)")
+    }
+
+    /// The fixture flag alone must reach the chat view from a clean sim state:
+    /// --debug-force-admin stores credentials but never a gateway address, and
+    /// RootView routes to PairingView unless BOTH auth.isAuthenticated AND
+    /// ProviderBaseURLStore.baseURL are set. GoalAFixtureChatService never
+    /// makes a network call, so a fixed placeholder URL satisfies that gate
+    /// without depending on a live or previously-paired gateway -- and setting
+    /// it unconditionally (not only when unset) keeps the launch reproducible
+    /// regardless of whatever pairing state the sim happened to start in.
+    static func configureDebugGoalAFixtureBypassIfNeeded(authManager: AuthManager) {
+        if !authManager.isAuthenticated {
+            authManager.storeCredentials(token: "debug-goalA-fixture-token", userId: "debug-goalA-fixture-user")
+        }
+        ProviderBaseURLStore.setBaseURL(URL(string: "https://goalA-fixture.invalid")!)
     }
 }
 #endif

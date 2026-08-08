@@ -4,12 +4,15 @@
 //
 //  T-B (ticket T1750): the tightbeam-only new-chat creation sheet. The name-only
 //  create gains optional harness / model / host / archetype choices populated
-//  from GET /api/org-options (fetched on demand into ChatViewModel.orgOptions).
-//  All four choices are optional; a plain name-only create still works exactly as
-//  before (the gateway applies defaults). The server validates placement and
-//  either returns the stream or a named refusal whose message is surfaced here
-//  verbatim. On openclaw the sheet never presents — the "+" affordance keeps its
-//  name-only direct create (see StreamCreationLaunchPolicy).
+//  from GET /api/org-options (fetched on demand into ChatViewModel.orgOptions,
+//  read here via ChatViewModel.orgOptionsState so loading/empty/failed render
+//  honestly instead of a frozen picker). All four choices are optional; a plain
+//  name-only create still works exactly as before (the gateway applies
+//  defaults). The server validates placement and returns the stream or a named
+//  refusal; a placement-rule refusal is surfaced verbatim, but a catalog
+//  staleness/routing refusal is humanized (ChatViewModel.humaneCreateRefusalMessage)
+//  rather than leaking raw substrate text. On openclaw the sheet never presents —
+//  the "+" affordance keeps its name-only direct create (see StreamCreationLaunchPolicy).
 //
 
 import SwiftUI
@@ -55,8 +58,17 @@ struct StreamCreationSheet: View {
         _name = State(initialValue: defaultName)
     }
 
+    /// The loaded catalog, or nil while loading/failed. Callers that need a
+    /// concrete `OrgOptions` to read arrays off of (host/archetype narrowing)
+    /// fall back to `.empty`; callers that need to tell "no data yet" apart
+    /// from "loaded and genuinely empty" read this directly.
+    private var loadedOrgOptions: OrgOptions? {
+        if case .loaded(let options) = viewModel.orgOptionsState { return options }
+        return nil
+    }
+
     private var orgOptions: OrgOptions {
-        viewModel.orgOptions ?? OrgOptions.empty
+        loadedOrgOptions ?? OrgOptions.empty
     }
 
     private var modelOptions: [OrgOptions.HarnessModel] {
@@ -96,40 +108,29 @@ struct StreamCreationSheet: View {
                 }
 
                 Section {
-                    Picker("Harness", selection: $selectedHarness) {
-                        Text("Default").tag(String?.none)
-                        ForEach(orgOptions.harnesses, id: \.self) { harness in
-                            Text(harness).tag(String?.some(harness))
+                    switch viewModel.orgOptionsState {
+                    case .loading:
+                        HStack {
+                            ProgressView()
+                            Text("Loading placement options…")
+                                .foregroundStyle(.secondary)
                         }
-                    }
-                    .disabled(orgOptions.harnesses.isEmpty)
-
-                    if !modelOptions.isEmpty {
-                        Picker("Model", selection: $selectedModel) {
-                            Text("Default").tag(String?.none)
-                            ForEach(modelOptions, id: \.ref) { model in
-                                Text(model.name).tag(String?.some(model.ref))
-                            }
+                    case .failed:
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Couldn't load placement options.")
+                                .foregroundStyle(.secondary)
+                            Button("Retry") { viewModel.retryOrgOptionsLoad() }
                         }
+                    case .loaded:
+                        placementPickers
                     }
-
-                    Picker("Archetype", selection: $selectedArchetype) {
-                        Text("Default").tag(String?.none)
-                        ForEach(orgOptions.archetypes, id: \.name) { archetype in
-                            Text(archetype.name).tag(String?.some(archetype.name))
-                        }
-                    }
-                    .disabled(orgOptions.archetypes.isEmpty)
-
-                    Picker("Host", selection: $selectedHost) {
-                        Text("Default").tag(String?.none)
-                        ForEach(allowedHosts, id: \.self) { host in
-                            Text(host).tag(String?.some(host))
-                        }
-                    }
-                    .disabled(allowedHosts.isEmpty)
                 } header: {
                     Text("Placement")
+                } footer: {
+                    if case .failed = viewModel.orgOptionsState {
+                        Text("You can still create with default placement.")
+                            .font(.clawline(.secondaryLabel))
+                    }
                 }
 
                 if let refusalMessage {
@@ -161,6 +162,76 @@ struct StreamCreationSheet: View {
             }
             .onChange(of: selectedHarness) { _, _ in reconcileModelSelection() }
             .onChange(of: selectedArchetype) { _, _ in reconcileHostSelection() }
+            .onAppear { viewModel.loadOrgOptionsIfNeeded() }
+        }
+    }
+
+    /// The four placement axes once the catalog has loaded. Each axis renders
+    /// its own honest empty state instead of a silently `.disabled` picker —
+    /// a genuinely empty axis (e.g. a codex-only install with no models) means
+    /// there is nothing to select, not that the control is broken.
+    @ViewBuilder
+    private var placementPickers: some View {
+        placementAxis(
+            title: "Harness",
+            options: orgOptions.harnesses,
+            emptyMessage: "No harnesses available — onboarding needed.",
+            selection: $selectedHarness
+        )
+
+        if !modelOptions.isEmpty {
+            Picker("Model", selection: $selectedModel) {
+                Text("Default").tag(String?.none)
+                ForEach(modelOptions, id: \.ref) { model in
+                    Text(model.name).tag(String?.some(model.ref))
+                }
+            }
+        } else if selectedHarness != nil {
+            placementEmptyRow(title: "Model", message: "No models available for this harness — onboarding needed.")
+        }
+
+        placementAxis(
+            title: "Archetype",
+            options: orgOptions.archetypes.map(\.name),
+            emptyMessage: "No archetypes available — onboarding needed.",
+            selection: $selectedArchetype
+        )
+
+        placementAxis(
+            title: "Host",
+            options: allowedHosts,
+            emptyMessage: "No hosts available — onboarding needed.",
+            selection: $selectedHost
+        )
+    }
+
+    @ViewBuilder
+    private func placementAxis(
+        title: String,
+        options: [String],
+        emptyMessage: String,
+        selection: Binding<String?>
+    ) -> some View {
+        if options.isEmpty {
+            placementEmptyRow(title: title, message: emptyMessage)
+        } else {
+            Picker(title, selection: selection) {
+                Text("Default").tag(String?.none)
+                ForEach(options, id: \.self) { value in
+                    Text(value).tag(String?.some(value))
+                }
+            }
+        }
+    }
+
+    private func placementEmptyRow(title: String, message: String) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(message)
+                .font(.clawline(.secondaryLabel))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.trailing)
         }
     }
 

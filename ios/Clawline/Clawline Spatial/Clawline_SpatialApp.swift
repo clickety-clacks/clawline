@@ -21,6 +21,9 @@ struct Clawline_SpatialApp: App {
     // this one instance into every scene keeps cache write/delete ordering
     // correct across scenes (spec §T-A).
     @State private var messageCacheIO: any MessageCacheIOServicing = MessageCacheIO()
+    // Shared across the main window and the "message-detail" window so the
+    // detail window can read the message the main window asked to open.
+    @State private var detailPresentation = MessageDetailPresentation()
 
     private let deviceIdentifier: any DeviceIdentifying
     private let connectionService: any ConnectionServicing
@@ -55,6 +58,7 @@ struct Clawline_SpatialApp: App {
                 .environment(\.chatService, chatService)
                 .environment(\.settingsManager, settingsManager)
                 .environment(\.allowsTransparentWindowBackground, true)
+                .modifier(MessageDetailWindowOpener(presentation: detailPresentation))
                 .background {
 #if canImport(UIKit)
                     SpatialWindowTransparencyInstaller()
@@ -71,6 +75,15 @@ struct Clawline_SpatialApp: App {
         .commands {
             ClawlineAppCommands(settingsManager: settingsManager)
         }
+
+        // Goal B: openDetail(for:) opens the message's full contents as a NEW
+        // WINDOW on visionOS instead of a modal sheet (spec item 2).
+        WindowGroup(id: MessageDetailWindowOpener.windowID) {
+            MessageDetailWindowScene()
+                .environment(\.messageDetailPresentation, detailPresentation)
+        }
+        .windowStyle(.plain)
+        .defaultSize(width: 820, height: 640)
     }
 }
 

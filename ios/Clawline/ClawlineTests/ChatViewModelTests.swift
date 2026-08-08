@@ -2379,6 +2379,62 @@ struct ChatViewModelTests {
         #expect(placement.archetype == "default")
     }
 
+    /// Regression for a review finding: on the real transport,
+    /// `ProviderChatService.mapStreamAPIError` wraps every `StreamAPIError`
+    /// into its own `Error.serverError(code:message:)` before `ChatViewModel`
+    /// ever sees it. A humanizer that only matches the bare `StreamAPIError`
+    /// is dead code on that production path — this drives the error through
+    /// the SAME wrapped shape the real service produces, not the raw type.
+    @Test("R3 regression: a stale/route-refusal is humanized even when wrapped in the provider-mapped error")
+    @MainActor
+    func staleRefusalHumanizedThroughProviderMappedError() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.r3.staleRefusalWrapped")
+        chatService.serverFeatures = ["tightbeam"]
+        chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))
+        for _ in 0..<50 {
+            if viewModel.isTightbeamServer { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.isTightbeamServer)
+
+        let rawSubstrateMessage = "cannot route claude-sonnet-5 on Gibson: the claude catalog on Gibson is STALE and must be re-onboarded"
+        chatService.createStreamError = ProviderChatService.Error.serverError(
+            code: "route_refusal",
+            message: rawSubstrateMessage
+        )
+
+        let outcome = await viewModel.createStream(
+            displayName: "Placed",
+            harness: "claude",
+            model: "sonnet",
+            host: "eezo",
+            archetype: "default"
+        )
+        guard case .failed(let message) = outcome else {
+            Issue.record("expected the wrapped stale refusal to fail the create")
+            return
+        }
+        let humaneMessage = try #require(message)
+        #expect(!humaneMessage.contains(rawSubstrateMessage), "raw substrate text must never reach the sheet")
+        #expect(!humaneMessage.localizedCaseInsensitiveContains("gibson"), "raw substrate text must never reach the sheet")
+        #expect(humaneMessage.localizedCaseInsensitiveContains("refresh"))
+    }
+
     @Test("Gate regression: flipping the tightbeam gate invalidates already-rendered presentations")
     @MainActor
     func gateFlipInvalidatesRenderedPresentations() async throws {

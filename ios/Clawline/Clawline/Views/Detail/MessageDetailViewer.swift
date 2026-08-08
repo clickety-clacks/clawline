@@ -8,6 +8,7 @@
 
 import Foundation
 import SwiftUI
+import UIKit
 
 #if DEBUG
 // MARK: - Verification fixture (DEBUG only)
@@ -71,7 +72,16 @@ struct MessageDetailAction {
 }
 
 private struct MessageDetailActionKey: EnvironmentKey {
-    static let defaultValue = MessageDetailAction { _ in }
+    // Reaching this default means openDetail fired somewhere ClawlineApp /
+    // Clawline_SpatialApp never injected the real action at the composition
+    // root -- a wiring bug, not a normal path. Loud in DEBUG so it is caught
+    // in development; a silent no-op in Release so it can never trap in
+    // production.
+    static let defaultValue = MessageDetailAction { message in
+        #if DEBUG
+        assertionFailure("openDetail invoked without \\.openDetail injected -- dropped message id \(message.id)")
+        #endif
+    }
 }
 
 extension EnvironmentValues {
@@ -108,6 +118,28 @@ extension EnvironmentValues {
 struct MessageDetailContentView: View {
     let message: Message
     var onClose: (() -> Void)?
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var metrics: ChatFlowTheme.Metrics { ChatFlowTheme.Metrics(isCompact: false) }
+    private var bodyFont: UIFont { UIFont.clawline(.bodyText) }
+
+    /// Stamp-stripped so the raw `[from <sender>]` first line (present on
+    /// substrate/agent messages) never duplicates what `header` already
+    /// shows via `message.displayName`.
+    private var renderedBlocks: [RenderedMarkdownBlock] {
+        let displayMessage = message.strippingProvenanceStampForDisplay()
+        let context = MarkdownMessageRenderContext(role: message.role, messageID: message.id, metrics: metrics)
+        let rendered = UnifiedMarkdownRenderer.makeContent(
+            messageText: displayMessage.content,
+            context: context,
+            baseFont: bodyFont,
+            inkColor: UIColor(ChatFlowTheme.ink(colorScheme)),
+            lineSpacing: 4,
+            stripDetectedURLs: false,
+            isDark: colorScheme == .dark
+        )
+        return rendered.renderedBlocks
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -115,10 +147,30 @@ struct MessageDetailContentView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(message.content)
-                        .font(.body)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    ForEach(Array(renderedBlocks.enumerated()), id: \.offset) { item in
+                        switch item.element {
+                        case .attributedText(let attributed):
+                            SelectableAttributedText(
+                                attributedString: attributed,
+                                alignment: .left,
+                                colorScheme: colorScheme,
+                                onSelectionChange: { _ in },
+                                onLinkTap: { url in UIApplication.shared.open(url) }
+                            )
+                        case .code(let language, let code):
+                            CodeBlockView(language: language, code: code)
+                        case .table(let model):
+                            MarkdownTableView(
+                                model: model,
+                                role: message.role,
+                                metrics: metrics,
+                                maxLineWidth: ChatFlowTheme.maxLineWidth(bodyFontSize: bodyFont.pointSize),
+                                isExpanded: true,
+                                onExpand: {},
+                                onCollapse: { onClose?() }
+                            )
+                        }
+                    }
                     if !message.attachments.isEmpty {
                         attachmentsSummary
                     }

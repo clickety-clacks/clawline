@@ -57,6 +57,7 @@ struct ClawlineApp: App {
         self.uploadService = coreServices.uploadService
 #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--debug-goalA-fixture-transcript") {
+            Self.configureDebugGoalAFixtureBypassIfNeeded(authManager: authManager)
             self.chatService = GoalAFixtureChatService()
         } else {
             self.chatService = coreServices.chatService
@@ -125,6 +126,21 @@ private extension ClawlineApp {
         }
         authManager.updateAdminStatus(true)
         logger.info("Debug admin now active? \(authManager.isAdmin, privacy: .public)")
+    }
+
+    /// The fixture flag alone must reach the chat view from a clean sim state:
+    /// --debug-force-admin stores credentials but never a gateway address, and
+    /// RootView routes to PairingView unless BOTH auth.isAuthenticated AND
+    /// ProviderBaseURLStore.baseURL are set. GoalAFixtureChatService never
+    /// makes a network call, so a fixed placeholder URL satisfies that gate
+    /// without depending on a live or previously-paired gateway -- and setting
+    /// it unconditionally (not only when unset) keeps the launch reproducible
+    /// regardless of whatever pairing state the sim happened to start in.
+    static func configureDebugGoalAFixtureBypassIfNeeded(authManager: AuthManager) {
+        if !authManager.isAuthenticated {
+            authManager.storeCredentials(token: "debug-goalA-fixture-token", userId: "debug-goalA-fixture-user")
+        }
+        ProviderBaseURLStore.setBaseURL(URL(string: "https://goalA-fixture.invalid")!)
     }
 }
 #endif

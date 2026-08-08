@@ -60,15 +60,36 @@ extension Message {
 /// below; visionOS opens it as a new window/scene instead of a modal.
 struct MessageDetailAction {
     private let handler: @MainActor (Message) -> Void
+    private let payloadHandler: (@MainActor (MessageDetailPayload) -> Void)?
 
-    init(handler: @escaping @MainActor (Message) -> Void) {
+    init(
+        handler: @escaping @MainActor (Message) -> Void,
+        payloadHandler: (@MainActor (MessageDetailPayload) -> Void)? = nil
+    ) {
         self.handler = handler
+        self.payloadHandler = payloadHandler
     }
 
     @MainActor
     func callAsFunction(for message: Message) {
         handler(message)
     }
+
+    @MainActor
+    func callAsFunction(for payload: MessageDetailPayload) {
+        if let payloadHandler {
+            payloadHandler(payload)
+        } else {
+            handler(payload.message)
+        }
+    }
+}
+
+struct MessageDetailPayload {
+    let message: Message
+    let presentation: MessagePresentation
+    let fontScaleChangeSequence: Int
+    let terminalConnectionPool: TerminalSessionConnectionPool
 }
 
 private struct MessageDetailActionKey: EnvironmentKey {
@@ -100,6 +121,7 @@ extension EnvironmentValues {
 @Observable
 final class MessageDetailPresentation {
     var message: Message?
+    var payload: MessageDetailPayload?
 }
 
 private struct MessageDetailPresentationKey: EnvironmentKey {
@@ -226,8 +248,21 @@ struct MessageDetailContentView: View {
 /// full-bleed overlay so the detail viewer's own frame — not a system sheet
 /// detent — controls the exact proportions the spec calls for.
 struct MessageDetailViewer: View {
-    let message: Message
-    let onDismiss: () -> Void
+    private let message: Message
+    private let payload: MessageDetailPayload?
+    private let onDismiss: () -> Void
+
+    init(message: Message, onDismiss: @escaping () -> Void) {
+        self.message = message
+        self.payload = nil
+        self.onDismiss = onDismiss
+    }
+
+    init(payload: MessageDetailPayload, onDismiss: @escaping () -> Void) {
+        self.message = payload.message
+        self.payload = payload
+        self.onDismiss = onDismiss
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -236,7 +271,19 @@ struct MessageDetailViewer: View {
                     .ignoresSafeArea()
                     .onTapGesture(perform: onDismiss)
 
-                MessageDetailContentView(message: message, onClose: onDismiss)
+                Group {
+                    if let payload {
+                        ExpandedMessageSheet(
+                            message: payload.message,
+                            presentation: payload.presentation,
+                            fontScaleChangeSequence: payload.fontScaleChangeSequence,
+                            terminalConnectionPool: payload.terminalConnectionPool,
+                            onDismiss: onDismiss
+                        )
+                    } else {
+                        MessageDetailContentView(message: message, onClose: onDismiss)
+                    }
+                }
                     .frame(width: proxy.size.width * 0.8)
                     .frame(maxHeight: .infinity)
                     .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))

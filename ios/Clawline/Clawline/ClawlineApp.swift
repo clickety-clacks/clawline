@@ -84,9 +84,16 @@ struct ClawlineApp: App {
                     .environment(\.messageDetailPresentation, detailPresentation)
                     .environment(\.openDetail, MessageDetailAction { message in
                         detailPresentation.message = message
+                    } payloadHandler: { payload in
+                        detailPresentation.payload = payload
                     })
                     .overlay {
-                        if let message = detailPresentation.message {
+                        if let payload = detailPresentation.payload {
+                            MessageDetailViewer(payload: payload) {
+                                detailPresentation.payload = nil
+                                detailPresentation.message = nil
+                            }
+                        } else if let message = detailPresentation.message {
                             MessageDetailViewer(message: message) {
                                 detailPresentation.message = nil
                             }

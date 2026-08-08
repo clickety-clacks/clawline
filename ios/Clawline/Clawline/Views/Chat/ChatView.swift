@@ -2827,10 +2827,10 @@ struct ChatView: View {
             firstUnreadMessageId: state.firstUnreadMessageId,
             unreadCount: state.unreadCount,
             onExpand: { message in
-                activeSheet = .expandedMessage(message)
+                openMessageDetail(message)
             },
             onOpenDetail: { message in
-                openDetail(for: message)
+                openMessageDetail(message)
             },
             layoutCoordinator: layoutCoordinator,
             sessionKey: sessionKey,
@@ -2895,6 +2895,18 @@ struct ChatView: View {
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .contentShape(Rectangle())
         return list
+    }
+
+    private func openMessageDetail(_ selectedMessage: Message) {
+        let message = viewModel.expandedDetailMessage(for: selectedMessage)
+        let metrics = ChatFlowTheme.Metrics(isCompact: horizontalSizeClass == .compact)
+        let presentation = viewModel.presentation(for: message, metrics: metrics)
+        openDetail(for: MessageDetailPayload(
+            message: message,
+            presentation: presentation,
+            fontScaleChangeSequence: fontScaleChangeSequence,
+            terminalConnectionPool: viewModel.terminalConnectionPool
+        ))
     }
 
     @ViewBuilder

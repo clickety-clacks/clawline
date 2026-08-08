@@ -122,7 +122,12 @@ final class MarkerDividerCell: UICollectionViewCell {
 
     private func configureRule(_ rule: UIView) {
         rule.translatesAutoresizingMaskIntoConstraints = false
-        rule.heightAnchor.constraint(equalToConstant: 1 / UIScreen.main.scale).isActive = true
+        // UIScreen.main is unavailable on visionOS; traitCollection.displayScale
+        // is the cross-platform replacement (iOS, Catalyst, visionOS all support
+        // it via UITraitEnvironment). displayScale is 0 when unspecified, so
+        // guard with a Retina-safe fallback rather than divide by zero.
+        let displayScale = rule.traitCollection.displayScale
+        rule.heightAnchor.constraint(equalToConstant: 1 / (displayScale > 0 ? displayScale : 2)).isActive = true
         rule.setContentHuggingPriority(.defaultLow, for: .horizontal)
         rule.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     }

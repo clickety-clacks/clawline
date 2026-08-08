@@ -15,6 +15,10 @@ enum StreamPopupSearchPresentationFocusPolicy {
     static func shouldRenderSearchTextFieldOnInitialPresentation(searchFocusRequestID: Int?) -> Bool {
         searchFocusRequestID != nil
     }
+
+    static func allowsSelectorFocusOwnership(isInlineEditorFocused: Bool) -> Bool {
+        !isInlineEditorFocused
+    }
 }
 
 struct StreamManagerSheet: View {
@@ -180,7 +184,8 @@ struct StreamManagerSheet: View {
             && selectorShortcutsAvailable
             && searchFocusRequestID == nil
             && !isSearchFieldFocused
-            && activeEditor == nil
+            && StreamPopupSearchPresentationFocusPolicy
+                .allowsSelectorFocusOwnership(isInlineEditorFocused: focusedEditor != nil)
     }
 
     private var shouldRenderSearchTextField: Bool {
@@ -190,7 +195,8 @@ struct StreamManagerSheet: View {
     }
 
     private var activeSearchFocusRequestID: Int? {
-        guard activeEditor == nil else { return nil }
+        guard StreamPopupSearchPresentationFocusPolicy
+            .allowsSelectorFocusOwnership(isInlineEditorFocused: focusedEditor != nil) else { return nil }
         return searchFocusRequestID ?? (localSearchFocusRequestID > 0 ? localSearchFocusRequestID : nil)
     }
 
@@ -489,7 +495,7 @@ struct StreamManagerSheet: View {
                         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                .disabled(activeEditor != nil || isWorking)
+                .disabled(focusedEditor != nil || isWorking)
                 .accessibilityLabel("Track")
                 .accessibilityHint("Tracks an existing untracked session")
             }
@@ -509,7 +515,7 @@ struct StreamManagerSheet: View {
                     .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
             .buttonStyle(.plain)
-            .disabled(activeEditor != nil)
+            .disabled(focusedEditor != nil)
             .accessibilityLabel("Add stream")
             .accessibilityHint("Creates a new stream")
         }
@@ -629,6 +635,7 @@ struct StreamManagerSheet: View {
                 .submitLabel(.done)
                 .focused($focusedEditor, equals: .renaming(stream.sessionKey))
                 .onSubmit {
+                    focusedEditor = nil
                     Task { await renameStream(stream) }
                 }
         } else {

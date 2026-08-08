@@ -489,11 +489,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     /// Message ids currently shown individually because their run is
     /// expanded (drives SubstrateRowCell's indent-under-run presentation).
     private var expandedRunMemberMessageIds: Set<String> = []
-    /// Segment-anchor (step 3b): transient UI state (never persisted), toggled
-    /// by tapping the marker divider. When true, everything before the last
-    /// reliable boundary (ChatViewModel.lastReliableBoundaryTimestamp) is
-    /// hidden from the snapshot.
-    private var isSegmentAnchorActive: Bool = false
     private struct PerStreamRuntimeState {
         typealias MessageLoadCallback = @MainActor () -> Void
 
@@ -3512,14 +3507,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let snapshotItemIds = isShowingOnlyUserMessages
             ? snapshotMessageIds
             : snapshotItemsWithWebBubbles(
-                from: snapshotItemsWithSubstrateRunCollapse(
-                    from: snapshotItemsWithSegmentAnchor(
-                        from: snapshotItemsWithMarkerDivider(
-                            from: snapshotItemsWithDateSeparators(from: snapshotMessages),
-                            messages: snapshotMessages
-                        )
-                    )
-                ),
+                from: snapshotItemsWithSubstrateRunCollapse(from: snapshotItemsWithDateSeparators(from: snapshotMessages)),
                 stream: effectiveStream
             )
         logScrollRestore(
@@ -4013,55 +4001,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         return items
     }
 
-    /// Insert one divider at the first message strictly after the latest
-    /// .sessionInfo firing. The boundary must fall inside the visible
-    /// transcript so the divider always separates real messages on both
-    /// sides. No semantic marker kind is inferred from message text.
-    ///
-    /// OpenClaw invariant: `.sessionInfo` fires on auth success for ANY
-    /// backend, tightbeam or OpenClaw -- it is not itself a tightbeam-only
-    /// signal, unlike the classifier's provenance-origin heuristic. Gate on
-    /// `isTightbeamServer` (the same flag `showsProvenanceChrome` already
-    /// uses for this exact concern) so an OpenClaw session never grows a
-    /// divider it didn't have before.
-    private func snapshotItemsWithMarkerDivider(from items: [String], messages: [Message]) -> [String] {
-        guard viewModel?.isTightbeamServer == true else { return items }
-        guard let boundaryTimestamp = viewModel?.lastReliableBoundaryTimestamp else { return items }
-        guard let firstAfterIndex = messages.firstIndex(where: { $0.timestamp > boundaryTimestamp }),
-              firstAfterIndex > 0
-        else {
-            return items
-        }
-        let anchorMessageID = messages[firstAfterIndex].id
-        let dividerID = MarkerDividerCell.itemID(before: anchorMessageID)
-        guard let insertionIndex = items.firstIndex(of: anchorMessageID) else { return items }
-        var result = items
-        result.insert(dividerID, at: insertionIndex)
-        return result
-    }
-
-    /// Segment-anchor (step 3b): when active, hides everything STRICTLY
-    /// BEFORE the marker divider -- a transient VIEW of the already-built
-    /// item list, not a reclassification, so it adds no new measurement or
-    /// grouping work. A no-op when no divider is present (nothing to anchor
-    /// on yet). The divider itself is deliberately KEPT (not sliced away):
-    /// it is the only tap target that toggles this state, so dropping it
-    /// once anchored would strand the user with no affordance to un-anchor.
-    private func snapshotItemsWithSegmentAnchor(from items: [String]) -> [String] {
-        guard isSegmentAnchorActive,
-              let dividerIndex = items.firstIndex(where: { MarkerDividerCell.isMarkerDividerItemID($0) })
-        else {
-            return items
-        }
-        return Array(items[dividerIndex...])
-    }
-
-    /// Toggle segment-anchor and reapply the snapshot, same reentrancy-safe
-    /// path as toggleSubstrateRunExpansion (crash history #140/#148/#149).
-    private func toggleSegmentAnchor() {
-        isSegmentAnchorActive.toggle()
-        applySnapshotForWebBubbles()
-    }
+    // MarkerDividerCell stays dormant: the wire carries no marker signal
+    // today (no messageType, no boundary event a client can trust), so
+    // nothing here synthesizes a divider from a heuristic. The cell, its
+    // item-id scheme, and its dequeue/sizing plumbing remain in place ready
+    // to wire up once a typed marker payload exists on the wire.
 
     private static let substrateRunItemIdPrefix = "__substrate_run__|"
 
@@ -5151,14 +5095,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                     withReuseIdentifier: MarkerDividerCell.reuseIdentifier,
                     for: indexPath
                 ) as? MarkerDividerCell
-                cell?.configure(
-                    content: .sessionBoundary,
-                    isDark: self.currentIsDark,
-                    isSegmentAnchorActive: self.isSegmentAnchorActive,
-                    onTap: { [weak self] in
-                        self?.toggleSegmentAnchor()
-                    }
-                )
+                cell?.configure(content: .sessionBoundary, isDark: self.currentIsDark)
                 return cell
             }
 
@@ -7696,14 +7633,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
         let snapshotMessages = lastMessages
         let desiredItemIds = snapshotItemsWithWebBubbles(
-            from: snapshotItemsWithSubstrateRunCollapse(
-                from: snapshotItemsWithSegmentAnchor(
-                    from: snapshotItemsWithMarkerDivider(
-                        from: snapshotItemsWithDateSeparators(from: snapshotMessages),
-                        messages: snapshotMessages
-                    )
-                )
-            ),
+            from: snapshotItemsWithSubstrateRunCollapse(from: snapshotItemsWithDateSeparators(from: snapshotMessages)),
             stream: stream
         )
         snapshot.deleteAllItems()

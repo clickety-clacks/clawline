@@ -1027,19 +1027,6 @@ final class ChatViewModel {
     private var hasResolvedProvisioningCapability = true
     private var hasReceivedSessionProvisioning = false
     private var hasReceivedExplicitSessionInfo = false
-    // The only structurally reliable client-visible boundary signal today.
-    // No model or harness identity exists on the wire, so the divider uses
-    // the .sessionInfo firing time and message position without inventing a
-    // semantic kind or parsing message text. This is also the ONE capability
-    // the segment-anchor feature (step 3b: show-only-since-this-boundary)
-    // reads -- generic/upgradeable, since a future typed harness-retune
-    // signal only needs to set this same property from a different origin,
-    // with no change to either the divider or the anchor filter that key
-    // off it. SERVER time, never device wall-clock: set from the latest
-    // known Message.timestamp (wire-decoded), the same coordinate system as
-    // every timestamp it is compared against -- device clock skew cannot
-    // move this boundary.
-    private(set) var lastReliableBoundaryTimestamp: Date?
 
     private var accessibleSessionKeys: Set<String> = []
     private var accessibleSessionKeyOrder: [String] = []
@@ -4649,20 +4636,6 @@ final class ChatViewModel {
             supportsSessionProvisioning = true
             hasReceivedSessionProvisioning = true
             hasReceivedExplicitSessionInfo = true
-            // Server time, not device wall-clock: the boundary is compared
-            // against Message.timestamp (wire-decoded, server-assigned), so
-            // stamping it with the DEVICE clock let clock skew move the
-            // divider and silently hide/reveal messages across an anchor.
-            // The latest known message timestamp is already in the same
-            // (server) coordinate system as every timestamp it will be
-            // compared against. No messages received yet -> nothing can
-            // satisfy the divider's own firstAfterIndex > 0 guard regardless
-            // of this value, so `Date()` here is a harmless placeholder.
-            lastReliableBoundaryTimestamp = sessionMessages.values
-                .lazy
-                .flatMap { $0 }
-                .map(\.timestamp)
-                .max() ?? Date()
             replaceAccessibleSessionKeys(with: info.sessionKeys)
             refreshTrackableSessions(reason: "sessionInfo")
             attemptPendingProvisionedSendIfPossible()
@@ -5084,7 +5057,6 @@ final class ChatViewModel {
         hasResolvedProvisioningCapability = false
         hasReceivedSessionProvisioning = false
         hasReceivedExplicitSessionInfo = false
-        lastReliableBoundaryTimestamp = nil
         accessibleSessionKeys.removeAll()
         accessibleSessionKeyOrder.removeAll()
         trackableSessionsBySessionKey.removeAll()

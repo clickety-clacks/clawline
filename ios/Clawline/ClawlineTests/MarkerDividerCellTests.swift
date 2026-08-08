@@ -2,9 +2,10 @@
 //  MarkerDividerCellTests.swift
 //  ClawlineTests
 //
-//  Cycle-3 Goal A, step 3. Covers MarkerDividerCell configuration and its
-//  step-3b segment-anchor tap (same "internal handleTap(), no simulated
-//  UIGestureRecognizer" convention as SubstrateRunCollapseCellTests).
+//  Cycle-3 Goal A. Covers MarkerDividerCell's render-only configuration. The
+//  cell stays dormant -- nothing inserts a marker-divider item id today, since
+//  the wire carries no marker signal -- but must render correctly once a
+//  future typed marker payload wires it up.
 //
 
 import Foundation
@@ -17,28 +18,24 @@ struct MarkerDividerCellTests {
     @MainActor
     func configuresSessionBoundaryContent() {
         let cell = MarkerDividerCell()
-        cell.configure(content: .sessionBoundary, isDark: false, isSegmentAnchorActive: false) {}
+        cell.configure(content: .sessionBoundary, isDark: false)
         #expect(cell.accessibilityLabel == "Session boundary")
-        #expect(cell.accessibilityValue == nil)
     }
 
-    @Test("exposes the active segment-anchor state via accessibility")
+    @Test("prepareForReuse clears the configured content")
     @MainActor
-    func exposesSegmentAnchorActiveState() {
+    func prepareForReuseClearsContent() {
         let cell = MarkerDividerCell()
-        cell.configure(content: .sessionBoundary, isDark: true, isSegmentAnchorActive: true) {}
-        #expect(cell.accessibilityValue == "Showing only since this boundary")
+        cell.configure(content: .sessionBoundary, isDark: false)
+        cell.prepareForReuse()
+        #expect(cell.accessibilityLabel == nil)
     }
 
-    @Test("tap invokes the supplied segment-anchor toggle closure")
+    @Test("itemID prefixes the anchor message id")
     @MainActor
-    func tapInvokesToggleClosure() {
-        let cell = MarkerDividerCell()
-        var tapped = false
-        cell.configure(content: .sessionBoundary, isDark: false, isSegmentAnchorActive: false) {
-            tapped = true
-        }
-        cell.handleTap()
-        #expect(tapped)
+    func itemIDPrefixesAnchorMessageID() {
+        let id = MarkerDividerCell.itemID(before: "msg-123")
+        #expect(MarkerDividerCell.isMarkerDividerItemID(id))
+        #expect(id == "\(MarkerDividerCell.itemIdPrefix)msg-123")
     }
 }

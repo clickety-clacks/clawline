@@ -136,7 +136,7 @@ final class GoalAFixtureChatService: ChatServicing {
             StreamSession(
                 sessionKey: Self.sessionKey,
                 displayName: "Goal A fixture verification",
-                kind: "personal",
+                kind: "main",
                 orderIndex: 0,
                 isBuiltIn: true,
                 createdAt: Date(),

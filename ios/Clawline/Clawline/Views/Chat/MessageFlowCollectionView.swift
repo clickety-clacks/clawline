@@ -3584,12 +3584,17 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             pendingEntranceAnimationIds.insert(newestMessageId)
         }
 
-        let materializedIdSet = Set(snapshotMessageIds)
+        // Filter against newItemIds (the actual snapshot content), not
+        // snapshotMessageIds (every message before collapsing): a message
+        // folded into a collapsed substrate run (snapshotItemsWithSubstrateRunCollapse)
+        // is not its own item in the snapshot, so reconfiguring its id directly
+        // throws "Attempted to reconfigure item identifier that does not exist
+        // in the snapshot."
         let changedIds = (needsFullLayout
             ? snapshotMessageIds
             : newFingerprints.compactMap { id, fingerprint in
                 fingerprints[id] == fingerprint ? nil : id
-            }).filter { materializedIdSet.contains($0) }
+            }).filter { newItemIds.contains($0) }
         if !changedIds.isEmpty {
             snapshot.reconfigureItems(changedIds)
             for id in changedIds {

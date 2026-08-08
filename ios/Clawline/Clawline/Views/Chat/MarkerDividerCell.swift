@@ -41,7 +41,6 @@ final class MarkerDividerCell: UICollectionViewCell {
 
         configureRule(leadingRule)
         configureRule(trailingRule)
-        leadingRule.widthAnchor.constraint(equalTo: trailingRule.widthAnchor).isActive = true
 
         flagView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -67,6 +66,12 @@ final class MarkerDividerCell: UICollectionViewCell {
         stack.addArrangedSubview(labelGroup)
         stack.addArrangedSubview(trailingRule)
         contentView.addSubview(stack)
+
+        // Activated only now: leadingRule/trailingRule need a common ancestor
+        // (the stack, via addArrangedSubview above) before a cross-view
+        // constraint between them can activate -- doing this earlier crashes
+        // ("no common ancestor") the instant a divider is instantiated.
+        leadingRule.widthAnchor.constraint(equalTo: trailingRule.widthAnchor).isActive = true
 
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),

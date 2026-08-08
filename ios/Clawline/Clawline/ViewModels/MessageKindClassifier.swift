@@ -60,15 +60,22 @@ enum MessageKindClassifier {
     ///     which passing it here makes it the preferred signal with no other
     ///     change to this classifier.
     ///
-    /// Precedence: (1) a recognized wire messageType wins; (2) else the
-    /// provenance origin heuristic; (3) else `.assistant`.
+    /// Precedence: (1) a recognized wire messageType wins; (2) an explicit but
+    /// unrecognized wire messageType degrades straight to `.assistant`; (3) no
+    /// wire messageType at all falls through to the provenance origin
+    /// heuristic; (4) else `.assistant`.
     static func classify(_ message: Message, wireMessageType: String? = nil) -> MessageKind {
-        // (1) Preferred: an explicit, recognized wire messageType.
-        if let explicit = kind(forWireMessageType: wireMessageType) {
-            return explicit
+        // (1) An explicit wire messageType is present: recognized wins,
+        // unrecognized degrades straight to .assistant -- the forward-compatible
+        // enum contract from this file's header. It must NOT fall through to
+        // the origin heuristic below: the server took a position (it sent a
+        // messageType), so an unmapped value is "unknown", not "absent".
+        if let wireMessageType {
+            return kind(forWireMessageType: wireMessageType) ?? .assistant
         }
 
-        // (2) Heuristic TODAY: the provenance origin (Models/MessageProvenance).
+        // (2) Heuristic: only when the wire messageType is absent entirely.
+        // The provenance origin (Models/MessageProvenance).
         //     `provenanceOrigin` is the single origin authority — it couples to
         //     the anti-forgery first-line stamp cross-check, so a stampless or
         //     forged origin falls through to `.assistant` (renders as today).

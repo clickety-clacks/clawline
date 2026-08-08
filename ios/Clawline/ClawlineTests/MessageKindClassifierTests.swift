@@ -118,12 +118,14 @@ struct MessageKindClassifierTests {
         #expect(MessageKindClassifier.classify(plain, wireMessageType: "  MARKER ") == .marker)
     }
 
-    @Test("an UNKNOWN wire messageType degrades and does NOT clobber the heuristic")
-    func unknownWireTypeFallsThroughToHeuristic() {
+    @Test("an UNKNOWN wire messageType degrades straight to assistant, never the heuristic")
+    func unknownWireTypeDegradesToAssistant() {
+        // The server took a position (it sent a messageType) -- an unmapped
+        // value is "unknown", not "absent", so it must not fall through to the
+        // origin heuristic even when that heuristic would otherwise apply.
         let substrateMsg = message(sender: "process:tightbeam", content: "[from process:tightbeam]\nnotice")
-        // Unknown type -> nil from the map -> heuristic still classifies substrate.
-        #expect(MessageKindClassifier.classify(substrateMsg, wireMessageType: "toolCall") == .substrate)
-        // And an unknown type over a plain assistant -> assistant.
+        #expect(MessageKindClassifier.classify(substrateMsg, wireMessageType: "toolCall") == .assistant)
+        // And an unknown type over a plain assistant -> still assistant.
         let plain = message(sender: nil, content: "x", role: .assistant)
         #expect(MessageKindClassifier.classify(plain, wireMessageType: "quux") == .assistant)
     }

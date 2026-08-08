@@ -64,11 +64,15 @@ struct MessageDetailContentViewTests {
     }
 
     @MainActor
-    private func detailPayload(message: Message, presentationText: String) -> MessageDetailPayload {
+    private func detailPayload(
+        message: Message,
+        presentationText: String,
+        fontScaleChangeSequence: Int = 3
+    ) -> MessageDetailPayload {
         MessageDetailPayload(
             message: message,
             presentation: detailPresentation(text: presentationText),
-            fontScaleChangeSequence: 3,
+            fontScaleChangeSequence: fontScaleChangeSequence,
             terminalConnectionPool: TerminalSessionConnectionPool { _ in
                 fatalError("Text-only detail must not create a terminal service")
             }
@@ -163,9 +167,9 @@ struct MessageDetailContentViewTests {
         #expect(receivedMessageID == message.id)
     }
 
-    @Test("large detail viewer renders presentation fallback through expanded-sheet semantics")
+    @Test("large detail viewer renders expanded-sheet semantics and refreshed live content")
     @MainActor
-    func largeViewerRendersPresentationFallback() async {
+    func largeViewerRendersPresentationFallbackAndRefreshesLiveContent() async {
         let presentationText = "Presentation-only **Markdown** survives the large viewer."
         let message = detailMessage(content: "")
         let payload = detailPayload(message: message, presentationText: presentationText)
@@ -184,6 +188,40 @@ struct MessageDetailContentViewTests {
         let renderedText = textViews(in: host.view).map(\.text).joined(separator: "\n")
         #expect(renderedText.contains("Presentation-only Markdown survives the large viewer."))
         #expect(!renderedText.contains("**Markdown**"))
+
+        let streamedMessage = Message(
+            id: message.id,
+            role: message.role,
+            content: "Streamed raw content",
+            timestamp: message.timestamp,
+            streaming: true,
+            attachments: message.attachments,
+            deviceId: message.deviceId,
+            sessionKey: message.sessionKey,
+            sender: message.sender
+        )
+        let refreshedPayload = detailPayload(
+            message: streamedMessage,
+            presentationText: "Live *streaming* update reached the viewer.",
+            fontScaleChangeSequence: 4
+        )
+        host.rootView = MessageDetailViewer(payload: refreshedPayload, onDismiss: {})
+            .environment(\.horizontalSizeClass, .regular)
+        for _ in 0..<10 {
+            try? await Task.sleep(for: .milliseconds(10))
+            host.view.layoutIfNeeded()
+            if textViews(in: host.view).contains(where: { textView in
+                textView.text.contains("Live streaming update reached the viewer.")
+            }) {
+                break
+            }
+        }
+
+        let refreshedText = textViews(in: host.view).map(\.text).joined(separator: "\n")
+        #expect(refreshedText.contains("Live streaming update reached the viewer."))
+        #expect(!refreshedText.contains("Presentation-only Markdown survives the large viewer."))
+        #expect(refreshedPayload.message.streaming)
+        #expect(refreshedPayload.fontScaleChangeSequence == 4)
         window.isHidden = true
     }
 }

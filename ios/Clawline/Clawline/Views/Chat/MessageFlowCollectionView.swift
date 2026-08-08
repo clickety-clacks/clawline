@@ -3504,6 +3504,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         lastEffectiveStream = effectiveStream
         webBubbleCoordinator.currentStream = effectiveStream
         let snapshotMessageIds = snapshotMessages.map(\.id)
+        // Captured before snapshotItemsWithSubstrateRunCollapse below
+        // overwrites substrateRunMemberIdsByItemId, so changedIds can detect
+        // a run whose membership grew/shrank under the same anchor id (see
+        // the reconfigureRunAnchorIds comment further down).
+        let previousRunMemberIdsByItemId = substrateRunMemberIdsByItemId
         let snapshotItemIds = isShowingOnlyUserMessages
             ? snapshotMessageIds
             : snapshotItemsWithWebBubbles(
@@ -3590,11 +3595,21 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         // is not its own item in the snapshot, so reconfiguring its id directly
         // throws "Attempted to reconfigure item identifier that does not exist
         // in the snapshot."
-        let changedIds = (needsFullLayout
+        //
+        // A collapsed run's anchor id is derived only from its FIRST member
+        // (snapshotItemsWithSubstrateRunCollapse), so a run growing from 2 to
+        // 3 members keeps the same anchor id and never appears in
+        // newFingerprints -- the anchor's displayed count would go stale
+        // (SubstrateRunCollapseCell reads substrateRunMemberIdsByItemId[id]
+        // only at dequeue/configure time) unless reconfigured explicitly here.
+        let changedRunAnchorIds = Array(substrateRunMemberIdsByItemId.filter { anchorId, members in
+            previousRunMemberIdsByItemId[anchorId] != members
+        }.keys)
+        let changedIds = ((needsFullLayout
             ? snapshotMessageIds
             : newFingerprints.compactMap { id, fingerprint in
                 fingerprints[id] == fingerprint ? nil : id
-            }).filter { newItemIds.contains($0) }
+            }) + changedRunAnchorIds).filter { newItemIds.contains($0) }
         if !changedIds.isEmpty {
             snapshot.reconfigureItems(changedIds)
             for id in changedIds {

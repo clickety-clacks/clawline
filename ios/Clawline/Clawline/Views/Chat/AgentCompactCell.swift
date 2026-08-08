@@ -127,10 +127,16 @@ final class AgentCompactCell: UICollectionViewCell {
     private let previewLabel = UILabel()
     private let moreLabel = UILabel()
     private var onTap: (() -> Void)?
-    /// Trackpad/mouse hover on iPad and Catalyst -- UICollectionViewCell's
-    /// own isHighlighted already covers the press state; this tracks the
-    /// separate hover state UIHoverGestureRecognizer reports.
+    /// Trackpad/mouse hover on iPad and Catalyst, from UIHoverGestureRecognizer.
     private var isHovered = false {
+        didSet { updateWashVisibility() }
+    }
+    /// Touch-down press state, tracked directly rather than via
+    /// UICollectionViewCell.isHighlighted: MessageFlowCollectionView's
+    /// shouldHighlightItemAt returns false globally (a deliberate,
+    /// collection-wide suppression covering every cell type, not something
+    /// to touch for one cell), so isHighlighted never becomes true here.
+    private var isPressed = false {
         didSet { updateWashVisibility() }
     }
 
@@ -232,14 +238,17 @@ final class AgentCompactCell: UICollectionViewCell {
         accessibilityLabel = nil
         onTap = nil
         isHovered = false
-    }
-
-    override var isHighlighted: Bool {
-        didSet { updateWashVisibility() }
+        isPressed = false
     }
 
     private func updateWashVisibility() {
-        washView.alpha = (isHighlighted || isHovered) ? 1 : 0
+        washView.alpha = (isPressed || isHovered) ? 1 : 0
+    }
+
+    /// Internal (not private) so the press/hover wash is directly
+    /// unit-testable, same convention as handleTap() below.
+    var isWashVisibleForTesting: Bool {
+        washView.alpha > 0
     }
 
     @objc private func handleHover(_ recognizer: UIHoverGestureRecognizer) {
@@ -249,6 +258,25 @@ final class AgentCompactCell: UICollectionViewCell {
         default:
             isHovered = false
         }
+    }
+
+    // UITapGestureRecognizer.cancelsTouchesInView (default true) sends
+    // touchesBegan on real touch-down regardless, then touchesCancelled once
+    // the tap recognizer takes over -- so this tracks the full press duration
+    // correctly even though the gesture recognizer ultimately owns the touch.
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesBegan(touches, with: event)
+        isPressed = true
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesEnded(touches, with: event)
+        isPressed = false
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesCancelled(touches, with: event)
+        isPressed = false
     }
 
     /// Internal (not private) so the tap path is directly unit-testable,

@@ -7,8 +7,10 @@
 //  REAL app (not a Swift Testing fixture, not an Xcode-canvas preview) with
 //  message data shaped exactly like the real wire (same Message/
 //  MessageProvenance shapes MessageKindClassifierTests validates against),
-//  so the actual MessageFlowCollectionView renders substrate/marker rows
-//  end-to-end and can be screenshotted as verification evidence. Gated
+//  so the actual MessageFlowCollectionView renders substrate/agent-compact
+//  rows end-to-end and can be screenshotted as verification evidence. No
+//  marker rows: the wire carries no marker signal today, so production
+//  correctly renders none here either. Gated
 //  behind #if DEBUG and a launch argument; never reachable in a Release
 //  build or without explicitly opting in.
 //

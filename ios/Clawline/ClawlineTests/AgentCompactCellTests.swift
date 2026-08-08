@@ -77,4 +77,27 @@ struct AgentCompactCellTests {
         cell.handleTap()
         #expect(tapped)
     }
+
+    @Test("touch-down shows the press wash, touch-up hides it again")
+    @MainActor
+    func touchDownShowsPressWash() {
+        let cell = AgentCompactCell()
+        cell.configure(senderLine: "coder \u{00B7} gibson", previewText: "preview", isDark: false) {}
+        #expect(cell.isWashVisibleForTesting == false)
+        cell.touchesBegan([], with: nil)
+        #expect(cell.isWashVisibleForTesting == true)
+        cell.touchesEnded([], with: nil)
+        #expect(cell.isWashVisibleForTesting == false)
+    }
+
+    @Test("a cancelled touch (the tap recognizer taking over) also hides the press wash")
+    @MainActor
+    func cancelledTouchHidesPressWash() {
+        let cell = AgentCompactCell()
+        cell.configure(senderLine: "coder \u{00B7} gibson", previewText: "preview", isDark: false) {}
+        cell.touchesBegan([], with: nil)
+        #expect(cell.isWashVisibleForTesting == true)
+        cell.touchesCancelled([], with: nil)
+        #expect(cell.isWashVisibleForTesting == false)
+    }
 }

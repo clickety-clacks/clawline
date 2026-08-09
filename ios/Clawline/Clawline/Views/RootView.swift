@@ -61,6 +61,7 @@ struct RootView: View {
                 ChatView(viewModel: chatViewModel, toastManager: toastManager)
             } else {
                 ProgressView()
+                    .accessibilityLabel("Loading chats")
                     .task {
                         logger.info(
                             "[T099-PIN] root=\(self.rootViewTraceId, privacy: .public) event=progress_task_ensureChatViewModel auth=\(self.auth.isAuthenticated, privacy: .public) providerConfigured=\(self.isProviderConfigured, privacy: .public)"

@@ -371,9 +371,11 @@ struct T1645FooterUsageTests {
         model: String = "gpt-5.6",
         thinkingLevel: String = "medium",
         fastMode: Bool = true,
+        harness: String? = nil,
         usageJSON: String?
     ) throws -> SessionStatus {
         let usageField = usageJSON.map { ", \"codexUsage\": \($0)" } ?? ""
+        let harnessField = harness.map { ",\n        \"harness\": \"\($0)\"" } ?? ""
         let generationField = metadataContextGeneration.map {
             "\"metadataContextGeneration\": \"\($0)\","
         } ?? ""
@@ -384,10 +386,9 @@ struct T1645FooterUsageTests {
           "display": {
             "model": "\(model)",
             "provider": "openai-codex",
-            "harness": "codex",
             "authMode": "\(authMode)",
             "thinkingLevel": "\(thinkingLevel)",
-            "fastMode": \(fastMode)
+            "fastMode": \(fastMode)\(harnessField)
             \(usageField)
           },
           "run": {"state": "idle"},

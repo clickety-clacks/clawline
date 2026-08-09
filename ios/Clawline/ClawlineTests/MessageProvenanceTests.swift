@@ -252,8 +252,8 @@ struct MessageProvenanceBubbleTests {
         #expect(chip?.textForTests == "⚙ ci")
     }
 
-    @Test("provenance uses the inbound bubble treatment when chrome is on")
-    func provenanceUsesInboundBubbleTreatment() {
+    @Test("non-user provenance uses the inbound bubble treatment when chrome is on")
+    func nonUserProvenanceUsesInboundBubbleTreatment() {
         let message = makeMessage(sender: "agent:atlas", content: "[from agent:atlas]\nDeploy is green.")
         let gatedBubble = configuredBubble(message: message, showsProvenanceChrome: true)
         let ungatedBubble = configuredBubble(message: message, showsProvenanceChrome: false)
@@ -267,6 +267,24 @@ struct MessageProvenanceBubbleTests {
             palette.bubbleSelfGradient,
             by: { $0.isEqual($1) }
         ))
+    }
+
+    @Test("user provenance keeps the self bubble treatment when chrome is on")
+    func userProvenanceKeepsSelfBubbleTreatment() {
+        let message = makeMessage(sender: "user:mike", content: "[from user:mike]\nReview the release notes.")
+        let gatedBubble = configuredBubble(message: message, showsProvenanceChrome: true)
+        let palette = ChatFlowUIKitTheme.palette(isDark: false)
+
+        #expect(gatedBubble.debugBubbleGradientColorsForTests().elementsEqual(
+            palette.bubbleSelfGradient,
+            by: { $0.isEqual($1) }
+        ))
+
+        let chip = findSubview(in: gatedBubble) { $0 is ProvenanceChipView } as? ProvenanceChipView
+        #expect(chip?.textForTests == "mike")
+        let bodyTexts = bodyTextViews(in: gatedBubble).compactMap { $0.text }
+        #expect(bodyTexts.contains { $0.contains("Review the release notes.") })
+        #expect(bodyTexts.allSatisfy { !$0.contains("[from user:mike]") })
     }
 
     @Test("chrome off renders exactly as today: no chip, stamp left as text")

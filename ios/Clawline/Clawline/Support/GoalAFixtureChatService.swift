@@ -59,7 +59,7 @@ final class GoalAFixtureChatService: ChatServicing {
     private var connectedEpoch: Int?
     private var hasStartedTranscript = false
 
-    var serverFeatures: [String] { [] }
+    var serverFeatures: [String] { ["tightbeam"] }
     var isTransportReadyForSend: Bool { true }
 
     init() {
@@ -278,6 +278,11 @@ final class GoalAFixtureChatService: ChatServicing {
         send(fixtureMessage(
             role: .user, sender: "agent:coder:gibson",
             content: "Report: marker dividers, segment-anchor, and the agent-compact seam are wired end-to-end. Screenshots attached to the verification artifact."
+        ))
+        guard await wait() else { return }
+        send(fixtureMessage(
+            role: .user, sender: "user:mike",
+            content: "Review the direct wake rendering before release."
         ))
     }
 

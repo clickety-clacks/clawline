@@ -831,10 +831,14 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     }
 
     private func bubbleGradientColors(for role: Message.Role, palette: ChatFlowUIKitTheme.Palette) -> [UIColor] {
-        // A wake-delivered `role=user` message is inbound to the agent, not text
-        // typed on this device. Keep its user-side placement, but use the inbound
-        // palette so the bubble treatment reinforces the provenance chip.
+        // A wake-delivered operator action (`sender=user:*`) is still Mike's own
+        // request. Keep the provenance cue, but do not borrow the inbound palette.
+        // Other provenance-bearing user-role messages that reach this ordinary
+        // bubble keep the existing inbound treatment.
         if role == .user, provenanceChipVisible {
+            if case .user? = currentMessage?.provenanceOrigin {
+                return palette.bubbleSelfGradient
+            }
             return palette.bubbleOtherGradient
         }
         if isCollapsedUserOnlyMode, role == .user {

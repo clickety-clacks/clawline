@@ -120,6 +120,16 @@ private final class AgentRelayIconView: UIView {
 final class AgentCompactCell: UICollectionViewCell {
     static let reuseIdentifier = "AgentCompactCell"
     static let leadingIndent: CGFloat = 12
+    static let maximumPreviewLines = 3
+
+    private enum Layout {
+        static let avatarSize: CGFloat = 22
+        static let avatarToText: CGFloat = 10
+        static let textToMore: CGFloat = 4
+        static let trailingInset: CGFloat = 12
+        static let verticalInset: CGFloat = 5
+        static let attributionToPreview: CGFloat = 2
+    }
 
     private let washView = UIView()
     private let avatarView = AgentRelayAvatarView()
@@ -127,6 +137,9 @@ final class AgentCompactCell: UICollectionViewCell {
     private let previewLabel = UILabel()
     private let moreLabel = UILabel()
     private var onTap: (() -> Void)?
+    private var configuredSenderLine: String?
+    private var configuredPreviewText: String?
+    private var configuredIsDark = false
     /// Trackpad/mouse hover on iPad and Catalyst, from UIHoverGestureRecognizer.
     private var isHovered = false {
         didSet { updateWashVisibility() }
@@ -159,29 +172,29 @@ final class AgentCompactCell: UICollectionViewCell {
 
         contentView.addSubview(avatarView)
 
+        // Attribution has its own single-line slot. The body then receives
+        // an independent one-to-three-line budget, so a long sender can
+        // never consume every preview line at accessibility sizes.
         senderLabel.translatesAutoresizingMaskIntoConstraints = false
-        // 12px/600 per spec -- .senderName already bakes in exactly that
-        // (caption1 + semibold), same role ExpandedMessageSheet uses for
-        // sender display. .secondaryLabel here was the 13px preview-text
-        // size, one step too large for the sender role.
-        senderLabel.font = UIFont.clawline(.senderName)
         senderLabel.adjustsFontForContentSizeCategory = true
         senderLabel.numberOfLines = 1
-        senderLabel.setContentHuggingPriority(.required, for: .horizontal)
-        senderLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        senderLabel.lineBreakMode = .byTruncatingTail
+        senderLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        senderLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         contentView.addSubview(senderLabel)
 
         previewLabel.translatesAutoresizingMaskIntoConstraints = false
-        previewLabel.font = UIFont.clawline(.secondaryLabel)
         previewLabel.adjustsFontForContentSizeCategory = true
-        previewLabel.numberOfLines = 1
+        previewLabel.numberOfLines = Self.maximumPreviewLines
         previewLabel.lineBreakMode = .byTruncatingTail
+        previewLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
         previewLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         contentView.addSubview(previewLabel)
 
         moreLabel.translatesAutoresizingMaskIntoConstraints = false
         moreLabel.text = "\u{22EF}"
         moreLabel.font = UIFont.clawline(.secondaryLabel, weight: .bold)
+        moreLabel.adjustsFontForContentSizeCategory = true
         moreLabel.setContentHuggingPriority(.required, for: .horizontal)
         moreLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         contentView.addSubview(moreLabel)
@@ -193,15 +206,15 @@ final class AgentCompactCell: UICollectionViewCell {
             washView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             avatarView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Self.leadingIndent),
             avatarView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-            senderLabel.leadingAnchor.constraint(equalTo: avatarView.trailingAnchor, constant: 10),
-            senderLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-            previewLabel.leadingAnchor.constraint(equalTo: senderLabel.trailingAnchor, constant: 8),
-            previewLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-            moreLabel.leadingAnchor.constraint(equalTo: previewLabel.trailingAnchor, constant: 4),
-            moreLabel.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -12),
-            moreLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-            senderLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 5),
-            senderLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -5)
+            senderLabel.leadingAnchor.constraint(equalTo: avatarView.trailingAnchor, constant: Layout.avatarToText),
+            senderLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Layout.verticalInset),
+            senderLabel.trailingAnchor.constraint(equalTo: moreLabel.leadingAnchor, constant: -Layout.textToMore),
+            previewLabel.leadingAnchor.constraint(equalTo: senderLabel.leadingAnchor),
+            previewLabel.topAnchor.constraint(equalTo: senderLabel.bottomAnchor, constant: Layout.attributionToPreview),
+            previewLabel.trailingAnchor.constraint(equalTo: moreLabel.leadingAnchor, constant: -Layout.textToMore),
+            previewLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Layout.verticalInset),
+            moreLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Layout.trailingInset),
+            moreLabel.lastBaselineAnchor.constraint(equalTo: previewLabel.lastBaselineAnchor)
         ])
 
         isAccessibilityElement = true
@@ -216,29 +229,123 @@ final class AgentCompactCell: UICollectionViewCell {
     ///   - senderLine: attribution only, e.g. "coder \u{00B7} gibson" -- built
     ///     from the message's provenance handle (`AgentCompactCell.displaySenderLine`),
     ///     never inferred from content.
-    ///   - previewText: first line of the (stamp-stripped) content, single-line
-    ///     truncated by the label itself.
+    ///   - previewText: full stamp-stripped content. The label wraps it
+    ///     naturally and truncates only after its third visible line.
     ///   - onTap: opens full contents via the click-to-detail bridge.
     func configure(senderLine: String, previewText: String, isDark: Bool, onTap: @escaping () -> Void) {
         self.onTap = onTap
-        let accent = ChatFlowUIKitTheme.agentAccent(isDark: isDark)
-        senderLabel.text = senderLine
-        senderLabel.textColor = accent
-        previewLabel.text = previewText
-        previewLabel.textColor = ChatFlowUIKitTheme.textAgentLine(isDark: isDark)
-        moreLabel.textColor = accent
-        washView.backgroundColor = accent.withAlphaComponent(0.09)
+        configuredSenderLine = senderLine
+        configuredPreviewText = previewText
+        configuredIsDark = isDark
+        applyConfiguredContent()
         accessibilityLabel = "Agent report from \(senderLine). Open full content."
     }
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        configuredSenderLine = nil
+        configuredPreviewText = nil
+        configuredIsDark = false
         senderLabel.text = nil
         previewLabel.text = nil
         accessibilityLabel = nil
         onTap = nil
         isHovered = false
         isPressed = false
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard previousTraitCollection?.preferredContentSizeCategory
+            != traitCollection.preferredContentSizeCategory
+        else { return }
+        applyConfiguredContent()
+    }
+
+    private func applyConfiguredContent() {
+        guard let configuredSenderLine, let configuredPreviewText else { return }
+        let accent = ChatFlowUIKitTheme.agentAccent(isDark: configuredIsDark)
+        senderLabel.text = configuredSenderLine
+        senderLabel.font = UIFont.clawline(.senderName, compatibleWith: traitCollection)
+        senderLabel.textColor = accent
+        previewLabel.text = configuredPreviewText
+        previewLabel.font = UIFont.clawline(.secondaryLabel, compatibleWith: traitCollection)
+        previewLabel.textColor = ChatFlowUIKitTheme.textAgentLine(isDark: configuredIsDark)
+        moreLabel.font = UIFont.clawline(
+            .secondaryLabel,
+            weight: .bold,
+            compatibleWith: traitCollection
+        )
+        moreLabel.textColor = accent
+        washView.backgroundColor = accent.withAlphaComponent(0.09)
+    }
+
+    /// The collection layout uses this exact cell geometry because its flow
+    /// layout has self-sizing disabled. Keeping measurement here prevents a
+    /// second, drifting definition of the three-line cap.
+    static func measuredHeight(
+        senderLine: String,
+        previewText: String,
+        rowWidth: CGFloat,
+        compatibleWith traitCollection: UITraitCollection?
+    ) -> CGFloat {
+        let moreFont = UIFont.clawline(
+            .secondaryLabel,
+            weight: .bold,
+            compatibleWith: traitCollection
+        )
+        let moreWidth = ceil(("\u{22EF}" as NSString).size(withAttributes: [.font: moreFont]).width)
+        let textWidth = max(
+            rowWidth
+                - Self.leadingIndent
+                - Layout.avatarSize
+                - Layout.avatarToText
+                - Layout.textToMore
+                - moreWidth
+                - Layout.trailingInset,
+            1
+        )
+        let senderFont = UIFont.clawline(.senderName, compatibleWith: traitCollection)
+        let previewFont = UIFont.clawline(.secondaryLabel, compatibleWith: traitCollection)
+        let senderHeight = measuredLabelHeight(
+            text: senderLine,
+            font: senderFont,
+            width: textWidth,
+            lineLimit: 1
+        )
+        let previewHeight: CGFloat
+        if previewText.isEmpty {
+            previewHeight = 0
+        } else {
+            previewHeight = measuredLabelHeight(
+                text: previewText,
+                font: previewFont,
+                width: textWidth,
+                lineLimit: Self.maximumPreviewLines
+            )
+        }
+        let attributionSpacing = senderHeight > 0 && previewHeight > 0
+            ? Layout.attributionToPreview
+            : 0
+        let textHeight = senderHeight + attributionSpacing + previewHeight
+        return ceil(max(Layout.avatarSize, textHeight) + (Layout.verticalInset * 2))
+    }
+
+    private static func measuredLabelHeight(
+        text: String,
+        font: UIFont,
+        width: CGFloat,
+        lineLimit: Int
+    ) -> CGFloat {
+        guard !text.isEmpty else { return 0 }
+        let label = UILabel()
+        label.font = font
+        label.numberOfLines = lineLimit
+        label.lineBreakMode = .byTruncatingTail
+        label.text = text
+        return ceil(label.sizeThatFits(
+            CGSize(width: width, height: .greatestFiniteMagnitude)
+        ).height)
     }
 
     private func updateWashVisibility() {
@@ -249,6 +356,19 @@ final class AgentCompactCell: UICollectionViewCell {
     /// unit-testable, same convention as handleTap() below.
     var isWashVisibleForTesting: Bool {
         washView.alpha > 0
+    }
+
+    var contentTextForTesting: String? {
+        guard let sender = senderLabel.text, let preview = previewLabel.text else { return nil }
+        return preview.isEmpty ? sender : "\(sender) \(preview)"
+    }
+
+    var previewLineLimitForTesting: Int {
+        previewLabel.numberOfLines
+    }
+
+    var previewLineBreakModeForTesting: NSLineBreakMode {
+        previewLabel.lineBreakMode
     }
 
     @objc private func handleHover(_ recognizer: UIHoverGestureRecognizer) {
@@ -292,11 +412,4 @@ final class AgentCompactCell: UICollectionViewCell {
         handle.replacingOccurrences(of: ":", with: " \u{00B7} ")
     }
 
-    /// The first line of `content`, for a single-line truncated preview.
-    static func firstLine(of content: String) -> String {
-        if let newlineIndex = content.firstIndex(of: "\n") {
-            return String(content[content.startIndex..<newlineIndex])
-        }
-        return content
-    }
 }

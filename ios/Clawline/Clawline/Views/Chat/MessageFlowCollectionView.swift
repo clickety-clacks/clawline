@@ -5238,7 +5238,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 let displayMessage = message.strippingProvenanceStampForDisplay()
                 cell?.configure(
                     senderLine: AgentCompactCell.displaySenderLine(forHandle: handle),
-                    previewText: AgentCompactCell.firstLine(of: displayMessage.content),
+                    previewText: displayMessage.content,
                     isDark: self.currentIsDark,
                     onTap: { [weak self] in
                         self?.onOpenDetail?(message)
@@ -5889,8 +5889,20 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
         if message.messageKind == .agent {
             let rowWidth = availableContentWidth()
-            let lineHeight = UIFont.clawline(.secondaryLabel, weight: .semibold).lineHeight
-            return CGSize(width: rowWidth, height: ceil(lineHeight) + 10)
+            let displayMessage = message.strippingProvenanceStampForDisplay()
+            let senderLine: String
+            if case let .agent(handle)? = message.provenanceOrigin {
+                senderLine = AgentCompactCell.displaySenderLine(forHandle: handle)
+            } else {
+                senderLine = ""
+            }
+            let height = AgentCompactCell.measuredHeight(
+                senderLine: senderLine,
+                previewText: displayMessage.content,
+                rowWidth: rowWidth,
+                compatibleWith: collectionView.traitCollection
+            )
+            return CGSize(width: rowWidth, height: height)
         }
 
         if bubbleSizingV2Enabled {

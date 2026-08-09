@@ -738,10 +738,40 @@ final class ChatViewModel {
 
     /// Whether a Tightbeam-gated session control may be applied right now. Used
     /// to keep a pending harness confirmation from driving set_harness after the
-    /// gate closed.
-    func canApplyTightbeamSessionControl(_ action: SessionControlAction) -> Bool {
+    /// gate or per-session capability closed.
+    func canApplyTightbeamSessionControl(_ action: SessionControlAction, sessionKey: String? = nil) -> Bool {
         guard action == .setHarness else { return true }
-        return isTightbeamServer
+        let authorityKey = sessionStatusAuthorityKey(for: sessionKey ?? engineActiveSessionKey)
+        guard !authorityKey.isEmpty else { return false }
+        return sessionStatus(for: authorityKey)?.capabilities.setHarness?.supported == true
+    }
+
+    func unavailableSessionControlReason(_ action: SessionControlAction, sessionKey: String? = nil) -> String? {
+        guard action == .setHarness else { return nil }
+        let authorityKey = sessionStatusAuthorityKey(for: sessionKey ?? engineActiveSessionKey)
+        guard !authorityKey.isEmpty else { return "session_status_loading" }
+        guard let capability = sessionStatus(for: authorityKey)?.capabilities.setHarness else {
+            if !isTightbeamServer {
+                return "tightbeam_feature_unavailable"
+            }
+            return "session_status_loading"
+        }
+        guard capability.supported else { return capability.reason ?? "set_harness_unsupported" }
+        let options = capability.options?.compactMap { $0.value ?? $0.title } ?? []
+        return options.isEmpty ? "harness_options_unavailable" : nil
+    }
+
+    func showUnavailableSessionControlReason(_ reason: String?) {
+        let trimmedReason = reason?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let reasonText: String
+        if let trimmedReason, !trimmedReason.isEmpty {
+            reasonText = trimmedReason
+        } else {
+            reasonText = "unknown_reason"
+        }
+        toastManager.show(
+            "This control is unavailable: \(reasonText). Refresh session status and try again."
+        )
     }
 
     func applySessionControl(
@@ -758,7 +788,12 @@ final class ChatViewModel {
             // between enqueueing this task and its execution (the modal's
             // synchronous check is not enough), and a Tightbeam-only control
             // must never post to a link that lost the feature.
-            guard self.canApplyTightbeamSessionControl(action) else { return }
+            guard self.canApplyTightbeamSessionControl(action, sessionKey: normalizedSessionKey) else {
+                self.showUnavailableSessionControlReason(
+                    self.unavailableSessionControlReason(action, sessionKey: normalizedSessionKey)
+                )
+                return
+            }
             do {
                 let response = try await self.chatService.applySessionControl(
                     sessionKey: normalizedSessionKey,
@@ -1023,16 +1058,15 @@ final class ChatViewModel {
     /// harness picker (T1751); the creation sheet (T1750) will read the rest.
     private(set) var orgOptions: OrgOptions?
     private var isLoadingOrgOptions = false
-    /// Harness picker options. Prefers the `setHarness` capability decoded off
-    /// session-status (which loads on every session) over `/api/org-options`
-    /// (launch-time only, and fails closed under TLS trouble against gibson),
-    /// so a failed org-options load no longer strands the picker disabled.
+    /// Harness picker options from the `setHarness` capability decoded off
+    /// session-status. The footer must not fall back to org-options here:
+    /// org-options are broad catalog data, while live session-status is the
+    /// per-session authority that says whether these options are actionable now.
     var orgOptionsHarnesses: [String] {
-        let capabilityOptions = sessionStatus(for: engineActiveSessionKey)?
-            .capabilities.setHarness?.options?
-            .compactMap { $0.value ?? $0.title } ?? []
-        if !capabilityOptions.isEmpty { return capabilityOptions }
-        return orgOptions?.harnesses ?? []
+        guard let capability = sessionStatus(for: engineActiveSessionKey)?.capabilities.setHarness,
+              capability.supported
+        else { return [] }
+        return capability.options?.compactMap { $0.value ?? $0.title } ?? []
     }
     private var hasResolvedProvisioningCapability = true
     private var hasReceivedSessionProvisioning = false

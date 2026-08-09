@@ -1303,9 +1303,8 @@ struct ChatView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
-        // Same gate rule as the creation sheet: a pending harness confirmation
-        // must not survive the Tightbeam gate closing and drive set_harness
-        // against an ungated server.
+        // Same coarse gate rule as the creation sheet. The confirm action below
+        // also rechecks the per-session setHarness capability before posting.
         .onChange(of: viewModel.isTightbeamServer) { _, isTightbeam in
             if !isTightbeam { pendingHarnessChange = nil }
         }
@@ -1319,11 +1318,15 @@ struct ChatView: View {
             presenting: pendingHarnessChange
         ) { change in
             Button("Switch to \(change.harness)", role: .destructive) {
-                if viewModel.canApplyTightbeamSessionControl(.setHarness) {
+                if viewModel.canApplyTightbeamSessionControl(.setHarness, sessionKey: change.sessionKey) {
                     viewModel.applySessionControl(
                         sessionKey: change.sessionKey,
                         action: .setHarness,
                         value: change.harness
+                    )
+                } else {
+                    viewModel.showUnavailableSessionControlReason(
+                        viewModel.unavailableSessionControlReason(.setHarness, sessionKey: change.sessionKey)
                     )
                 }
                 pendingHarnessChange = nil
@@ -2887,6 +2890,9 @@ struct ChatView: View {
                     value: value,
                     enabled: enabled
                 )
+            },
+            onUnavailableSessionControlSelected: { reason in
+                viewModel.showUnavailableSessionControlReason(reason)
             },
             onFooterTestMenuSelected: { action in
                 switch action {

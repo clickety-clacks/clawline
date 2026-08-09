@@ -411,6 +411,37 @@ struct SessionMetadataFooterHitTestingTests {
         #expect(disabledButtons.allSatisfy { !$0.isEnabled })
     }
 
+    @Test("Harness footer uses setHarness capability reason and does not build a menu when unsupported")
+    func harnessFooterSurfacesSetHarnessUnsupportedReason() async throws {
+        var unavailableReason: String?
+        let status = makeStatus(
+            harness: "codex",
+            setHarness: .init(
+                supported: false,
+                reason: "credential_unavailable",
+                options: [.init(title: "claude", value: "claude", enabled: true)]
+            )
+        )
+        let cell = makeConfiguredCell(
+            status: status,
+            isTightbeam: true,
+            harnessOptions: ["claude"],
+            onUnavailableSelect: { reason in unavailableReason = reason }
+        )
+
+        let harnessButton = try #require(
+            footerActionButtons(in: cell).first { $0.accessibilityLabel == "Harness codex" }
+        )
+        #expect(harnessButton.isEnabled)
+        #expect(harnessButton.menu == nil)
+        #expect(harnessButton.accessibilityHint == "credential_unavailable")
+
+        harnessButton.sendActions(for: .primaryActionTriggered)
+        try await Task.sleep(for: .milliseconds(20))
+
+        #expect(unavailableReason == "credential_unavailable")
+    }
+
     @Test("Popup selectors mark current item with checkmark image instead of text")
     func popupSelectorsMarkCurrentItemWithCheckmarkImageInsteadOfText() throws {
         let cell = makeConfiguredCell()
@@ -442,16 +473,35 @@ private func makeConfiguredCell(authMode: String? = nil, isDark: Bool = false, i
     makeConfiguredCell(status: makeStatus(authMode: authMode), isDark: isDark, isSpatial: isSpatial)
 }
 
-private func makeConfiguredCell(status: SessionStatus?, isDark: Bool = false, isSpatial: Bool = false) -> SessionMetadataFooterCell {
+private func makeConfiguredCell(
+    status: SessionStatus?,
+    isDark: Bool = false,
+    isSpatial: Bool = false,
+    isTightbeam: Bool = false,
+    harnessOptions: [String] = [],
+    onUnavailableSelect: (@MainActor (String) -> Void)? = nil
+) -> SessionMetadataFooterCell {
     let cell = SessionMetadataFooterCell(
         frame: CGRect(
             x: 0,
             y: 0,
             width: 320,
-            height: SessionMetadataFooterCell.height(for: status)
+            height: SessionMetadataFooterCell.height(
+                for: status,
+                isTightbeam: isTightbeam,
+                harnessOptions: harnessOptions
+            )
         )
     )
-    cell.configure(status: status, isDark: isDark, isSpatial: isSpatial, onSelect: { _, _, _, _ in })
+    cell.configure(
+        status: status,
+        isDark: isDark,
+        isSpatial: isSpatial,
+        isTightbeam: isTightbeam,
+        harnessOptions: harnessOptions,
+        onSelect: { _, _, _, _ in },
+        onUnavailableSelect: onUnavailableSelect
+    )
     cell.setNeedsLayout()
     cell.layoutIfNeeded()
     return cell
@@ -462,9 +512,11 @@ private func makeStatus(
     model: String? = "gpt-5.5",
     thinkingLevel: String? = "high",
     fastMode: Bool? = true,
+    harness: String? = nil,
     setModel: SessionStatus.Capability? = .init(supported: true, reason: nil),
     setThinking: SessionStatus.Capability? = .init(supported: true, reason: nil),
-    setFastMode: SessionStatus.Capability? = .init(supported: true, reason: nil)
+    setFastMode: SessionStatus.Capability? = .init(supported: true, reason: nil),
+    setHarness: SessionStatus.Capability? = nil
 ) -> SessionStatus {
     SessionStatus(
         sessionKey: "agent:main:clawline:user:s_test",
@@ -472,7 +524,7 @@ private func makeStatus(
             model: model,
             fallbackModels: ["gpt-5.5", "claude-sonnet-4.6"],
             provider: "openai",
-            harness: nil,
+            harness: harness,
             authMode: authMode,
             reasoningLevel: nil,
             thinkingLevel: thinkingLevel,
@@ -497,6 +549,7 @@ private func makeStatus(
             setFastMode: setFastMode,
             setMode: nil,
             setVerbosity: nil,
+            setHarness: setHarness,
             canCancelCurrentRun: nil,
             canChangeModel: nil,
             canChangeReasoning: nil,

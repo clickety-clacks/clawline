@@ -1853,9 +1853,9 @@ struct ChatViewModelTests {
         #expect(viewModel.orgOptions?.harnesses.contains("stale-A") != true)
     }
 
-    @Test("orgOptionsHarnesses prefers the setHarness session-status capability over org-options, and falls back when the capability is absent")
+    @Test("orgOptionsHarnesses uses setHarness session-status capability and does not fall back to org-options when capability is absent")
     @MainActor
-    func orgOptionsHarnessesPrefersSessionStatusCapability() async throws {
+    func orgOptionsHarnessesUsesSessionStatusCapabilityOnly() async throws {
         resetChatPersistence()
         let auth = TestAuthManager()
         auth.storeCredentials(token: "jwt", userId: "user")
@@ -1891,8 +1891,10 @@ struct ChatViewModelTests {
         }
 
         #expect(viewModel.orgOptionsHarnesses == ["claude", "codex"])
+        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness, sessionKey: personalSessionKey))
 
-        // Capability absent (nil, distinct from empty) -> falls back to org-options.
+        // Capability absent (nil, distinct from empty) -> no actionable footer
+        // options. Broad org-options must not become a live per-session action.
         let firstFetchCount = chatService.fetchSessionStatusCallCount
         chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
             sessionKey: personalSessionKey,
@@ -1912,7 +1914,8 @@ struct ChatViewModelTests {
             try await Task.sleep(for: .milliseconds(20))
         }
 
-        #expect(viewModel.orgOptionsHarnesses == ["org-only"])
+        #expect(viewModel.orgOptionsHarnesses == [])
+        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness, sessionKey: personalSessionKey) == false)
     }
 
     @Test("F3 regression: prepareForReplacement cancels the in-flight org-options task")
@@ -2051,7 +2054,7 @@ struct ChatViewModelTests {
             try await Task.sleep(forDuration: .milliseconds(10))
         }
         #expect(viewModel.isTightbeamServer)
-        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness))
+        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness) == false)
 
         // Gate closes (feature set without "tightbeam").
         chatService.serverFeatures = []
@@ -2109,7 +2112,7 @@ struct ChatViewModelTests {
             try await Task.sleep(forDuration: .milliseconds(10))
         }
         #expect(viewModel.isTightbeamServer)
-        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness))
+        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness) == false)
 
         // The link drops: production's handleSocketClose clears the service's
         // authoritative feature set BEFORE it drives the coordinator, so the

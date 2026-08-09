@@ -69,7 +69,7 @@ struct MessageFlowCacheSeamIntegrityTests {
             return
         }
 
-        let windowEnd = min(lines.count, branchStart + 12)
+        let windowEnd = min(lines.count, branchStart + 9)
         let branchWindow = lines[branchStart..<windowEnd]
 
         #expect(
@@ -125,12 +125,13 @@ struct MessageFlowCacheSeamIntegrityTests {
             "Pair-specific spacing must participate in the layout cache signature."
         )
         #expect(
-            contents.contains("let size = (collectionView.delegate as? UICollectionViewDelegateFlowLayout)?\n                .collectionView?(collectionView, layout: self, sizeForItemAt: indexPath) ?? itemSize\n            layoutItems.append(MessageFlowRowLayoutEngine.Item(index: item, size: size))"),
+            contents.contains("let size = (collectionView.delegate as? UICollectionViewDelegateFlowLayout)?\n                .collectionView?(collectionView, layout: self, sizeForItemAt: indexPath) ?? itemSize")
+                && contents.contains("layoutItems.append(MessageFlowRowLayoutEngine.Item(index: item, size: size))"),
             "Full row composition must use delegate sizeForItem output, not a stale or partial cell frame."
         )
         #expect(
-            contents.contains("guard isNormalMessageItem(at: previousIndex),\n              isNormalMessageItem(at: nextIndex) else"),
-            "Only normal message-to-message adjacency should use compact T1484 spacing."
+            contents.contains("guard isCardFlowItem(at: previousIndex),\n              isCardFlowItem(at: nextIndex) else"),
+            "Every ordinary or special card-flow adjacency should use compact T1484 spacing."
         )
         #expect(
             contents.contains("let rowSpacingFingerprint: Int"),
@@ -148,6 +149,48 @@ struct MessageFlowCacheSeamIntegrityTests {
             contents.contains("static func shouldApplyBubbleSizingV2Remeasure(isNearBottom _: Bool, isScrollAtRest: Bool) -> Bool"),
             "T1193 proof: V2 remeasure flushing should be controlled by a testable first-pass cache policy."
         )
+    }
+
+    @Test("special presentations cannot reintroduce availableContentWidth sizing")
+    func specialPresentationsUseSharedBoundedWidthSeam() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Clawline/Views/Chat/MessageFlowCollectionView.swift")
+        let contents = try String(contentsOf: sourceURL, encoding: .utf8)
+        let lines = contents.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+
+        guard let sizeForItemStart = lines.firstIndex(where: {
+                  $0.contains("private func sizeForItem(at indexPath: IndexPath)")
+              }),
+              let sizeForItemEnd = lines[sizeForItemStart...].firstIndex(where: {
+                  $0.contains("private func measureUIKitBubbleSize")
+              })
+        else {
+            Issue.record("Unable to locate sizeForItem(at:) special-presentation branches.")
+            return
+        }
+        let sizing = lines[sizeForItemStart..<sizeForItemEnd].joined(separator: "\n")
+
+        for branch in [
+            "if MarkerDividerCell.isMarkerDividerItemID(id)",
+            "if id.hasPrefix(Self.substrateRunItemIdPrefix)",
+            "if message.messageKind == .substrate",
+            "if message.messageKind == .agent"
+        ] {
+            guard let branchRange = sizing.range(of: branch) else {
+                Issue.record("Missing special-presentation sizing branch: \(branch)")
+                continue
+            }
+            let suffix = sizing[branchRange.lowerBound...]
+            let nextBranch = suffix.dropFirst(branch.count).range(of: "\n        if ")?.lowerBound
+            let branchBody = nextBranch.map { String(suffix[..<$0]) } ?? String(suffix)
+            #expect(branchBody.contains("let rowWidth = effectiveContentWidth(metrics: metrics)"))
+            #expect(!branchBody.contains("let rowWidth = availableContentWidth()"))
+        }
+
+        #expect(contents.contains("Self.lastCardFlowItemID("))
+        #expect(contents.contains("isCardFlowItem(at: previousIndex)"))
     }
 
     @Test("T1193: V2 sizing and visible cells consume one authoritative layout state")

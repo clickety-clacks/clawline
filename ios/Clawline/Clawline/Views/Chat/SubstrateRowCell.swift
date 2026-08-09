@@ -3,7 +3,7 @@
 //  Clawline
 //
 //  Cycle-3 Goal A, step 2. Chromeless ghost-row rendering for `.substrate`
-//  classified messages (MessageKindClassifier). Full-width, no bubble, no
+//  classified messages (MessageKindClassifier). Bounded card-flow width, no bubble, no
 //  border, no shadow, no hover lift — "the ground is not an object"
 //  (bubble-additions.html Substrate spec).
 //
@@ -14,18 +14,96 @@
 //  identically to the live voice"), and today there is no reliable wire
 //  signal that distinguishes a record-shaped substrate message from a
 //  live-voice one (Goal A step-1 observability report: no structured
-//  discriminator field exists). `SubstrateRowStyle` is therefore modeled as a
-//  seam — `.record` renders correctly when passed in — but no call site
+//  discriminator field exists). `SubstrateRowHeader.record` is therefore
+//  modeled as a seam — it renders correctly when passed in — but no call site
 //  classifies a message as `.record` yet; every substrate row renders
-//  `.liveVoice` today. Wire a `.record` classifier once a reliable signal
+//  live voice today. Wire a `.record` classifier once a reliable signal
 //  exists; do not guess one from message text.
 //
 
 import UIKit
 
-enum SubstrateRowStyle: Equatable {
-    case liveVoice
-    case record
+enum SubstrateRowHeader: Equatable {
+    case tightbeam
+    case process(name: String)
+    case record(eventName: String)
+
+    private static let primarySourceName = "Tightbeam"
+    private static let knownProcessSourceNames = [
+        "anthropic": "Anthropic",
+        "chatgpt": "ChatGPT",
+        "ci": "CI",
+        "claude": "Claude",
+        "codex": "Codex",
+        "gemini": "Gemini",
+        "github": "GitHub",
+        "gitlab": "GitLab",
+        "openai": "OpenAI"
+    ]
+
+    /// Resolves the live-voice taxonomy only from durable sender provenance.
+    /// `process:tightbeam` is the substrate itself. Every other meaningful
+    /// process name remains a process delivery and never borrows Tightbeam's
+    /// primary identity.
+    static func liveVoice(for origin: MessageProvenanceOrigin?) -> Self {
+        guard case let .process(name)? = origin else { return .tightbeam }
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty, !isTightbeamOrigin(origin) else {
+            return .tightbeam
+        }
+        let displayName = knownProcessSourceNames[trimmedName.lowercased()] ?? trimmedName
+        return .process(name: displayName)
+    }
+
+    static func isTightbeamOrigin(_ origin: MessageProvenanceOrigin?) -> Bool {
+        guard case let .process(name)? = origin else { return false }
+        return name.trimmingCharacters(in: .whitespacesAndNewlines)
+            .caseInsensitiveCompare(primarySourceName) == .orderedSame
+    }
+
+    var leadLabel: String {
+        switch self {
+        case .tightbeam:
+            return Self.primarySourceName
+        case .process(let name):
+            return "Process • \(name)"
+        case .record(let eventName):
+            return eventName
+        }
+    }
+
+    var avatarSystemName: String {
+        switch self {
+        case .tightbeam:
+            return "gearshape.fill"
+        case .process:
+            return "dot.radiowaves.left.and.right"
+        case .record:
+            return "checkmark"
+        }
+    }
+
+    var avatarAccessibilityLabel: String {
+        switch self {
+        case .tightbeam:
+            return "Tightbeam substrate"
+        case .process:
+            return "Process delivery"
+        case .record:
+            return "Substrate record"
+        }
+    }
+
+    var accessibilityPrefix: String {
+        switch self {
+        case .tightbeam:
+            return "Notice from Tightbeam substrate"
+        case .process(let name):
+            return "Process delivery from \(name)"
+        case .record(let eventName):
+            return "Event: \(eventName)"
+        }
+    }
 }
 
 /// 22px stone sphere avatar shared by substrate live-voice and record rows.
@@ -85,21 +163,15 @@ final class SubstrateStoneAvatarView: UIView {
         gradientLayer.frame = bounds
     }
 
-    func configure(style: SubstrateRowStyle) {
+    func configure(header: SubstrateRowHeader) {
         let config = UIImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
-        switch style {
-        case .liveVoice:
-            iconView.image = UIImage(systemName: "dot.radiowaves.left.and.right", withConfiguration: config)
-            accessibilityLabel = "Substrate"
-        case .record:
-            iconView.image = UIImage(systemName: "checkmark", withConfiguration: config)
-            accessibilityLabel = "Substrate record"
-        }
+        iconView.image = UIImage(systemName: header.avatarSystemName, withConfiguration: config)
+        accessibilityLabel = header.avatarAccessibilityLabel
     }
 }
 
-/// A single substrate ghost row: one classified message rendered chromeless,
-/// full width, 13pt text. Cycle-3 Goal A step 5: the whole row is a real
+/// A single substrate ghost row: one classified message rendered chromeless
+/// at the shared card-flow width, in 13pt text. Cycle-3 Goal A step 5: the whole row is a real
 /// button -- tapping opens the message's full contents via the
 /// click-to-detail bridge (MessageDetailAction.swift), same contract as
 /// SubstrateRunCollapseCell's tap-to-expand and AgentCompactCell's
@@ -110,6 +182,10 @@ final class SubstrateRowCell: UICollectionViewCell {
     static let reuseIdentifier = "SubstrateRowCell"
     static let leadingIndent: CGFloat = 12
     static let expandedStackIndent: CGFloat = 30
+    private static let avatarSize: CGFloat = 22
+    private static let avatarToText: CGFloat = 8
+    private static let trailingInset: CGFloat = 12
+    private static let verticalInset: CGFloat = 6
 
     private let avatarView = SubstrateStoneAvatarView()
     private let textLabel = UILabel()
@@ -155,29 +231,28 @@ final class SubstrateRowCell: UICollectionViewCell {
     }
 
     /// - Parameters:
-    ///   - leadLabel: "tightbeam" for live voice, the event name for records
+    ///   - header: the provenance-derived delivery identity for live voice, or
+    ///     the event name for records
     ///     (bubble-additions.html: lead label is 600 weight, 0.3px tracking).
     ///   - detail: the rest of the line, following the lead label's " · ".
-    ///   - style: live-voice or record (see the type-level note on why
-    ///     `.record` has no producer today).
     ///   - isDark: current theme.
     ///   - isIndentedUnderRun: true when this row is a member of an EXPANDED
     ///     run, stacked under the shared waypoint (bubble-additions.html
     ///     "Collapsed Run" — expanded rows indent under the run's avatar).
     ///   - onTap: opens full contents via the click-to-detail bridge.
     func configure(
-        leadLabel: String,
+        header: SubstrateRowHeader,
         detail: String,
-        style: SubstrateRowStyle,
         isDark: Bool,
         isIndentedUnderRun: Bool,
         onTap: @escaping () -> Void
     ) {
         self.onTap = onTap
-        avatarView.configure(style: style)
+        avatarView.configure(header: header)
         avatarView.isHidden = isIndentedUnderRun
         indentConstraint?.constant = isIndentedUnderRun ? Self.expandedStackIndent : Self.leadingIndent
 
+        let leadLabel = header.leadLabel
         let leadFont = UIFont.clawline(.secondaryLabel, weight: .semibold)
         let bodyFont = UIFont.clawline(.secondaryLabel)
         let textColor = ChatFlowUIKitTheme.textSubstrate(isDark: isDark)
@@ -199,14 +274,7 @@ final class SubstrateRowCell: UICollectionViewCell {
         // lead with the kind" -- "notice from tightbeam substrate" for live
         // voice, "event: <name>" for records), same requirement AgentCompactCell
         // already meets with "Agent report from <sender>. Open full content."
-        let kindPrefix: String
-        switch style {
-        case .liveVoice:
-            kindPrefix = "Notice from tightbeam substrate"
-        case .record:
-            kindPrefix = "Event: \(leadLabel)"
-        }
-        accessibilityLabel = "\(kindPrefix). \(detail). Open full content."
+        accessibilityLabel = "\(header.accessibilityPrefix). \(detail). Open full content."
     }
 
     override func prepareForReuse() {
@@ -221,5 +289,41 @@ final class SubstrateRowCell: UICollectionViewCell {
     /// same convention as SubstrateRunCollapseCell.handleTap().
     @objc func handleTap() {
         onTap?()
+    }
+
+    /// Matches the multiline label and waypoint constraints above. The
+    /// collection layout has self-sizing disabled, so its card-flow width and
+    /// Dynamic Type traits must feed this same measurement seam.
+    static func measuredHeight(
+        header: SubstrateRowHeader,
+        detail: String,
+        rowWidth: CGFloat,
+        isIndentedUnderRun: Bool,
+        compatibleWith traitCollection: UITraitCollection?
+    ) -> CGFloat {
+        let leadingInset = isIndentedUnderRun ? expandedStackIndent : leadingIndent
+        let textWidth = max(
+            rowWidth - leadingInset - avatarSize - avatarToText - trailingInset,
+            1
+        )
+        let leadFont = UIFont.clawline(
+            .secondaryLabel,
+            weight: .semibold,
+            compatibleWith: traitCollection
+        )
+        let bodyFont = UIFont.clawline(.secondaryLabel, compatibleWith: traitCollection)
+        let text = NSMutableAttributedString(
+            string: header.leadLabel,
+            attributes: [.font: leadFont]
+        )
+        text.append(NSAttributedString(string: " \u{00B7} \(detail)", attributes: [.font: bodyFont]))
+
+        let label = UILabel()
+        label.numberOfLines = 0
+        label.attributedText = text
+        let textHeight = label.sizeThatFits(
+            CGSize(width: textWidth, height: .greatestFiniteMagnitude)
+        ).height
+        return ceil(max(avatarSize, textHeight) + (verticalInset * 2))
     }
 }

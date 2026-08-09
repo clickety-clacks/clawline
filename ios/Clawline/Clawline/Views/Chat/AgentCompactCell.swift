@@ -3,7 +3,7 @@
 //  Clawline
 //
 //  Cycle-3 Goal A, step 4. `.agent` classified messages (colleague DMs,
-//  MessageKindClassifier) render as a compact full-width line in the
+//  MessageKindClassifier) render as a compact bounded card-flow line in the
 //  stream -- never the full "harbor" bubble. Per bubble-additions.html
 //  Agent Lines spec: the compact line is the STREAM default; the harbor
 //  bubble is reserved for the detail viewer (Goal B), opened by tapping
@@ -113,7 +113,7 @@ private final class AgentRelayIconView: UIView {
     }
 }
 
-/// A single agent-compact row: full-width, chromeless at rest, a faint
+/// A single agent-compact row: bounded to the shared card flow, chromeless at rest, a faint
 /// harbor wash on hover/press. The whole line is a real button -- tapping
 /// opens the message's full contents via Goal A's click-to-detail bridge
 /// (MessageDetailAction.swift), never a full bubble in the stream itself.

@@ -4029,19 +4029,43 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     private static let substrateRunItemIdPrefix = "__substrate_run__|"
 
-    /// Collapse RUNS of 2+ consecutive .substrate classified message ids
-    /// into one synthetic collapsed-run item id, unless that run is
-    /// currently expanded (transient state). Non-message ids (date
-    /// separators, etc) break a run, same as a visible interruption would.
+    /// Collapse RUNS of 2+ consecutive Tightbeam substrate notice ids into
+    /// one synthetic collapsed-run item id, unless that run is currently
+    /// expanded (transient state). Other process deliveries and non-message
+    /// ids (date separators, etc) break a run, same as a visible interruption
+    /// would.
     /// Grouping is computed fresh here each snapshot build (view-model DATA,
     /// no measurement/layout work) so step-2's chrome never adds main-thread
     /// churn to the MessageFlow hotspot.
     private func snapshotItemsWithSubstrateRunCollapse(from itemIds: [String]) -> [String] {
-        guard !itemIds.isEmpty else {
-            substrateRunMemberIdsByItemId = [:]
-            expandedRunMemberMessageIds = []
-            return itemIds
-        }
+        let projection = Self.collapsedTightbeamRunProjection(
+            from: itemIds,
+            expandedRunItemIds: expandedSubstrateRunItemIds,
+            isTightbeamNotice: { [messagesById] id in
+                guard let message = messagesById[id] else { return false }
+                return Self.isTightbeamRunEligible(message)
+            }
+        )
+        substrateRunMemberIdsByItemId = projection.memberIdsByItemId
+        expandedRunMemberMessageIds = projection.expandedMemberIds
+        return projection.itemIds
+    }
+
+    static func isTightbeamRunEligible(_ message: Message) -> Bool {
+        message.messageKind == .substrate
+            && SubstrateRowHeader.isTightbeamOrigin(message.provenanceOrigin)
+    }
+
+    static func collapsedTightbeamRunProjection(
+        from itemIds: [String],
+        expandedRunItemIds: Set<String>,
+        isTightbeamNotice: (String) -> Bool
+    ) -> (
+        itemIds: [String],
+        memberIdsByItemId: [String: [String]],
+        expandedMemberIds: Set<String>
+    ) {
+        guard !itemIds.isEmpty else { return (itemIds, [:], []) }
 
         var result: [String] = []
         result.reserveCapacity(itemIds.count)
@@ -4056,7 +4080,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             } else {
                 let anchorId = Self.substrateRunItemIdPrefix + pendingRun[0]
                 runMembers[anchorId] = pendingRun
-                if expandedSubstrateRunItemIds.contains(anchorId) {
+                if expandedRunItemIds.contains(anchorId) {
                     result.append(contentsOf: pendingRun)
                     expandedMembers.formUnion(pendingRun)
                 } else {
@@ -4067,12 +4091,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
 
         for id in itemIds {
-            // messagesById[id] is nil for every synthetic id (typing
-            // indicator, footer, date separator) -- no need to also consult
-            // isNonMessageItemID here (and doing so would be circular: that
-            // function now excludes substrate messages FROM bubble-sizing
-            // purposes by consulting this same classification).
-            guard let message = messagesById[id], message.messageKind == .substrate else {
+            guard isTightbeamNotice(id) else {
                 flushPendingRun()
                 result.append(id)
                 continue
@@ -4081,9 +4100,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
         flushPendingRun()
 
-        substrateRunMemberIdsByItemId = runMembers
-        expandedRunMemberMessageIds = expandedMembers
-        return result
+        return (result, runMembers, expandedMembers)
     }
 
     /// Toggle a collapsed run's transient expansion state and reapply the
@@ -4200,16 +4217,17 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     private func chatBubbleBottomOffsetY(bottomInset: CGFloat) -> CGFloat? {
-        guard let lastDisplayedMessageId = dataSource.snapshot().itemIdentifiers.reversed().first(where: {
-                  messagesById[$0] != nil
-              }),
-              let lastMessageIndexPath = dataSource.indexPath(for: lastDisplayedMessageId),
-              let lastMessageAttributes = collectionView.layoutAttributesForItem(at: lastMessageIndexPath)
+        guard let lastCardFlowItemId = Self.lastCardFlowItemID(
+                  in: dataSource.snapshot().itemIdentifiers,
+                  isMessage: { messagesById[$0] != nil }
+              ),
+              let lastCardFlowIndexPath = dataSource.indexPath(for: lastCardFlowItemId),
+              let lastCardFlowAttributes = collectionView.layoutAttributesForItem(at: lastCardFlowIndexPath)
         else {
             return nil
         }
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
-        let chatContentBottom = lastMessageAttributes.frame.maxY
+        let chatContentBottom = lastCardFlowAttributes.frame.maxY
             + metrics.flowGap
             + flowLayout.sectionInset.bottom
         return Self.bottomOffsetMaxY(
@@ -5217,10 +5235,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                     for: indexPath
                 ) as? SubstrateRowCell
                 let displayMessage = message.strippingProvenanceStampForDisplay()
+                let header = SubstrateRowHeader.liveVoice(for: message.provenanceOrigin)
                 cell?.configure(
-                    leadLabel: "tightbeam",
+                    header: header,
                     detail: displayMessage.content,
-                    style: .liveVoice,
                     isDark: self.currentIsDark,
                     isIndentedUnderRun: self.expandedRunMemberMessageIds.contains(id),
                     onTap: { [weak self] in
@@ -5534,24 +5552,32 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private func rowSpacing(afterItemAt previousIndex: Int,
                             beforeItemAt nextIndex: Int,
                             metrics: ChatFlowTheme.Metrics) -> CGFloat {
-        guard isNormalMessageItem(at: previousIndex),
-              isNormalMessageItem(at: nextIndex) else {
+        guard isCardFlowItem(at: previousIndex),
+              isCardFlowItem(at: nextIndex) else {
             return metrics.flowGap
         }
         return Self.interBubbleRowSpacing(metrics: metrics)
     }
 
-    private func isNormalMessageItem(at itemIndex: Int) -> Bool {
+    private func isCardFlowItem(at itemIndex: Int) -> Bool {
         let indexPath = IndexPath(item: itemIndex, section: 0)
         guard let id = dataSource.itemIdentifier(for: indexPath) else { return false }
-        guard id != TypingIndicatorCell.itemId,
-              id != SessionMetadataFooterCell.itemId,
-              !DateSeparatorCell.isDateSeparatorItemID(id),
-              !MarkerDividerCell.isMarkerDividerItemID(id),
-              !id.hasPrefix("web_") else {
-            return false
+        return Self.participatesInCardFlow(id: id, isMessage: messagesById[id] != nil)
+    }
+
+    static func participatesInCardFlow(id: String, isMessage: Bool) -> Bool {
+        isMessage
+            || id.hasPrefix(substrateRunItemIdPrefix)
+            || MarkerDividerCell.isMarkerDividerItemID(id)
+    }
+
+    static func lastCardFlowItemID(
+        in itemIDs: [String],
+        isMessage: (String) -> Bool
+    ) -> String? {
+        itemIDs.reversed().first {
+            participatesInCardFlow(id: $0, isMessage: isMessage($0))
         }
-        return messagesById[id] != nil
     }
 
     private func rowSpacingFingerprint() -> Int {
@@ -5568,8 +5594,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if id == SessionMetadataFooterCell.itemId { return 2 }
         if DateSeparatorCell.isDateSeparatorItemID(id) { return 3 }
         if id.hasPrefix("web_") { return 4 }
-        if messagesById[id] != nil { return 5 }
-        if MarkerDividerCell.isMarkerDividerItemID(id) { return 6 }
+        if Self.participatesInCardFlow(id: id, isMessage: messagesById[id] != nil) { return 5 }
         return 0
     }
 
@@ -5578,9 +5603,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     private func effectiveContentWidth(metrics: ChatFlowTheme.Metrics) -> CGFloat {
-        let width = availableContentWidth()
-        let referenceWidth = max(0, Self.bubbleReferenceSize.width - (metrics.containerPadding * 2))
-        return min(width, referenceWidth)
+        Self.boundedCardFlowWidth(
+            availableWidth: availableContentWidth(),
+            containerPadding: metrics.containerPadding
+        )
+    }
+
+    static func boundedCardFlowWidth(availableWidth: CGFloat, containerPadding: CGFloat) -> CGFloat {
+        let referenceWidth = max(0, Self.bubbleReferenceSize.width - (containerPadding * 2))
+        return min(availableWidth, referenceWidth)
     }
 
     private func effectiveContainerHeight() -> CGFloat {
@@ -5794,13 +5825,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
 
         if MarkerDividerCell.isMarkerDividerItemID(id) {
-            let rowWidth = availableContentWidth()
-            let lineHeight = UIFont.clawline(.timestamp, weight: .semibold).lineHeight
-            let iconHeight: CGFloat = 18
-            let contentHeight = max(lineHeight, iconHeight)
+            let rowWidth = effectiveContentWidth(metrics: metrics)
             return CGSize(
                 width: rowWidth,
-                height: ceil(contentHeight + MarkerDividerCell.verticalPadding * 2)
+                height: MarkerDividerCell.measuredHeight(compatibleWith: collectionView.traitCollection)
             )
         }
 
@@ -5852,9 +5880,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
 
         if id.hasPrefix(Self.substrateRunItemIdPrefix) {
-            let rowWidth = availableContentWidth()
-            let lineHeight = UIFont.clawline(.secondaryLabel, weight: .semibold).lineHeight
-            return CGSize(width: rowWidth, height: ceil(lineHeight) + 12)
+            let rowWidth = effectiveContentWidth(metrics: metrics)
+            return CGSize(
+                width: rowWidth,
+                height: SubstrateRunCollapseCell.measuredHeight(
+                    compatibleWith: collectionView.traitCollection
+                )
+            )
         }
 
         guard let message = messagesById[id] else {
@@ -5871,24 +5903,23 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             if let cached = readSizeState(messageId: id, env: env) {
                 return cached.size
             }
-            let rowWidth = availableContentWidth()
+            let rowWidth = effectiveContentWidth(metrics: metrics)
             let displayMessage = message.strippingProvenanceStampForDisplay()
-            let avatarAndSpacing: CGFloat = SubstrateRowCell.leadingIndent + 22 + 8 + 12
-            let textWidth = max(rowWidth - avatarAndSpacing, 0)
-            let font = UIFont.clawline(.secondaryLabel)
-            let measured = ("tightbeam \u{00B7} " + displayMessage.content as NSString).boundingRect(
-                with: CGSize(width: textWidth, height: .greatestFiniteMagnitude),
-                options: [.usesLineFragmentOrigin, .usesFontLeading],
-                attributes: [.font: font],
-                context: nil
+            let header = SubstrateRowHeader.liveVoice(for: message.provenanceOrigin)
+            let height = SubstrateRowCell.measuredHeight(
+                header: header,
+                detail: displayMessage.content,
+                rowWidth: rowWidth,
+                isIndentedUnderRun: expandedRunMemberMessageIds.contains(id),
+                compatibleWith: collectionView.traitCollection
             )
-            let size = CGSize(width: rowWidth, height: ceil(measured.height) + 12)
+            let size = CGSize(width: rowWidth, height: height)
             _ = writeMeasuredSize(messageId: id, measurement: size)
             return size
         }
 
         if message.messageKind == .agent {
-            let rowWidth = availableContentWidth()
+            let rowWidth = effectiveContentWidth(metrics: metrics)
             let displayMessage = message.strippingProvenanceStampForDisplay()
             let senderLine: String
             if case let .agent(handle)? = message.provenanceOrigin {

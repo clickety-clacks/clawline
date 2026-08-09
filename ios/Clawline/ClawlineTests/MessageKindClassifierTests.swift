@@ -45,6 +45,18 @@ struct MessageKindClassifierTests {
         #expect(m.messageKind == .agent)
     }
 
+    @Test("process delivery and agent message remain separate presentation classes")
+    func processAndAgentClassesStaySeparate() {
+        let body = "identical delivery body"
+        let process = message(sender: "process:chatgpt", content: "[from process:chatgpt]\n\(body)")
+        let agent = message(sender: "agent:chatgpt", content: "[from agent:chatgpt]\n\(body)")
+
+        #expect(process.messageKind == .substrate)
+        #expect(agent.messageKind == .agent)
+        #expect(process.provenanceOrigin == .process(name: "chatgpt"))
+        #expect(agent.provenanceOrigin == .agent(handle: "chatgpt"))
+    }
+
     @Test("stamped user:* operator origin is NOT special — classifies as assistant (unchanged)")
     func userOriginIsAssistantDefault() {
         let m = message(sender: "user:mike", content: "[from user:mike]\nship it")

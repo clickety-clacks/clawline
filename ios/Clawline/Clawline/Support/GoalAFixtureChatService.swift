@@ -284,6 +284,11 @@ final class GoalAFixtureChatService: ChatServicing {
             role: .user, sender: "user:mike",
             content: "Review the direct wake rendering before release."
         ))
+        guard await wait() else { return }
+        send(fixtureMessage(
+            role: .user, sender: "process:tightbeam",
+            content: "routing complete: this isolated substrate notice keeps its single primary identity."
+        ))
     }
 
     private func fixtureMessage(role: Message.Role, sender: String?, content: String) -> Message {

@@ -121,6 +121,16 @@ final class MarkerDividerCell: UICollectionViewCell {
         id.hasPrefix(itemIdPrefix)
     }
 
+    static func measuredHeight(compatibleWith traitCollection: UITraitCollection?) -> CGFloat {
+        let lineHeight = UIFont.clawline(
+            .timestamp,
+            weight: .semibold,
+            compatibleWith: traitCollection
+        ).lineHeight
+        let iconHeight: CGFloat = 18
+        return ceil(max(lineHeight, iconHeight) + (verticalPadding * 2))
+    }
+
     private func configureRule(_ rule: UIView) {
         rule.translatesAutoresizingMaskIntoConstraints = false
         // UIScreen.main is unavailable on visionOS; traitCollection.displayScale

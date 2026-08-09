@@ -2,20 +2,23 @@
 //  SubstrateRunCollapseCell.swift
 //  Clawline
 //
-//  Cycle-3 Goal A, step 2. Two or more consecutive `.substrate` classified
-//  messages collapse to one line: "tightbeam · N notices ▾". The whole line
-//  is a real button — tapping expands the stack in place, indented under the
-//  shared waypoint (bubble-additions.html "Collapsed Run"). Grouping (which
-//  messages form a run) is view-model DATA computed once per snapshot build;
-//  expansion is TRANSIENT presentation state held by the collection view
-//  controller, never persisted. Expanding/collapsing re-applies the diffable
-//  snapshot; it never triggers a remeasure of unrelated bubble content.
+//  Cycle-3 Goal A, step 2. Two or more consecutive Tightbeam substrate
+//  notices collapse to one line: "tightbeam · N notices ▾". Other process
+//  deliveries remain individual rows with their durable origin identity. The
+//  whole line is a real button — tapping expands the stack in place, indented
+//  under the shared waypoint (bubble-additions.html "Collapsed Run"). Grouping
+//  (which messages form a run) is view-model DATA computed once per snapshot
+//  build; expansion is TRANSIENT presentation state held by the collection
+//  view controller, never persisted. Expanding/collapsing re-applies the
+//  diffable snapshot; it never triggers a remeasure of unrelated bubble content.
 //
 
 import UIKit
 
 final class SubstrateRunCollapseCell: UICollectionViewCell {
     static let reuseIdentifier = "SubstrateRunCollapseCell"
+    private static let avatarSize: CGFloat = 22
+    private static let verticalInset: CGFloat = 6
 
     private let avatarView = SubstrateStoneAvatarView()
     private let textLabel = UILabel()
@@ -30,7 +33,7 @@ final class SubstrateRunCollapseCell: UICollectionViewCell {
         contentView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap)))
 
         avatarView.translatesAutoresizingMaskIntoConstraints = false
-        avatarView.configure(style: .liveVoice)
+        avatarView.configure(header: .tightbeam)
         contentView.addSubview(avatarView)
 
         textLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -106,5 +109,14 @@ final class SubstrateRunCollapseCell: UICollectionViewCell {
     /// without simulating a UIGestureRecognizer from the test target.
     @objc func handleTap() {
         onTap?()
+    }
+
+    static func measuredHeight(compatibleWith traitCollection: UITraitCollection?) -> CGFloat {
+        let lineHeight = UIFont.clawline(
+            .secondaryLabel,
+            weight: .semibold,
+            compatibleWith: traitCollection
+        ).lineHeight
+        return ceil(max(avatarSize, lineHeight) + (verticalInset * 2))
     }
 }

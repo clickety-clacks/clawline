@@ -45,6 +45,7 @@ struct ExpandedMessageSheet: View {
     let presentation: MessagePresentation
     let fontScaleChangeSequence: Int
     let terminalConnectionPool: TerminalSessionConnectionPool
+    var onDismiss: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -63,6 +64,14 @@ struct ExpandedMessageSheet: View {
     private var regularReadingWidth: CGFloat {
         ChatFlowTheme.maxLineWidth(bodyFontSize: expandedBodyFont.pointSize)
             + (regularContentHorizontalPadding * 2)
+    }
+
+    private func close() {
+        if let onDismiss {
+            onDismiss()
+        } else {
+            dismiss()
+        }
     }
 
     private struct RenderedBlocksCache: Equatable {
@@ -122,7 +131,7 @@ struct ExpandedMessageSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") {
-                        dismiss()
+                        close()
                     }
                 }
             }
@@ -140,7 +149,7 @@ struct ExpandedMessageSheet: View {
                 }
                 .onEnded { value in
                     if abs(value.translation.width) > dismissThreshold {
-                        dismiss()
+                        close()
                     } else {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                             dragOffset = 0
@@ -224,7 +233,7 @@ struct ExpandedMessageSheet: View {
                             maxLineWidth: ChatFlowTheme.maxLineWidth(bodyFontSize: metrics.bodyFontSize),
                             isExpanded: true,
                             onExpand: {},
-                            onCollapse: { dismiss() }
+                            onCollapse: close
                         )
                     }
                 }

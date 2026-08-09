@@ -558,6 +558,7 @@ struct ChatView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.settingsManager) private var settings
     @Environment(\.openDetail) private var openDetail
+    @Environment(\.messageDetailPresentation) private var messageDetailPresentation
 
     @State private var inputBarHeight: CGFloat = 0
     @State private var settledInputBarHeight: CGFloat = 0
@@ -653,6 +654,25 @@ struct ChatView: View {
 
     private var fontScaleChangeSequence: Int {
         settings.fontScaleChangeSequence
+    }
+
+    private struct OpenMessageDetailRefreshKey: Equatable {
+        let message: Message
+        let fontScaleChangeSequence: Int
+        let isCompact: Bool
+    }
+
+    private var openMessageDetailRefreshKey: OpenMessageDetailRefreshKey? {
+        guard let payload = messageDetailPresentation.payload,
+              let message = viewModel.messages(for: payload.message.sessionKey)
+                .first(where: { $0.id == payload.message.id }) else {
+            return nil
+        }
+        return OpenMessageDetailRefreshKey(
+            message: message,
+            fontScaleChangeSequence: fontScaleChangeSequence,
+            isCompact: horizontalSizeClass == .compact
+        )
     }
 
     private enum ChatSheet: Identifiable {
@@ -1138,6 +1158,9 @@ struct ChatView: View {
 
         GeometryReader { geometry in
             chatContent(geometry: geometry, viewModel: viewModel, toastManager: toastManager)
+        }
+        .onChange(of: openMessageDetailRefreshKey) { _, refreshKey in
+            refreshOpenMessageDetail(using: refreshKey)
         }
         .background {
             // Background extends edge-to-edge. Admin users with paged TabView have
@@ -2827,7 +2850,7 @@ struct ChatView: View {
             firstUnreadMessageId: state.firstUnreadMessageId,
             unreadCount: state.unreadCount,
             onExpand: { message in
-                activeSheet = .expandedMessage(message)
+                openMessageDetail(message)
             },
             onOpenDetail: { message in
                 openDetail(for: message)
@@ -2895,6 +2918,32 @@ struct ChatView: View {
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .contentShape(Rectangle())
         return list
+    }
+
+    private func openMessageDetail(_ selectedMessage: Message) {
+        let message = viewModel.expandedDetailMessage(for: selectedMessage)
+        let metrics = ChatFlowTheme.Metrics(isCompact: horizontalSizeClass == .compact)
+        let presentation = viewModel.presentation(for: message, metrics: metrics)
+        openDetail(for: MessageDetailPayload(
+            message: message,
+            presentation: presentation,
+            fontScaleChangeSequence: fontScaleChangeSequence,
+            terminalConnectionPool: viewModel.terminalConnectionPool
+        ))
+    }
+
+    private func refreshOpenMessageDetail(using refreshKey: OpenMessageDetailRefreshKey?) {
+        guard let refreshKey,
+              let payload = messageDetailPresentation.payload else {
+            return
+        }
+        let metrics = ChatFlowTheme.Metrics(isCompact: refreshKey.isCompact)
+        messageDetailPresentation.payload = MessageDetailPayload(
+            message: refreshKey.message,
+            presentation: viewModel.presentation(for: refreshKey.message, metrics: metrics),
+            fontScaleChangeSequence: refreshKey.fontScaleChangeSequence,
+            terminalConnectionPool: payload.terminalConnectionPool
+        )
     }
 
     @ViewBuilder

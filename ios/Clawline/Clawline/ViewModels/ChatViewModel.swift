@@ -1023,7 +1023,17 @@ final class ChatViewModel {
     /// harness picker (T1751); the creation sheet (T1750) will read the rest.
     private(set) var orgOptions: OrgOptions?
     private var isLoadingOrgOptions = false
-    var orgOptionsHarnesses: [String] { orgOptions?.harnesses ?? [] }
+    /// Harness picker options. Prefers the `setHarness` capability decoded off
+    /// session-status (which loads on every session) over `/api/org-options`
+    /// (launch-time only, and fails closed under TLS trouble against gibson),
+    /// so a failed org-options load no longer strands the picker disabled.
+    var orgOptionsHarnesses: [String] {
+        let capabilityOptions = sessionStatus(for: engineActiveSessionKey)?
+            .capabilities.setHarness?.options?
+            .compactMap { $0.value ?? $0.title } ?? []
+        if !capabilityOptions.isEmpty { return capabilityOptions }
+        return orgOptions?.harnesses ?? []
+    }
     private var hasResolvedProvisioningCapability = true
     private var hasReceivedSessionProvisioning = false
     private var hasReceivedExplicitSessionInfo = false

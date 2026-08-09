@@ -112,7 +112,7 @@ struct T1751HarnessSelectorTests {
 
     @Test("T1751 gated harness renders as an enabled picker button once options load")
     func gatedHarnessRendersAsEnabledPicker() throws {
-        let status = try decodedStatus(harness: "codex")
+        let status = try decodedStatus(harness: "codex", harnessOptions: ["claude", "codex"])
         let cell = configuredCell(status: status, isTightbeam: true, harnessOptions: ["claude", "codex"])
         let button = try #require(
             descendants(of: cell)
@@ -125,15 +125,17 @@ struct T1751HarnessSelectorTests {
 
     @Test("T1751 harness shows as a disabled label before org-options load")
     func harnessRendersDisabledBeforeOptionsLoad() throws {
-        let status = try decodedStatus(harness: "codex")
+        let status = try decodedStatus(harness: "codex", harnessOptions: [])
         let cell = configuredCell(status: status, isTightbeam: true, harnessOptions: [])
         let button = try #require(
             descendants(of: cell)
                 .compactMap { $0 as? UIButton }
                 .first { $0.accessibilityLabel == "Harness codex" }
         )
-        // No options yet -> not tappable, but the current engine is still shown.
+        // No live per-session options yet -> not tappable, but the current engine is still shown.
         #expect(button.isEnabled == false)
+        #expect(button.menu == nil)
+        #expect(button.accessibilityHint == "harness_options_unavailable")
     }
 
     @Test("T1751 ungated cell does not render the harness picker")
@@ -148,7 +150,16 @@ struct T1751HarnessSelectorTests {
 
     // MARK: - helpers
 
-    private func decodedStatus(harness: String) throws -> SessionStatus {
+    private func decodedStatus(harness: String, harnessOptions: [String]? = nil) throws -> SessionStatus {
+        let setHarnessCapability: String
+        if let harnessOptions {
+            let options = harnessOptions
+                .map { #"{"title": "\#($0)", "value": "\#($0)", "enabled": true}"# }
+                .joined(separator: ", ")
+            setHarnessCapability = #""setHarness": {"supported": true, "options": [\#(options)]}"#
+        } else {
+            setHarnessCapability = ""
+        }
         let json = """
         {
           "sessionKey": "agent:main:clawline:user:s_t1751",
@@ -159,7 +170,7 @@ struct T1751HarnessSelectorTests {
             "authMode": "oauth"
           },
           "run": {"state": "idle"},
-          "capabilities": {}
+          "capabilities": {\(setHarnessCapability)}
         }
         """
         return try JSONDecoder().decode(SessionStatus.self, from: Data(json.utf8))

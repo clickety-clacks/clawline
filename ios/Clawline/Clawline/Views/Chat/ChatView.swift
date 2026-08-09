@@ -1309,7 +1309,7 @@ struct ChatView: View {
             if !isTightbeam { pendingHarnessChange = nil }
         }
         .confirmationDialog(
-            "Switching harnesses will clear this chat.",
+            "Switching harnesses starts a fresh engine context.",
             isPresented: Binding(
                 get: { pendingHarnessChange != nil },
                 set: { presented in if !presented { pendingHarnessChange = nil } }
@@ -1333,7 +1333,7 @@ struct ChatView: View {
             }
             Button("Cancel", role: .cancel) { pendingHarnessChange = nil }
         } message: { _ in
-            Text("The new engine starts with fresh model context — engines can't read each other's memory.")
+            Text("The durable session record stays intact. The new harness must inspect that record itself; Clawline will not transfer, replay, or summarize the prior engine context.")
         }
         .photosPicker(
             isPresented: $isPhotosPickerPresented,
@@ -2861,7 +2861,8 @@ struct ChatView: View {
             layoutCoordinator: layoutCoordinator,
             sessionKey: sessionKey,
             sessionStatus: viewModel.sessionStatus(for: sessionKey),
-            sessionStatusUnavailable: viewModel.isSessionStatusUnavailable(for: sessionKey),
+            sessionStatusUnavailable: viewModel.isSessionStatusUnavailable(for: sessionKey)
+                || viewModel.isSessionStatusStale(for: sessionKey),
             streamSearchQuery: streamSearchQueryBySessionKey[sessionKey] ?? "",
             messageProjectionPublicationSequence: viewModel.messageProjectionPublicationSequence,
             forceReReadGeneration: viewModel.forceReReadGeneration(for: sessionKey),
@@ -2880,7 +2881,8 @@ struct ChatView: View {
             },
             onSessionControlSelected: { sessionKey, action, value, enabled in
                 if action == .setHarness {
-                    // Confirm before switching engines — the swap clears the chat.
+                    // Confirm before switching engines — the swap starts a fresh
+                    // engine context on the same durable session.
                     requestHarnessChange(sessionKey: sessionKey, harness: value)
                     return
                 }

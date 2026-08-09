@@ -757,7 +757,10 @@ final class ChatViewModel {
             return "session_status_loading"
         }
         guard capability.supported else { return capability.reason ?? "set_harness_unsupported" }
-        let options = capability.options?.compactMap { $0.value ?? $0.title } ?? []
+        let options = capability.options?.compactMap { option in
+            let value = option.value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return value.isEmpty ? nil : value
+        } ?? []
         return options.isEmpty ? "harness_options_unavailable" : nil
     }
 
@@ -801,22 +804,18 @@ final class ChatViewModel {
                     value: value,
                     enabled: enabled
                 )
+                if let status = response.status {
+                    self.applyReturnedSessionStatus(status, requestedSessionKey: normalizedSessionKey)
+                }
                 if response.ok {
-                    if let status = response.status {
-                        let displayStatus = self.sessionStatusByKeepingStickyDisplayFields(
-                            from: status,
-                            requestedSessionKey: normalizedSessionKey
-                        )
-                        self.sessionStatusBySessionKey[normalizedSessionKey] = displayStatus
-                        if displayStatus.sessionKey != normalizedSessionKey {
-                            self.sessionStatusBySessionKey[displayStatus.sessionKey] = displayStatus
-                        }
-                    } else {
+                    if response.status == nil {
                         self.scheduleSessionStatusRefresh(for: normalizedSessionKey, reason: "sessionControlApplied")
                     }
                 } else {
                     self.toastManager.show(response.message ?? "This session control is not supported.")
-                    self.scheduleSessionStatusRefresh(for: normalizedSessionKey, reason: "sessionControlRejected")
+                    if response.status == nil {
+                        self.scheduleSessionStatusRefresh(for: normalizedSessionKey, reason: "sessionControlRejected")
+                    }
                 }
             } catch {
                 self.toastManager.show(error.localizedDescription)
@@ -1066,7 +1065,10 @@ final class ChatViewModel {
         guard let capability = sessionStatus(for: engineActiveSessionKey)?.capabilities.setHarness,
               capability.supported
         else { return [] }
-        return capability.options?.compactMap { $0.value ?? $0.title } ?? []
+        return capability.options?.compactMap { option in
+            let value = option.value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return value.isEmpty ? nil : value
+        } ?? []
     }
     private var hasResolvedProvisioningCapability = true
     private var hasReceivedSessionProvisioning = false
@@ -5267,6 +5269,10 @@ final class ChatViewModel {
         sessionStatusUnavailableSessionKeys.contains(sessionStatusAuthorityKey(for: sessionKey))
     }
 
+    func isSessionStatusStale(for sessionKey: String) -> Bool {
+        sessionStatusRefreshTasks[sessionStatusAuthorityKey(for: sessionKey)] != nil
+    }
+
     private func sessionStatusAuthorityKey(for sessionKey: String) -> String {
         let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
         return runtimeSessionKeyByRoutingSessionKey[normalizedSessionKey] ?? normalizedSessionKey
@@ -5316,6 +5322,21 @@ final class ChatViewModel {
                 sessionStatusUnavailableSessionKeys.insert(sessionKey)
             }
             return .seconds(30)
+        }
+    }
+
+    private func applyReturnedSessionStatus(_ status: SessionStatus, requestedSessionKey: String) {
+        let displayStatus = sessionStatusByKeepingStickyDisplayFields(
+            from: status,
+            requestedSessionKey: requestedSessionKey
+        )
+        sessionStatusBySessionKey[requestedSessionKey] = displayStatus
+        if displayStatus.sessionKey != requestedSessionKey {
+            sessionStatusBySessionKey[displayStatus.sessionKey] = displayStatus
+        }
+        recordSessionStatusFetchSuccess(for: requestedSessionKey)
+        if displayStatus.sessionKey != requestedSessionKey {
+            recordSessionStatusFetchSuccess(for: displayStatus.sessionKey)
         }
     }
 

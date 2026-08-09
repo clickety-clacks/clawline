@@ -7374,6 +7374,65 @@ struct ChatViewModelTests {
         #expect(viewModel.sessionStatus(for: personalSessionKey)?.display.fastMode == true)
     }
 
+    @Test("Session control applies rejected returned status without extra refresh")
+    @MainActor
+    func sessionControlAppliesRejectedReturnedStatusWithoutExtraRefresh() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let toastManager = ToastManager()
+        let returnedStatus = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .idle,
+            provider: "openai",
+            model: "gpt-5.5",
+            thinkingLevel: "medium",
+            fastMode: false,
+            queueDepth: 0
+        )
+        chatService.sessionControlResponse = SessionControlResponse(
+            ok: false,
+            sessionKey: personalSessionKey,
+            action: SessionControlAction.setFastMode.rawValue,
+            code: "fast_rejected",
+            message: "Fast rejected",
+            status: returnedStatus,
+            capabilities: returnedStatus.capabilities
+        )
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: toastManager,
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        viewModel.applySessionControl(
+            sessionKey: personalSessionKey,
+            action: .setFastMode,
+            enabled: true
+        )
+
+        for _ in 0..<50 {
+            if viewModel.sessionStatus(for: personalSessionKey)?.display.fastMode == false,
+               toastManager.debugMessages.contains("Fast rejected") {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(chatService.lastSessionControl?.sessionKey == personalSessionKey)
+        #expect(chatService.lastSessionControl?.action == .setFastMode)
+        #expect(chatService.lastSessionControl?.enabled == true)
+        #expect(chatService.fetchSessionStatusCallCount == 0)
+        #expect(viewModel.sessionStatus(for: personalSessionKey)?.display.fastMode == false)
+        #expect(toastManager.debugMessages.contains("Fast rejected"))
+    }
+
     @Test("Session control treats ok response without status as success and refreshes")
     @MainActor
     func sessionControlTreatsOkResponseWithoutStatusAsSuccessAndRefreshes() async throws {

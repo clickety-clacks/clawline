@@ -222,6 +222,12 @@ struct SessionStatus: Decodable, Equatable {
             case models
         }
 
+        init(available: Bool, reason: String?, models: [Model]) {
+            self.available = available
+            self.reason = reason
+            self.models = models
+        }
+
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             available = try container.decodeIfPresent(Bool.self, forKey: .available) ?? false
@@ -235,6 +241,14 @@ struct SessionStatus: Decodable, Equatable {
             let ref: String
             let name: String?
             let alias: String?
+
+            init(id: String, provider: String, ref: String, name: String?, alias: String?) {
+                self.id = id
+                self.provider = provider
+                self.ref = ref
+                self.name = name
+                self.alias = alias
+            }
         }
     }
 }

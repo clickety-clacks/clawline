@@ -8315,12 +8315,38 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             hasReasoningValue: reasoningValue != nil
         )
         let fastControl = fastModeControlAction(capabilities: capabilities)
+        let statusControlReason = isUnavailable ? "session_status_stale" : nil
+        let modelControlOptions = modelOptions(display: display, catalog: status.modelCatalog)
+        let modelControlAction: SessionControlAction? = statusControlReason == nil
+            && modelCapability.isSupported
+            && !modelControlOptions.isEmpty ? .setModel : nil
+        let modelUnsupportedReason = statusControlReason
+            ?? modelCapability.reason
+            ?? (modelCapability.isSupported ? "model_options_unavailable" : "model_catalog_control_not_available")
+        let levelControlOptions = levelOptions(
+            current: thinkingValue ?? reasoningValue,
+            action: levelControl.action,
+            providerOptions: levelControl.options
+        )
+        let levelAction = statusControlReason == nil && !levelControlOptions.isEmpty ? levelControl.action : nil
+        let levelUnsupportedReason = statusControlReason
+            ?? levelControl.reason
+            ?? (levelControl.action != nil ? "thinking_options_unavailable" : nil)
+        let fastControlOptions = fastModeOptions(
+            current: display.fastMode,
+            action: fastControl.action,
+            providerOptions: fastControl.options
+        )
+        let fastAction = statusControlReason == nil && !fastControlOptions.isEmpty ? fastControl.action : nil
+        let fastUnsupportedReason = statusControlReason
+            ?? fastControl.reason
+            ?? (fastControl.action != nil ? "fast_options_unavailable" : nil)
         return [
             FooterItem(
                 text: displayModelText(display: display, catalog: status.modelCatalog),
-                action: modelCapability.isSupported ? .setModel : nil,
-                options: modelOptions(display: display, catalog: status.modelCatalog),
-                unsupportedReason: modelCapability.reason ?? "model_catalog_control_not_available",
+                action: modelControlAction,
+                options: modelControlOptions,
+                unsupportedReason: modelUnsupportedReason,
                 textColor: nil,
                 allowsTruncation: true
             ),
@@ -8328,27 +8354,19 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                 text: thinkingText(
                     thinkingValue: thinkingValue,
                     reasoningValue: reasoningValue,
-                    action: levelControl.action,
-                    unsupportedReason: levelControl.reason
+                    action: levelAction,
+                    unsupportedReason: levelUnsupportedReason
                 ),
-                action: levelControl.action,
-                options: levelOptions(
-                    current: thinkingValue ?? reasoningValue,
-                    action: levelControl.action,
-                    providerOptions: levelControl.options
-                ),
-                unsupportedReason: levelControl.reason,
+                action: levelAction,
+                options: levelControlOptions,
+                unsupportedReason: levelUnsupportedReason,
                 textColor: nil
             ),
             FooterItem(
-                text: fastModeText(display.fastMode, action: fastControl.action, unsupportedReason: fastControl.reason),
-                action: fastControl.action,
-                options: fastModeOptions(
-                    current: display.fastMode,
-                    action: fastControl.action,
-                    providerOptions: fastControl.options
-                ),
-                unsupportedReason: fastControl.reason,
+                text: fastModeText(display.fastMode, action: fastAction, unsupportedReason: fastUnsupportedReason),
+                action: fastAction,
+                options: fastControlOptions,
+                unsupportedReason: fastUnsupportedReason,
                 textColor: nil
             )
         ] + authModeFooterItems(display.authMode, codexUsage: display.codexUsage, isDark: isDark)
@@ -8356,7 +8374,8 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                 display.harness,
                 isTightbeam: isTightbeam,
                 capability: capabilities.setHarness,
-                options: harnessOptions
+                options: statusControlReason == nil ? harnessOptions : [],
+                statusControlReason: statusControlReason
             )
             + hostFooterItems(display.host, isTightbeam: isTightbeam)
     }
@@ -8365,7 +8384,8 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         _ harness: String?,
         isTightbeam: Bool,
         capability: SessionStatus.Capability?,
-        options: [String]
+        options: [String],
+        statusControlReason: String?
     ) -> [FooterItem] {
         // Tightbeam-only. Absent harness renders nothing (openclaw payloads lack it).
         guard isTightbeam, let harness = normalized(harness) else { return [] }
@@ -8375,8 +8395,10 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         let footerOptions = options.compactMap { normalized($0) }.map { value in
             FooterOption(title: value, value: value, enabled: nil, isCurrent: value == harness)
         }
-        let isActionable = capability?.supported == true && !footerOptions.isEmpty
-        let unavailableReason: String? = if capability == nil {
+        let isActionable = statusControlReason == nil && capability?.supported == true && !footerOptions.isEmpty
+        let unavailableReason: String? = if let statusControlReason {
+            statusControlReason
+        } else if capability == nil {
             "session_status_loading"
         } else if capability?.supported != true {
             capability?.reason ?? "set_harness_unsupported"
@@ -8607,8 +8629,9 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             var orderedRefs: [String] = []
             for model in catalog?.models ?? [] {
                 let option = modelCatalogOption(model, current: current)
-                let footerOption = FooterOption(title: option.title, value: model.ref, enabled: nil, isCurrent: option.isCurrent)
-                let ref = normalized(model.ref) ?? option.title
+                guard let value = normalized(model.ref) else { continue }
+                let footerOption = FooterOption(title: option.title, value: value, enabled: nil, isCurrent: option.isCurrent)
+                let ref = value
                 if optionsByRef[ref] == nil {
                     orderedRefs.append(ref)
                     optionsByRef[ref] = footerOption
@@ -8627,11 +8650,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                 )
             }
         }
-        let fallbackModels = ([current] + (display.fallbackModels ?? []).map { normalized($0) }).compactMap { $0 }
-        let uniqueModels = Array(NSOrderedSet(array: fallbackModels)) as? [String] ?? fallbackModels
-        return uniqueModels.map { model in
-            FooterOption(title: model, value: model, enabled: nil, isCurrent: model == current)
-        }
+        return []
     }
 
     private static func displayModelText(display: SessionStatus.Display,
@@ -8656,16 +8675,14 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         return (title, isCurrent)
     }
 
-    private static func providerFooterOptions(
+    private static func providerValueOptions(
         _ options: [SessionStatus.Capability.Option]?
     ) -> [FooterOption]? {
         guard let options, !options.isEmpty else { return nil }
         return options.compactMap { option in
-            let title = normalized(option.title)
-                ?? normalized(option.value)
-                ?? (option.enabled == true ? "On" : option.enabled == false ? "Off" : nil)
-            guard let title else { return nil }
-            return FooterOption(title: title, value: normalized(option.value), enabled: option.enabled, isCurrent: false)
+            guard let value = normalized(option.value) else { return nil }
+            let title = normalized(option.title) ?? value
+            return FooterOption(title: title, value: value, enabled: option.enabled, isCurrent: false)
         }
     }
 
@@ -8674,7 +8691,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         action: SessionControlAction?,
         providerOptions: [SessionStatus.Capability.Option]?
     ) -> [FooterOption] {
-        if let options = providerFooterOptions(providerOptions) {
+        if let options = providerValueOptions(providerOptions) {
             return options.map { option in
                 FooterOption(
                     title: option.title,
@@ -8684,23 +8701,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                 )
             }
         }
-        let levels: [String]
-        switch action {
-        case .setThinking:
-            levels = ["off", "minimal", "low", "medium", "high", "xhigh", "adaptive", "max"]
-        case .setReasoning:
-            levels = ["off", "on", "stream"]
-        default:
-            return []
-        }
-        return levels.map { level in
-            FooterOption(
-                title: level,
-                value: level,
-                enabled: nil,
-                isCurrent: level == current
-            )
-        }
+        return []
     }
 
     private static func fastModeOptions(
@@ -8708,7 +8709,20 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         action: SessionControlAction?,
         providerOptions: [SessionStatus.Capability.Option]?
     ) -> [FooterOption] {
-        if let options = providerFooterOptions(providerOptions) {
+        guard let providerOptions, !providerOptions.isEmpty else { return [] }
+        if action == .setFastMode {
+            return providerOptions.compactMap { option in
+                guard let enabled = option.enabled else { return nil }
+                let title = normalized(option.title) ?? (enabled ? "On" : "Off")
+                return FooterOption(
+                    title: title,
+                    value: normalized(option.value),
+                    enabled: enabled,
+                    isCurrent: enabled == current
+                )
+            }
+        }
+        if let options = providerValueOptions(providerOptions) {
             return options.map { option in
                 let optionCurrent: Bool
                 if let enabled = option.enabled {
@@ -8724,16 +8738,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                 )
             }
         }
-        guard action != .setMode else {
-            return [
-                FooterOption(title: "On", value: "fast", enabled: nil, isCurrent: current == true),
-                FooterOption(title: "Off", value: "normal", enabled: nil, isCurrent: current == false),
-            ]
-        }
-        return [
-            FooterOption(title: "On", value: nil, enabled: true, isCurrent: current == true),
-            FooterOption(title: "Off", value: nil, enabled: false, isCurrent: current == false),
-        ]
+        return []
     }
 
     private static func levelControlAction(

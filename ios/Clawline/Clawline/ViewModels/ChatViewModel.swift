@@ -738,27 +738,61 @@ final class ChatViewModel {
 
     /// Whether a Tightbeam-gated session control may be applied right now. Used
     /// to keep a pending harness confirmation from driving set_harness after the
-    /// gate or per-session capability closed.
-    func canApplyTightbeamSessionControl(_ action: SessionControlAction, sessionKey: String? = nil) -> Bool {
+    /// gate, per-session capability, freshness, or selected option changed.
+    func canApplyTightbeamSessionControl(
+        _ action: SessionControlAction,
+        sessionKey: String? = nil,
+        value: String? = nil,
+        requiresSelectedValue: Bool = false
+    ) -> Bool {
         guard action == .setHarness else { return true }
-        let authorityKey = sessionStatusAuthorityKey(for: sessionKey ?? engineActiveSessionKey)
-        guard !authorityKey.isEmpty else { return false }
-        return sessionStatus(for: authorityKey)?.capabilities.setHarness?.supported == true
+        return unavailableSessionControlReason(
+            action,
+            sessionKey: sessionKey,
+            value: value,
+            requiresSelectedValue: requiresSelectedValue
+        ) == nil
     }
 
-    func unavailableSessionControlReason(_ action: SessionControlAction, sessionKey: String? = nil) -> String? {
+    func unavailableSessionControlReason(
+        _ action: SessionControlAction,
+        sessionKey: String? = nil,
+        value: String? = nil,
+        requiresSelectedValue: Bool = false
+    ) -> String? {
         guard action == .setHarness else { return nil }
         let authorityKey = sessionStatusAuthorityKey(for: sessionKey ?? engineActiveSessionKey)
         guard !authorityKey.isEmpty else { return "session_status_loading" }
+        if isSessionStatusUnavailable(for: authorityKey) {
+            return "session_status_unavailable"
+        }
+        if isSessionStatusStale(for: authorityKey) {
+            return "session_status_stale"
+        }
         guard let capability = sessionStatus(for: authorityKey)?.capabilities.setHarness else {
             return "session_status_loading"
         }
         guard capability.supported else { return capability.reason ?? "set_harness_unsupported" }
-        let options = capability.options?.compactMap { option in
-            let value = option.value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return value.isEmpty ? nil : value
-        } ?? []
+        let options = enabledSetHarnessOptionValues(from: capability)
+        if let selectedValue = normalizedSetHarnessValue(value) {
+            return options.contains(selectedValue) ? nil : "harness_options_unavailable"
+        }
+        if requiresSelectedValue {
+            return "harness_options_unavailable"
+        }
         return options.isEmpty ? "harness_options_unavailable" : nil
+    }
+
+    private func enabledSetHarnessOptionValues(from capability: SessionStatus.Capability) -> [String] {
+        capability.options?.compactMap { option in
+            guard option.enabled != false else { return nil }
+            return normalizedSetHarnessValue(option.value)
+        } ?? []
+    }
+
+    private func normalizedSetHarnessValue(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     func showUnavailableSessionControlReason(_ reason: String?) {
@@ -788,9 +822,19 @@ final class ChatViewModel {
             // between enqueueing this task and its execution (the modal's
             // synchronous check is not enough), and a Tightbeam-only control
             // must never post to a link that lost the feature.
-            guard self.canApplyTightbeamSessionControl(action, sessionKey: normalizedSessionKey) else {
+            guard self.canApplyTightbeamSessionControl(
+                action,
+                sessionKey: normalizedSessionKey,
+                value: value,
+                requiresSelectedValue: action == .setHarness
+            ) else {
                 self.showUnavailableSessionControlReason(
-                    self.unavailableSessionControlReason(action, sessionKey: normalizedSessionKey)
+                    self.unavailableSessionControlReason(
+                        action,
+                        sessionKey: normalizedSessionKey,
+                        value: value,
+                        requiresSelectedValue: action == .setHarness
+                    )
                 )
                 return
             }
@@ -1062,10 +1106,7 @@ final class ChatViewModel {
         guard let capability = sessionStatus(for: engineActiveSessionKey)?.capabilities.setHarness,
               capability.supported
         else { return [] }
-        return capability.options?.compactMap { option in
-            let value = option.value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return value.isEmpty ? nil : value
-        } ?? []
+        return enabledSetHarnessOptionValues(from: capability)
     }
     private var hasResolvedProvisioningCapability = true
     private var hasReceivedSessionProvisioning = false

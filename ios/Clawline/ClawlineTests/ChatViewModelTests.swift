@@ -1978,6 +1978,187 @@ struct ChatViewModelTests {
         #expect(chatService.lastSessionControl?.value == "claude")
     }
 
+    @Test("setHarness refuses stale or unavailable status before posting the selected value")
+    @MainActor
+    func setHarnessRefusesStaleOrUnavailableStatusBeforePostingSelectedValue() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.fetchSessionStatusDelay = .milliseconds(250)
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .idle,
+            provider: "anthropic",
+            model: "claude-sonnet-5",
+            thinkingLevel: nil,
+            queueDepth: 0,
+            harness: "codex",
+            harnessOptions: ["claude", "codex"]
+        )
+        let viewModel = ChatViewModel(
+            auth: auth, chatService: chatService, settings: SettingsManager(),
+            device: TestDevice(), uploadService: TestUploadService(),
+            toastManager: ToastManager(), salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.setHarnessStaleStatus")
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+
+        for _ in 0..<50 {
+            if viewModel.canApplyTightbeamSessionControl(.setHarness, sessionKey: personalSessionKey, value: "claude") { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness, sessionKey: personalSessionKey, value: "claude"))
+
+        let firstFetchCount = chatService.fetchSessionStatusCallCount
+        let payload = #"{"type":"message","id":"s_stale_probe","role":"assistant","content":"noop","timestamp":1700000000003,"streaming":false,"sessionKey":"\#(personalSessionKey)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(payload.utf8))))
+
+        for _ in 0..<50 {
+            if chatService.fetchSessionStatusCallCount > firstFetchCount { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.isSessionStatusStale(for: personalSessionKey))
+        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness, sessionKey: personalSessionKey, value: "claude") == false)
+        #expect(viewModel.unavailableSessionControlReason(.setHarness, sessionKey: personalSessionKey, value: "claude") == "session_status_stale")
+
+        viewModel.applySessionControl(sessionKey: personalSessionKey, action: .setHarness, value: "claude")
+        try await Task.sleep(for: .milliseconds(80))
+        #expect(chatService.lastSessionControl == nil)
+
+        _ = viewModel.recordSessionStatusFetchFailure(for: personalSessionKey)
+        _ = viewModel.recordSessionStatusFetchFailure(for: personalSessionKey)
+        _ = viewModel.recordSessionStatusFetchFailure(for: personalSessionKey)
+
+        #expect(viewModel.isSessionStatusUnavailable(for: personalSessionKey))
+        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness, sessionKey: personalSessionKey, value: "claude") == false)
+        #expect(viewModel.unavailableSessionControlReason(.setHarness, sessionKey: personalSessionKey, value: "claude") == "session_status_unavailable")
+    }
+
+    @Test("setHarness refuses removed disabled or empty options before posting retained selection")
+    @MainActor
+    func setHarnessRefusesRemovedDisabledOrEmptyOptionsBeforePostingRetainedSelection() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .idle,
+            provider: "anthropic",
+            model: "claude-sonnet-5",
+            thinkingLevel: nil,
+            queueDepth: 0,
+            harness: "codex",
+            harnessOptions: ["claude", "codex"]
+        )
+        let viewModel = ChatViewModel(
+            auth: auth, chatService: chatService, settings: SettingsManager(),
+            device: TestDevice(), uploadService: TestUploadService(),
+            toastManager: ToastManager(), salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.setHarnessRemovedOption")
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+
+        for _ in 0..<50 {
+            if viewModel.orgOptionsHarnesses == ["claude", "codex"] { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness, sessionKey: personalSessionKey, value: "claude"))
+
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .idle,
+            provider: "anthropic",
+            model: "claude-sonnet-5",
+            thinkingLevel: nil,
+            queueDepth: 0,
+            harness: "codex",
+            harnessOptions: ["codex"]
+        )
+        let removedFetchCount = chatService.fetchSessionStatusCallCount
+        let removedPayload = #"{"type":"message","id":"s_removed_option","role":"assistant","content":"noop","timestamp":1700000000004,"streaming":false,"sessionKey":"\#(personalSessionKey)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(removedPayload.utf8))))
+
+        for _ in 0..<50 {
+            if chatService.fetchSessionStatusCallCount > removedFetchCount,
+               viewModel.orgOptionsHarnesses == ["codex"] {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness, sessionKey: personalSessionKey, value: "claude") == false)
+        #expect(viewModel.unavailableSessionControlReason(.setHarness, sessionKey: personalSessionKey, value: "claude") == "harness_options_unavailable")
+        viewModel.applySessionControl(sessionKey: personalSessionKey, action: .setHarness, value: "claude")
+        try await Task.sleep(for: .milliseconds(80))
+        #expect(chatService.lastSessionControl == nil)
+
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .idle,
+            provider: "anthropic",
+            model: "claude-sonnet-5",
+            thinkingLevel: nil,
+            queueDepth: 0,
+            harness: "codex",
+            harnessOptions: ["claude", "codex"],
+            harnessOptionEnabled: ["claude": false]
+        )
+        let disabledFetchCount = chatService.fetchSessionStatusCallCount
+        let disabledPayload = #"{"type":"message","id":"s_disabled_option","role":"assistant","content":"noop","timestamp":1700000000005,"streaming":false,"sessionKey":"\#(personalSessionKey)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(disabledPayload.utf8))))
+
+        for _ in 0..<50 {
+            if chatService.fetchSessionStatusCallCount > disabledFetchCount,
+               viewModel.orgOptionsHarnesses == ["codex"] {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness, sessionKey: personalSessionKey, value: "claude") == false)
+        #expect(viewModel.unavailableSessionControlReason(.setHarness, sessionKey: personalSessionKey, value: "claude") == "harness_options_unavailable")
+
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .idle,
+            provider: "anthropic",
+            model: "claude-sonnet-5",
+            thinkingLevel: nil,
+            queueDepth: 0,
+            harness: "codex",
+            harnessOptions: []
+        )
+        let emptyFetchCount = chatService.fetchSessionStatusCallCount
+        let emptyPayload = #"{"type":"message","id":"s_empty_options","role":"assistant","content":"noop","timestamp":1700000000006,"streaming":false,"sessionKey":"\#(personalSessionKey)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(emptyPayload.utf8))))
+
+        for _ in 0..<50 {
+            if chatService.fetchSessionStatusCallCount > emptyFetchCount,
+               viewModel.orgOptionsHarnesses.isEmpty {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness, sessionKey: personalSessionKey, value: "claude") == false)
+        #expect(viewModel.unavailableSessionControlReason(.setHarness, sessionKey: personalSessionKey, value: "claude") == "harness_options_unavailable")
+    }
+
     @Test("F3 regression: prepareForReplacement cancels the in-flight org-options task")
     @MainActor
     func prepareForReplacementCancelsOrgOptionsTask() async throws {
@@ -8880,6 +9061,7 @@ final class TestChatService: ChatServicing {
     var fetchOrgOptionsError: Error?
     var orgOptions = OrgOptions.empty
     var orgOptionsFetchDelay: Duration?
+    var fetchSessionStatusDelay: Duration?
     private(set) var fetchOrgOptionsCallCount: Int = 0
     var streams: [StreamSession] = []
     var trackableSessions: [TrackableSession] = []
@@ -9106,6 +9288,7 @@ final class TestChatService: ChatServicing {
     func fetchSessionStatus(sessionKey: String) async throws -> SessionStatus {
         fetchSessionStatusCallCount += 1
         fetchedSessionStatusKeys.append(sessionKey)
+        if let fetchSessionStatusDelay { try await Task.sleep(for: fetchSessionStatusDelay) }
         if let status = sessionStatusBySessionKey[sessionKey] {
             return status
         }
@@ -9525,7 +9708,8 @@ private func makeSessionStatus(
     queueDepth: Int,
     canCancelCurrentRun: Bool = false,
     harness: String? = nil,
-    harnessOptions: [String]? = nil
+    harnessOptions: [String]? = nil,
+    harnessOptionEnabled: [String: Bool] = [:]
 ) -> SessionStatus {
     SessionStatus(
         sessionKey: sessionKey,
@@ -9566,7 +9750,7 @@ private func makeSessionStatus(
                 .init(
                     supported: true,
                     reason: nil,
-                    options: options.map { .init(title: $0, value: $0, enabled: true) }
+                    options: options.map { .init(title: $0, value: $0, enabled: harnessOptionEnabled[$0] ?? true) }
                 )
             },
             canCancelCurrentRun: nil,

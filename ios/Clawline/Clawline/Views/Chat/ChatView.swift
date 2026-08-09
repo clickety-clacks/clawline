@@ -1315,7 +1315,11 @@ struct ChatView: View {
             presenting: pendingHarnessChange
         ) { change in
             Button("Switch to \(change.harness)", role: .destructive) {
-                if viewModel.canApplyTightbeamSessionControl(.setHarness, sessionKey: change.sessionKey) {
+                if viewModel.canApplyTightbeamSessionControl(
+                    .setHarness,
+                    sessionKey: change.sessionKey,
+                    value: change.harness
+                ) {
                     viewModel.applySessionControl(
                         sessionKey: change.sessionKey,
                         action: .setHarness,
@@ -1323,7 +1327,11 @@ struct ChatView: View {
                     )
                 } else {
                     viewModel.showUnavailableSessionControlReason(
-                        viewModel.unavailableSessionControlReason(.setHarness, sessionKey: change.sessionKey)
+                        viewModel.unavailableSessionControlReason(
+                            .setHarness,
+                            sessionKey: change.sessionKey,
+                            value: change.harness
+                        )
                     )
                 }
                 pendingHarnessChange = nil

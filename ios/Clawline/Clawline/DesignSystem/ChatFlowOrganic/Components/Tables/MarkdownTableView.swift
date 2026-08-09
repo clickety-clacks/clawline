@@ -3,6 +3,20 @@ import UIKit
 import UniformTypeIdentifiers
 
 struct MarkdownTableView: View {
+    private static let tableTextColor = UIColor { traitCollection in
+        let colorScheme: ColorScheme = traitCollection.userInterfaceStyle == .dark ? .dark : .light
+        if colorScheme == .dark {
+            return UIColor(red: 0.941, green: 0.918, blue: 0.894, alpha: 1.0)
+        }
+        return UIColor(ChatFlowTheme.ink(colorScheme))
+    }
+
+    private static let inlineCodeBackgroundColor = UIColor { traitCollection in
+        traitCollection.userInterfaceStyle == .dark
+            ? UIColor.white.withAlphaComponent(0.12)
+            : UIColor.black.withAlphaComponent(0.08)
+    }
+
     let model: TableModel
     let role: Message.Role
     let metrics: ChatFlowTheme.Metrics
@@ -67,12 +81,6 @@ struct MarkdownTableView: View {
     private var borderColor: Color { Color(uiColor: borderColorValue) }
     private var headerDividerColor: Color { Color(uiColor: headerDividerColorValue) }
     private var cellDividerColor: Color { Color(uiColor: cellDividerColorValue) }
-    private var tableTextColor: UIColor { dynamicColor { colorScheme in
-        if colorScheme == .dark {
-            return UIColor(red: 0.941, green: 0.918, blue: 0.894, alpha: 1.0)
-        }
-        return UIColor(ChatFlowTheme.ink(colorScheme))
-    } }
     private var emptyCellTextColor: UIColor { dynamicColor { colorScheme in
         UIColor(ChatFlowTheme.ink(colorScheme)).withAlphaComponent(colorScheme == .dark ? 0.82 : 0.60)
     } }
@@ -493,14 +501,14 @@ struct MarkdownTableView: View {
         }
     }
 
-    private func styledAttributedString(for cell: TableModel.Cell, alignment: ColumnAlignment, isHeader: Bool) -> NSAttributedString {
+    func styledAttributedString(for cell: TableModel.Cell, alignment: ColumnAlignment, isHeader: Bool) -> NSAttributedString {
         let attributed = cell.attributed
         let mutable = NSMutableAttributedString(attributed)
         _ = metrics
         let scaledFont = isHeader ? UIFont.clawline(.mediumMessage) : UIFont.clawline(.bodyText)
         let fullRange = NSRange(location: 0, length: mutable.length)
         mutable.addAttribute(.font, value: scaledFont, range: fullRange)
-        mutable.addAttribute(.foregroundColor, value: tableTextColor, range: fullRange)
+        mutable.addAttribute(.foregroundColor, value: Self.tableTextColor, range: fullRange)
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = nsTextAlignment(for: alignment)
         paragraph.lineBreakMode = .byWordWrapping
@@ -511,7 +519,7 @@ struct MarkdownTableView: View {
                 let nsRange = NSRange(run.range, in: attributed)
                 let codeFont = UIFont.clawlineMonospaced(.secondaryLabel)
                 mutable.addAttribute(.font, value: codeFont, range: nsRange)
-                mutable.addAttribute(.backgroundColor, value: inlineCodeBackgroundColor(), range: nsRange)
+                mutable.addAttribute(.backgroundColor, value: Self.inlineCodeBackgroundColor, range: nsRange)
             }
         }
 
@@ -534,14 +542,6 @@ struct MarkdownTableView: View {
         )
         // Small safety margin prevents edge-case glyph clipping/wrapping in UITextView layout.
         return ceil(measured.width) + 1
-    }
-
-    private func inlineCodeBackgroundColor() -> UIColor {
-        dynamicColor { colorScheme in
-            colorScheme == .dark
-                ? UIColor.white.withAlphaComponent(0.12)
-                : UIColor.black.withAlphaComponent(0.08)
-        }
     }
 
     private func dynamicColor(_ makeColor: @escaping (ColorScheme) -> UIColor) -> UIColor {

@@ -1853,6 +1853,68 @@ struct ChatViewModelTests {
         #expect(viewModel.orgOptions?.harnesses.contains("stale-A") != true)
     }
 
+    @Test("orgOptionsHarnesses prefers the setHarness session-status capability over org-options, and falls back when the capability is absent")
+    @MainActor
+    func orgOptionsHarnessesPrefersSessionStatusCapability() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        // Org-options load succeeds too, but the capability must win when both are present.
+        chatService.orgOptions = OrgOptions(harnesses: ["org-only"], models: [:], hosts: [], archetypes: [])
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .idle,
+            provider: "anthropic",
+            model: "claude-sonnet-5",
+            thinkingLevel: nil,
+            queueDepth: 0,
+            harness: "codex",
+            harnessOptions: ["claude", "codex"]
+        )
+        let viewModel = ChatViewModel(
+            auth: auth, chatService: chatService, settings: SettingsManager(),
+            device: TestDevice(), uploadService: TestUploadService(),
+            toastManager: ToastManager(), salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.orgOptionsHarnessesCapability")
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+
+        for _ in 0..<50 {
+            if viewModel.sessionStatus(for: personalSessionKey)?.display.harness == "codex" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.orgOptionsHarnesses == ["claude", "codex"])
+
+        // Capability absent (nil, distinct from empty) -> falls back to org-options.
+        let firstFetchCount = chatService.fetchSessionStatusCallCount
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .idle,
+            provider: "anthropic",
+            model: "claude-sonnet-5",
+            thinkingLevel: nil,
+            queueDepth: 0,
+            harness: "codex",
+            harnessOptions: nil
+        )
+        let payload = #"{"type":"message","id":"s_capability_probe","role":"assistant","content":"noop","timestamp":1700000000002,"streaming":false,"sessionKey":"\#(personalSessionKey)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(payload.utf8))))
+
+        for _ in 0..<50 {
+            if chatService.fetchSessionStatusCallCount > firstFetchCount { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.orgOptionsHarnesses == ["org-only"])
+    }
+
     @Test("F3 regression: prepareForReplacement cancels the in-flight org-options task")
     @MainActor
     func prepareForReplacementCancelsOrgOptionsTask() async throws {
@@ -9339,7 +9401,9 @@ private func makeSessionStatus(
     fastMode: Bool? = nil,
     codexUsage: SessionStatus.Display.CodexUsage? = nil,
     queueDepth: Int,
-    canCancelCurrentRun: Bool = false
+    canCancelCurrentRun: Bool = false,
+    harness: String? = nil,
+    harnessOptions: [String]? = nil
 ) -> SessionStatus {
     SessionStatus(
         sessionKey: sessionKey,
@@ -9347,7 +9411,7 @@ private func makeSessionStatus(
             model: model,
             fallbackModels: nil,
             provider: provider,
-            harness: nil,
+            harness: harness,
             authMode: authMode,
             reasoningLevel: reasoningLevel,
             thinkingLevel: thinkingLevel,
@@ -9376,6 +9440,13 @@ private func makeSessionStatus(
             setFastMode: .init(supported: true, reason: nil),
             setMode: .init(supported: false, reason: "provider_control_not_available"),
             setVerbosity: .init(supported: false, reason: "provider_control_not_available"),
+            setHarness: harnessOptions.map { options in
+                .init(
+                    supported: true,
+                    reason: nil,
+                    options: options.map { .init(title: $0, value: $0, enabled: true) }
+                )
+            },
             canCancelCurrentRun: nil,
             canChangeModel: nil,
             canChangeReasoning: nil,

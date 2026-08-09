@@ -1918,6 +1918,66 @@ struct ChatViewModelTests {
         #expect(viewModel.canApplyTightbeamSessionControl(.setHarness, sessionKey: personalSessionKey) == false)
     }
 
+    @Test("setHarness uses per-session capability when the coarse Tightbeam flag is absent")
+    @MainActor
+    func setHarnessUsesCapabilityWhenCoarseTightbeamFlagIsAbsent() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .idle,
+            provider: "anthropic",
+            model: "claude-sonnet-5",
+            thinkingLevel: nil,
+            queueDepth: 0,
+            harness: "codex",
+            harnessOptions: ["claude", "codex"]
+        )
+        chatService.sessionControlResponse = SessionControlResponse(
+            ok: true,
+            sessionKey: personalSessionKey,
+            action: SessionControlAction.setHarness.rawValue,
+            code: nil,
+            message: nil,
+            status: chatService.sessionStatusBySessionKey[personalSessionKey],
+            capabilities: nil
+        )
+        let viewModel = ChatViewModel(
+            auth: auth, chatService: chatService, settings: SettingsManager(),
+            device: TestDevice(), uploadService: TestUploadService(),
+            toastManager: ToastManager(), salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.setHarnessCapabilityNoCoarseGate")
+        chatService.emitServiceEvent(.serverFeatures([]))
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+
+        for _ in 0..<50 {
+            if viewModel.sessionStatus(for: personalSessionKey)?.display.harness == "codex" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.isTightbeamServer == false)
+        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness, sessionKey: personalSessionKey))
+        #expect(viewModel.unavailableSessionControlReason(.setHarness, sessionKey: personalSessionKey) == nil)
+
+        viewModel.applySessionControl(sessionKey: personalSessionKey, action: .setHarness, value: "claude")
+        for _ in 0..<50 {
+            if chatService.lastSessionControl?.action == .setHarness { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(chatService.lastSessionControl?.sessionKey == personalSessionKey)
+        #expect(chatService.lastSessionControl?.action == .setHarness)
+        #expect(chatService.lastSessionControl?.value == "claude")
+    }
+
     @Test("F3 regression: prepareForReplacement cancels the in-flight org-options task")
     @MainActor
     func prepareForReplacementCancelsOrgOptionsTask() async throws {

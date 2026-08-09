@@ -751,9 +751,6 @@ final class ChatViewModel {
         let authorityKey = sessionStatusAuthorityKey(for: sessionKey ?? engineActiveSessionKey)
         guard !authorityKey.isEmpty else { return "session_status_loading" }
         guard let capability = sessionStatus(for: authorityKey)?.capabilities.setHarness else {
-            if !isTightbeamServer {
-                return "tightbeam_feature_unavailable"
-            }
             return "session_status_loading"
         }
         guard capability.supported else { return capability.reason ?? "set_harness_unsupported" }

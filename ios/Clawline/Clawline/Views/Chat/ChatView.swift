@@ -1303,11 +1303,8 @@ struct ChatView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
-        // Same coarse gate rule as the creation sheet. The confirm action below
-        // also rechecks the per-session setHarness capability before posting.
-        .onChange(of: viewModel.isTightbeamServer) { _, isTightbeam in
-            if !isTightbeam { pendingHarnessChange = nil }
-        }
+        // Confirmation stays keyed to the selected session; the confirm action
+        // rechecks the per-session setHarness capability before posting.
         .confirmationDialog(
             "Switching harnesses starts a fresh engine context.",
             isPresented: Binding(

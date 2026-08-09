@@ -91,23 +91,23 @@ struct T1751HarnessSelectorTests {
 
     // MARK: - footer picker gating
 
-    @Test("T1751 footer renders the harness picker only when the tightbeam gate is on")
-    func footerRendersHarnessOnlyWhenGated() throws {
-        let status = try decodedStatus(harness: "codex")
+    @Test("T1751 footer renders the harness from per-session capability when the coarse gate is absent")
+    func footerRendersHarnessFromCapabilityWhenCoarseGateIsAbsent() throws {
+        let status = try decodedStatus(harness: "codex", harnessOptions: ["claude", "codex"])
 
-        // Gate on -> harness renders in the footer text.
+        // Coarse gate on -> harness renders in the footer text.
         #expect(SessionMetadataFooterCell.footerText(
             for: status,
             isTightbeam: true,
             harnessOptions: ["claude", "codex"]
         )?.contains("codex") == true)
 
-        // Gate off -> harness affordance is hidden even though the value exists.
+        // Coarse gate off -> per-session capability still renders the harness.
         #expect(SessionMetadataFooterCell.footerText(
             for: status,
             isTightbeam: false,
             harnessOptions: ["claude", "codex"]
-        )?.contains("codex") == false)
+        )?.contains("codex") == true)
     }
 
     @Test("T1751 gated harness renders as an enabled picker button once options load")
@@ -138,14 +138,17 @@ struct T1751HarnessSelectorTests {
         #expect(button.accessibilityHint == "harness_options_unavailable")
     }
 
-    @Test("T1751 ungated cell does not render the harness picker")
-    func ungatedCellHidesHarness() throws {
-        let status = try decodedStatus(harness: "codex")
+    @Test("T1751 capability-present coarse-flag-absent cell renders the harness picker")
+    func capabilityPresentCoarseFlagAbsentCellRendersHarness() throws {
+        let status = try decodedStatus(harness: "codex", harnessOptions: ["claude", "codex"])
         let cell = configuredCell(status: status, isTightbeam: false, harnessOptions: ["claude", "codex"])
-        let hasHarness = descendants(of: cell)
-            .compactMap { $0 as? UIButton }
-            .contains { $0.accessibilityLabel == "Harness codex" }
-        #expect(hasHarness == false)
+        let button = try #require(
+            descendants(of: cell)
+                .compactMap { $0 as? UIButton }
+                .first { $0.accessibilityLabel == "Harness codex" }
+        )
+        #expect(button.isEnabled)
+        #expect(button.menu != nil)
     }
 
     // MARK: - helpers

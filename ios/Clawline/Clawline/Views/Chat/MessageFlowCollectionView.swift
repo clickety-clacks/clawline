@@ -8372,7 +8372,6 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         ] + authModeFooterItems(display.authMode, codexUsage: display.codexUsage, isDark: isDark)
             + harnessFooterItems(
                 display.harness,
-                isTightbeam: isTightbeam,
                 capability: capabilities.setHarness,
                 options: statusControlReason == nil ? harnessOptions : [],
                 statusControlReason: statusControlReason
@@ -8382,13 +8381,14 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
 
     private static func harnessFooterItems(
         _ harness: String?,
-        isTightbeam: Bool,
         capability: SessionStatus.Capability?,
         options: [String],
         statusControlReason: String?
     ) -> [FooterItem] {
-        // Tightbeam-only. Absent harness renders nothing (openclaw payloads lack it).
-        guard isTightbeam, let harness = normalized(harness) else { return [] }
+        // Absent harness renders nothing (openclaw payloads lack it). When a
+        // session-status payload provides a harness, its setHarness capability
+        // is the only authority for whether the control is actionable.
+        guard let harness = normalized(harness) else { return [] }
         // Options come from session-status setHarness capability. Until that
         // per-session truth arrives, or when it says unsupported, the item shows
         // the current harness with reason feedback but no actionable menu.

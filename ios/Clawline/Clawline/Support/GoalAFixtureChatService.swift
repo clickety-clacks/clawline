@@ -58,8 +58,11 @@ final class GoalAFixtureChatService: ChatServicing {
     /// anything whose epoch does not match the coordinator's currentEpoch.
     private var connectedEpoch: Int?
     private var hasStartedTranscript = false
+    // This fixture exercises the same Tightbeam feature gate and status/control
+    // round trip as the live harness picker, without contacting a gateway.
+    private var selectedHarness = "codex"
 
-    var serverFeatures: [String] { [] }
+    var serverFeatures: [String] { ["tightbeam"] }
     var isTransportReadyForSend: Bool { true }
 
     init() {
@@ -149,7 +152,10 @@ final class GoalAFixtureChatService: ChatServicing {
     func fetchTrackableSessions() async throws -> [TrackableSession] { [] }
     func fetchOrgOptions() async throws -> OrgOptions { OrgOptions.empty }
     func fetchSessionStatus(sessionKey: String) async throws -> SessionStatus {
-        throw ProviderChatService.Error.notConnected
+        guard sessionKey == Self.sessionKey else {
+            throw ProviderChatService.Error.notConnected
+        }
+        return fixtureSessionStatus()
     }
     func applySessionControl(
         sessionKey: String,
@@ -157,7 +163,72 @@ final class GoalAFixtureChatService: ChatServicing {
         value: String?,
         enabled: Bool?
     ) async throws -> SessionControlResponse {
-        throw ProviderChatService.Error.notConnected
+        guard sessionKey == Self.sessionKey,
+              action == .setHarness,
+              let value else {
+            throw ProviderChatService.Error.notConnected
+        }
+        selectedHarness = value
+        let status = fixtureSessionStatus()
+        return SessionControlResponse(
+            ok: true,
+            sessionKey: Self.sessionKey,
+            action: action.rawValue,
+            code: nil,
+            message: nil,
+            status: status,
+            capabilities: status.capabilities
+        )
+    }
+
+    private func fixtureSessionStatus() -> SessionStatus {
+        SessionStatus(
+            sessionKey: Self.sessionKey,
+            display: SessionStatus.Display(
+                model: "claude-sonnet-5",
+                fallbackModels: ["gpt-5.6-sol"],
+                provider: "anthropic",
+                harness: selectedHarness,
+                reasoningLevel: nil,
+                thinkingLevel: nil,
+                fastMode: nil,
+                mode: nil,
+                verbosity: nil
+            ),
+            run: SessionStatus.Run(
+                state: .idle,
+                runId: nil,
+                messageId: nil,
+                startedAt: nil,
+                queueDepth: nil
+            ),
+            context: nil,
+            approval: nil,
+            capabilities: SessionStatus.Capabilities(
+                cancelCurrentRun: nil,
+                setModel: SessionStatus.Capability(supported: true, reason: nil),
+                setThinking: nil,
+                setReasoning: nil,
+                setFastMode: nil,
+                setMode: nil,
+                setVerbosity: nil,
+                setHarness: SessionStatus.Capability(
+                    supported: true,
+                    reason: nil,
+                    options: [
+                        SessionStatus.Capability.Option(title: "claude", value: "claude", enabled: true),
+                        SessionStatus.Capability.Option(title: "codex", value: "codex", enabled: true),
+                    ]
+                ),
+                canCancelCurrentRun: nil,
+                canChangeModel: nil,
+                canChangeReasoning: nil,
+                canChangeFastMode: nil,
+                canChangeVerbosity: nil,
+                readOnlyStatus: nil
+            ),
+            modelCatalog: nil
+        )
     }
     func adoptStream(sessionKey: String) async throws -> StreamSession {
         throw ProviderChatService.Error.notConnected

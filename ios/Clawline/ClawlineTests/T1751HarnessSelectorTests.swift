@@ -91,28 +91,34 @@ struct T1751HarnessSelectorTests {
 
     // MARK: - footer picker gating
 
-    @Test("T1751 footer renders the harness picker only when the tightbeam gate is on")
-    func footerRendersHarnessOnlyWhenGated() throws {
-        let status = try decodedStatus(harness: "codex")
+    @Test("T1751 raw session-status decodes setHarness and renders without the coarse gate")
+    func footerRendersDecodedCapabilityWithoutCoarseGate() throws {
+        let status = try decodedStatus(
+            harness: "codex",
+            setHarnessJSON: #"{"supported":true,"options":[{"title":"claude","value":"claude","enabled":true},{"title":"codex","value":"codex","enabled":true}]}"#
+        )
+        #expect(status.capabilities.setHarness?.supported == true)
+        #expect(status.capabilities.setHarness?.options?.compactMap(\.value) == ["claude", "codex"])
 
-        // Gate on -> harness renders in the footer text.
         #expect(SessionMetadataFooterCell.footerText(
             for: status,
             isTightbeam: true,
             harnessOptions: ["claude", "codex"]
         )?.contains("codex") == true)
 
-        // Gate off -> harness affordance is hidden even though the value exists.
         #expect(SessionMetadataFooterCell.footerText(
             for: status,
             isTightbeam: false,
             harnessOptions: ["claude", "codex"]
-        )?.contains("codex") == false)
+        )?.contains("codex") == true)
     }
 
     @Test("T1751 gated harness renders as an enabled picker button once options load")
     func gatedHarnessRendersAsEnabledPicker() throws {
-        let status = try decodedStatus(harness: "codex")
+        let status = try decodedStatus(
+            harness: "codex",
+            setHarnessJSON: #"{"supported":true,"options":[{"value":"claude"},{"value":"codex"}]}"#
+        )
         let cell = configuredCell(status: status, isTightbeam: true, harnessOptions: ["claude", "codex"])
         let button = try #require(
             descendants(of: cell)
@@ -123,32 +129,62 @@ struct T1751HarnessSelectorTests {
         #expect(button.menu != nil)
     }
 
-    @Test("T1751 harness shows as a disabled label before org-options load")
-    func harnessRendersDisabledBeforeOptionsLoad() throws {
-        let status = try decodedStatus(harness: "codex")
+    @Test("T1751 empty setHarness options render an honest unavailable picker")
+    func emptyCapabilityOptionsRenderUnavailablePicker() throws {
+        let status = try decodedStatus(
+            harness: "codex",
+            setHarnessJSON: #"{"supported":true,"options":[]}"#
+        )
+        #expect(status.capabilities.setHarness?.options == [])
         let cell = configuredCell(status: status, isTightbeam: true, harnessOptions: [])
         let button = try #require(
             descendants(of: cell)
                 .compactMap { $0 as? UIButton }
                 .first { $0.accessibilityLabel == "Harness codex" }
         )
-        // No options yet -> not tappable, but the current engine is still shown.
         #expect(button.isEnabled == false)
+        #expect(button.menu == nil)
+        #expect(button.accessibilityHint == "harness_options_unavailable")
     }
 
-    @Test("T1751 ungated cell does not render the harness picker")
-    func ungatedCellHidesHarness() throws {
+    @Test("T1751 absent setHarness capability decodes as loading, not org-options authority")
+    func absentCapabilityRendersLoadingPicker() throws {
         let status = try decodedStatus(harness: "codex")
-        let cell = configuredCell(status: status, isTightbeam: false, harnessOptions: ["claude", "codex"])
-        let hasHarness = descendants(of: cell)
-            .compactMap { $0 as? UIButton }
-            .contains { $0.accessibilityLabel == "Harness codex" }
-        #expect(hasHarness == false)
+        #expect(status.capabilities.setHarness == nil)
+        let cell = configuredCell(status: status, isTightbeam: true, harnessOptions: [])
+        let button = try #require(
+            descendants(of: cell)
+                .compactMap { $0 as? UIButton }
+                .first { $0.accessibilityLabel == "Harness codex" }
+        )
+        #expect(button.isEnabled == false)
+        #expect(button.menu == nil)
+        #expect(button.accessibilityHint == "session_status_loading")
+    }
+
+    @Test("T1751 unsupported setHarness capability preserves the server reason")
+    func unsupportedCapabilityPreservesReason() throws {
+        let status = try decodedStatus(
+            harness: "codex",
+            setHarnessJSON: #"{"supported":false,"reason":"credential_unavailable","options":[{"value":"claude"}]}"#
+        )
+        #expect(status.capabilities.setHarness?.supported == false)
+        #expect(status.capabilities.setHarness?.reason == "credential_unavailable")
+        let cell = configuredCell(status: status, isTightbeam: true, harnessOptions: [])
+        let button = try #require(
+            descendants(of: cell)
+                .compactMap { $0 as? UIButton }
+                .first { $0.accessibilityLabel == "Harness codex" }
+        )
+        #expect(button.isEnabled == false)
+        #expect(button.menu == nil)
+        #expect(button.accessibilityHint == "credential_unavailable")
     }
 
     // MARK: - helpers
 
-    private func decodedStatus(harness: String) throws -> SessionStatus {
+    private func decodedStatus(harness: String, setHarnessJSON: String? = nil) throws -> SessionStatus {
+        let setHarnessCapability = setHarnessJSON.map { #""setHarness": \#($0)"# } ?? ""
         let json = """
         {
           "sessionKey": "agent:main:clawline:user:s_t1751",
@@ -159,7 +195,7 @@ struct T1751HarnessSelectorTests {
             "authMode": "oauth"
           },
           "run": {"state": "idle"},
-          "capabilities": {}
+          "capabilities": {\(setHarnessCapability)}
         }
         """
         return try JSONDecoder().decode(SessionStatus.self, from: Data(json.utf8))

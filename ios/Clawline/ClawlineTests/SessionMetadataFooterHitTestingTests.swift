@@ -411,6 +411,84 @@ struct SessionMetadataFooterHitTestingTests {
         #expect(disabledButtons.allSatisfy { !$0.isEnabled })
     }
 
+    @Test("Harness footer surfaces the setHarness capability reason")
+    func harnessFooterSurfacesSetHarnessUnsupportedReason() async throws {
+        var unavailableReason: String?
+        let status = makeStatus(
+            harness: "codex",
+            setHarness: .init(
+                supported: false,
+                reason: "credential_unavailable",
+                options: [.init(title: "claude", value: "claude", enabled: true)]
+            )
+        )
+        let cell = makeConfiguredCell(
+            status: status,
+            harnessOptions: ["claude"],
+            onUnavailableSelect: { reason in unavailableReason = reason }
+        )
+
+        let harnessButton = try #require(
+            footerActionButtons(in: cell).first { $0.accessibilityLabel == "Harness codex" }
+        )
+        #expect(harnessButton.isEnabled)
+        #expect(harnessButton.menu == nil)
+        #expect(harnessButton.accessibilityHint == "credential_unavailable")
+
+        harnessButton.sendActions(for: .primaryActionTriggered)
+        try await Task.sleep(for: .milliseconds(20))
+
+        #expect(unavailableReason == "credential_unavailable")
+    }
+
+    @Test("Harness footer requires a live option value before building a menu")
+    func harnessFooterRequiresLiveOptionValue() throws {
+        let status = makeStatus(
+            harness: "codex",
+            setHarness: .init(
+                supported: true,
+                reason: nil,
+                options: [.init(title: "Claude Display", value: nil, enabled: true)]
+            )
+        )
+        let cell = makeConfiguredCell(status: status, harnessOptions: [])
+
+        let harnessButton = try #require(
+            footerActionButtons(in: cell).first { $0.accessibilityLabel == "Harness codex" }
+        )
+        #expect(harnessButton.isEnabled == false)
+        #expect(harnessButton.menu == nil)
+        #expect(harnessButton.accessibilityHint == "harness_options_unavailable")
+    }
+
+    @Test("Harness footer disables cached options while session status is stale")
+    func harnessFooterDisablesCachedOptionsWhileStatusIsStale() throws {
+        let status = makeStatus(
+            harness: "codex",
+            setHarness: .init(
+                supported: true,
+                reason: nil,
+                options: [
+                    .init(title: "codex", value: "codex", enabled: true),
+                    .init(title: "claude", value: "claude", enabled: true),
+                ]
+            )
+        )
+        let cell = makeConfiguredCell(
+            status: status,
+            statusUnavailable: true,
+            sessionControlUnavailableReason: "session_status_stale",
+            harnessOptions: ["codex", "claude"]
+        )
+
+        let harnessButton = try #require(
+            footerActionButtons(in: cell).first { $0.accessibilityLabel == "Harness codex" }
+        )
+        #expect(harnessButton.isEnabled == false)
+        #expect(harnessButton.menu == nil)
+        #expect(harnessButton.accessibilityHint == "session_status_stale")
+    }
+
     @Test("Popup selectors mark current item with checkmark image instead of text")
     func popupSelectorsMarkCurrentItemWithCheckmarkImageInsteadOfText() throws {
         let cell = makeConfiguredCell()
@@ -442,16 +520,36 @@ private func makeConfiguredCell(authMode: String? = nil, isDark: Bool = false, i
     makeConfiguredCell(status: makeStatus(authMode: authMode), isDark: isDark, isSpatial: isSpatial)
 }
 
-private func makeConfiguredCell(status: SessionStatus?, isDark: Bool = false, isSpatial: Bool = false) -> SessionMetadataFooterCell {
+private func makeConfiguredCell(
+    status: SessionStatus?,
+    statusUnavailable: Bool = false,
+    sessionControlUnavailableReason: String? = nil,
+    isDark: Bool = false,
+    isSpatial: Bool = false,
+    harnessOptions: [String] = [],
+    onUnavailableSelect: (@MainActor (String) -> Void)? = nil
+) -> SessionMetadataFooterCell {
     let cell = SessionMetadataFooterCell(
         frame: CGRect(
             x: 0,
             y: 0,
             width: 320,
-            height: SessionMetadataFooterCell.height(for: status)
+            height: SessionMetadataFooterCell.height(
+                for: status,
+                harnessOptions: harnessOptions
+            )
         )
     )
-    cell.configure(status: status, isDark: isDark, isSpatial: isSpatial, onSelect: { _, _, _, _ in })
+    cell.configure(
+        status: status,
+        statusUnavailable: statusUnavailable,
+        sessionControlUnavailableReason: sessionControlUnavailableReason,
+        isDark: isDark,
+        isSpatial: isSpatial,
+        harnessOptions: harnessOptions,
+        onSelect: { _, _, _, _ in },
+        onUnavailableSelect: onUnavailableSelect
+    )
     cell.setNeedsLayout()
     cell.layoutIfNeeded()
     return cell
@@ -462,9 +560,11 @@ private func makeStatus(
     model: String? = "gpt-5.5",
     thinkingLevel: String? = "high",
     fastMode: Bool? = true,
+    harness: String? = nil,
     setModel: SessionStatus.Capability? = .init(supported: true, reason: nil),
     setThinking: SessionStatus.Capability? = .init(supported: true, reason: nil),
-    setFastMode: SessionStatus.Capability? = .init(supported: true, reason: nil)
+    setFastMode: SessionStatus.Capability? = .init(supported: true, reason: nil),
+    setHarness: SessionStatus.Capability? = nil
 ) -> SessionStatus {
     SessionStatus(
         sessionKey: "agent:main:clawline:user:s_test",
@@ -472,7 +572,7 @@ private func makeStatus(
             model: model,
             fallbackModels: ["gpt-5.5", "claude-sonnet-4.6"],
             provider: "openai",
-            harness: nil,
+            harness: harness,
             authMode: authMode,
             reasoningLevel: nil,
             thinkingLevel: thinkingLevel,
@@ -497,6 +597,7 @@ private func makeStatus(
             setFastMode: setFastMode,
             setMode: nil,
             setVerbosity: nil,
+            setHarness: setHarness,
             canCancelCurrentRun: nil,
             canChangeModel: nil,
             canChangeReasoning: nil,

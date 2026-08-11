@@ -188,6 +188,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     var sessionKey: String?
     var sessionStatus: SessionStatus?
     var sessionStatusUnavailable: Bool = false
+    var sessionControlUnavailableReason: String?
     var streamSearchQuery: String = ""
     var messageProjectionPublicationSequence: Int = 0
     var forceReReadGeneration: Int = 0
@@ -197,6 +198,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     var onTypingIndicatorTap: (@MainActor (CGRect) -> Void)?
     var onTypingIndicatorAnchorFrameChanged: (@MainActor (CGRect?) -> Void)? = nil
     var onSessionControlSelected: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
+    var onUnavailableSessionControlSelected: (@MainActor (String) -> Void)?
     var onFooterTestMenuSelected: (@MainActor (FooterTestMenuAction) -> Void)?
     var onInsertMessageIntoPrompt: (@MainActor (Message) -> Void)?
     var onReferenceMessageInPrompt: (@MainActor (Message) -> Void)?
@@ -242,6 +244,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             sessionKey: sessionKey,
             sessionStatus: sessionStatus,
             sessionStatusUnavailable: sessionStatusUnavailable,
+            sessionControlUnavailableReason: sessionControlUnavailableReason,
             streamSearchQuery: streamSearchQuery,
             forceReReadGeneration: forceReReadGeneration,
             sendIndicatorRevision: sendIndicatorRevision,
@@ -250,6 +253,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             onTypingIndicatorTap: onTypingIndicatorTap,
             onTypingIndicatorAnchorFrameChanged: onTypingIndicatorAnchorFrameChanged,
             onSessionControlSelected: onSessionControlSelected,
+            onUnavailableSessionControlSelected: onUnavailableSessionControlSelected,
             onFooterTestMenuSelected: onFooterTestMenuSelected,
             onInsertMessageIntoPrompt: onInsertMessageIntoPrompt,
             onReferenceMessageInPrompt: onReferenceMessageInPrompt,
@@ -286,6 +290,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             sessionKey: sessionKey,
             sessionStatus: sessionStatus,
             sessionStatusUnavailable: sessionStatusUnavailable,
+            sessionControlUnavailableReason: sessionControlUnavailableReason,
             streamSearchQuery: streamSearchQuery,
             forceReReadGeneration: forceReReadGeneration,
             sendIndicatorRevision: sendIndicatorRevision,
@@ -294,6 +299,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             onTypingIndicatorTap: onTypingIndicatorTap,
             onTypingIndicatorAnchorFrameChanged: onTypingIndicatorAnchorFrameChanged,
             onSessionControlSelected: onSessionControlSelected,
+            onUnavailableSessionControlSelected: onUnavailableSessionControlSelected,
             onFooterTestMenuSelected: onFooterTestMenuSelected,
             onInsertMessageIntoPrompt: onInsertMessageIntoPrompt,
             onReferenceMessageInPrompt: onReferenceMessageInPrompt,
@@ -333,6 +339,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let sessionKey: String?
         let sessionStatus: SessionStatus?
         let sessionStatusUnavailable: Bool
+        let sessionControlUnavailableReason: String?
         let streamSearchQuery: String
         let forceReReadGeneration: Int
         let sendIndicatorRevision: Int
@@ -341,6 +348,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let onTypingIndicatorTap: (@MainActor (CGRect) -> Void)?
         let onTypingIndicatorAnchorFrameChanged: (@MainActor (CGRect?) -> Void)?
         let onSessionControlSelected: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
+        let onUnavailableSessionControlSelected: (@MainActor (String) -> Void)?
         let onFooterTestMenuSelected: (@MainActor (FooterTestMenuAction) -> Void)?
         let onInsertMessageIntoPrompt: (@MainActor (Message) -> Void)?
         let onReferenceMessageInPrompt: (@MainActor (Message) -> Void)?
@@ -593,6 +601,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var isTypingActive: Bool = false
     private var sessionStatus: SessionStatus?
     private var sessionStatusUnavailable = false
+    private var sessionControlUnavailableReason: String?
     private var liveProgress: LiveAgentProgress?
     private var topInset: CGFloat = 0
     private var truncationBottomInset: CGFloat = 0
@@ -616,6 +625,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var onTypingIndicatorAnchorFrameChanged: (@MainActor (CGRect?) -> Void)?
     private var lastReportedTypingIndicatorAnchorFrame: CGRect?
     private var onSessionControlSelected: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
+    private var onUnavailableSessionControlSelected: (@MainActor (String) -> Void)?
     private var onFooterTestMenuSelected: (@MainActor (FooterTestMenuAction) -> Void)?
     private var onInsertMessageIntoPrompt: (@MainActor (Message) -> Void)?
     private var onReferenceMessageInPrompt: (@MainActor (Message) -> Void)?
@@ -3098,6 +3108,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         sessionKey: String? = nil,
         sessionStatus: SessionStatus? = nil,
         sessionStatusUnavailable: Bool = false,
+        sessionControlUnavailableReason: String? = nil,
         streamSearchQuery: String = "",
         forceReReadGeneration: Int = 0,
         sendIndicatorRevision: Int = 0,
@@ -3106,6 +3117,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         onTypingIndicatorTap: (@MainActor (CGRect) -> Void)? = nil,
         onTypingIndicatorAnchorFrameChanged: (@MainActor (CGRect?) -> Void)? = nil,
         onSessionControlSelected: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)? = nil,
+        onUnavailableSessionControlSelected: (@MainActor (String) -> Void)? = nil,
         onFooterTestMenuSelected: (@MainActor (FooterTestMenuAction) -> Void)? = nil,
         onInsertMessageIntoPrompt: (@MainActor (Message) -> Void)? = nil,
         onReferenceMessageInPrompt: (@MainActor (Message) -> Void)? = nil,
@@ -3133,6 +3145,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             sessionKey: sessionKey,
             sessionStatus: sessionStatus,
             sessionStatusUnavailable: sessionStatusUnavailable,
+            sessionControlUnavailableReason: sessionControlUnavailableReason,
             streamSearchQuery: streamSearchQuery,
             forceReReadGeneration: forceReReadGeneration,
             sendIndicatorRevision: sendIndicatorRevision,
@@ -3141,6 +3154,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onTypingIndicatorTap: onTypingIndicatorTap,
             onTypingIndicatorAnchorFrameChanged: onTypingIndicatorAnchorFrameChanged,
             onSessionControlSelected: onSessionControlSelected,
+            onUnavailableSessionControlSelected: onUnavailableSessionControlSelected,
             onFooterTestMenuSelected: onFooterTestMenuSelected,
             onInsertMessageIntoPrompt: onInsertMessageIntoPrompt,
             onReferenceMessageInPrompt: onReferenceMessageInPrompt,
@@ -3215,6 +3229,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         self.isTypingActive = isTypingActive
         self.sessionStatus = sessionStatus
         self.sessionStatusUnavailable = sessionStatusUnavailable
+        self.sessionControlUnavailableReason = sessionControlUnavailableReason
         self.liveProgress = nextLiveProgress
         self.currentSendIndicatorRevision = request.sendIndicatorRevision
         self.onExpand = onExpand
@@ -3224,6 +3239,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         self.onTypingIndicatorTap = onTypingIndicatorTap
         self.onTypingIndicatorAnchorFrameChanged = onTypingIndicatorAnchorFrameChanged
         self.onSessionControlSelected = onSessionControlSelected
+        self.onUnavailableSessionControlSelected = onUnavailableSessionControlSelected
         self.onFooterTestMenuSelected = onFooterTestMenuSelected
         self.onInsertMessageIntoPrompt = onInsertMessageIntoPrompt
         self.onReferenceMessageInPrompt = onReferenceMessageInPrompt
@@ -5176,10 +5192,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 cell?.configure(
                     status: self.sessionStatus,
                     statusUnavailable: self.sessionStatusUnavailable,
+                    sessionControlUnavailableReason: self.sessionControlUnavailableReason,
                     isDark: self.currentIsDark,
                     isTightbeam: viewModel.isTightbeamServer,
                     harnessOptions: viewModel.orgOptionsHarnesses,
                     onSelect: self.onSessionControlSelected,
+                    onUnavailableSelect: self.onUnavailableSessionControlSelected,
                     onTestMenuSelect: self.onFooterTestMenuSelected,
                     searchQuery: self.streamSearchQuery,
                     onSearchQueryChanged: { [weak self] query in
@@ -7842,11 +7860,13 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
     private struct FooterConfiguration {
         let status: SessionStatus?
         let statusUnavailable: Bool
+        let sessionControlUnavailableReason: String?
         let isDark: Bool
         let isSpatial: Bool
         let isTightbeam: Bool
         let harnessOptions: [String]
         let onSelect: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
+        let onUnavailableSelect: (@MainActor (String) -> Void)?
         let onTestMenuSelect: (@MainActor (FooterTestMenuAction) -> Void)?
         let searchQuery: String
         let onSearchQueryChanged: (@MainActor (String) -> Void)?
@@ -8102,11 +8122,13 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         configure(
             status: configuration.status,
             statusUnavailable: configuration.statusUnavailable,
+            sessionControlUnavailableReason: configuration.sessionControlUnavailableReason,
             isDark: configuration.isDark,
             isSpatial: configuration.isSpatial,
             isTightbeam: configuration.isTightbeam,
             harnessOptions: configuration.harnessOptions,
             onSelect: configuration.onSelect,
+            onUnavailableSelect: configuration.onUnavailableSelect,
             onTestMenuSelect: configuration.onTestMenuSelect,
             searchQuery: configuration.searchQuery,
             onSearchQueryChanged: configuration.onSearchQueryChanged
@@ -8117,11 +8139,13 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
     func configure(
         status: SessionStatus?,
         statusUnavailable: Bool = false,
+        sessionControlUnavailableReason: String? = nil,
         isDark: Bool,
         isSpatial: Bool = SessionMetadataFooterCell.isSpatialPlatform,
         isTightbeam: Bool = false,
         harnessOptions: [String] = [],
         onSelect: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?,
+        onUnavailableSelect: (@MainActor (String) -> Void)? = nil,
         onTestMenuSelect: (@MainActor (FooterTestMenuAction) -> Void)? = nil,
         searchQuery: String = "",
         onSearchQueryChanged: (@MainActor (String) -> Void)? = nil
@@ -8129,11 +8153,13 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         lastFooterConfiguration = FooterConfiguration(
             status: status,
             statusUnavailable: statusUnavailable,
+            sessionControlUnavailableReason: sessionControlUnavailableReason,
             isDark: isDark,
             isSpatial: isSpatial,
             isTightbeam: isTightbeam,
             harnessOptions: harnessOptions,
             onSelect: onSelect,
+            onUnavailableSelect: onUnavailableSelect,
             onTestMenuSelect: onTestMenuSelect,
             searchQuery: searchQuery,
             onSearchQueryChanged: onSearchQueryChanged
@@ -8156,14 +8182,21 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             isUnavailable: statusUnavailable,
             isDark: isDark,
             isTightbeam: isTightbeam,
-            harnessOptions: harnessOptions
+            harnessOptions: harnessOptions,
+            sessionControlUnavailableReason: sessionControlUnavailableReason
         )
         currentFooterItems = items
         for item in items {
             let itemColor = isSpatial ? textColor : (item.textColor ?? textColor)
             let row = item.row == .secondary ? secondaryControlsStackView : primaryControlsStackView
             row.addArrangedSubview(
-                footerView(for: item, status: status, color: itemColor, onSelect: onSelect)
+                footerView(
+                    for: item,
+                    status: status,
+                    color: itemColor,
+                    onSelect: onSelect,
+                    onUnavailableSelect: onUnavailableSelect
+                )
             )
         }
         let hasSecondaryMetadata = items.contains { $0.row == .secondary }
@@ -8274,7 +8307,8 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         isUnavailable: Bool = false,
         isDark: Bool = false,
         isTightbeam: Bool = false,
-        harnessOptions: [String] = []
+        harnessOptions: [String] = [],
+        sessionControlUnavailableReason: String? = nil
     ) -> [FooterItem] {
         guard let status else {
             if isUnavailable {
@@ -8333,30 +8367,46 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                 textColor: nil
             )
         ] + authModeFooterItems(display.authMode, codexUsage: display.codexUsage, isDark: isDark)
-            + harnessFooterItems(display.harness, isTightbeam: isTightbeam, options: harnessOptions)
+            + harnessFooterItems(
+                display.harness,
+                capability: capabilities.setHarness,
+                options: sessionControlUnavailableReason == nil ? harnessOptions : [],
+                statusControlReason: sessionControlUnavailableReason
+            )
             + hostFooterItems(display.host, isTightbeam: isTightbeam)
     }
 
     private static func harnessFooterItems(
         _ harness: String?,
-        isTightbeam: Bool,
-        options: [String]
+        capability: SessionStatus.Capability?,
+        options: [String],
+        statusControlReason: String?
     ) -> [FooterItem] {
-        // Tightbeam-only. Absent harness renders nothing (openclaw payloads lack it).
-        guard isTightbeam, let harness = normalized(harness) else { return [] }
-        // Options come from GET /api/org-options → harnesses. Until they load the
-        // item shows the current harness with no menu (disabled), then becomes a
-        // picker once options arrive. Selecting the current harness is a no-op
-        // resolved downstream; selecting a different one triggers the confirm.
+        // Absent harness renders nothing (openclaw payloads lack it). When a
+        // session-status payload provides a harness, its setHarness capability
+        // is the only authority for whether the control is actionable.
+        guard let harness = normalized(harness) else { return [] }
         let footerOptions = options.compactMap { normalized($0) }.map { value in
             FooterOption(title: value, value: value, enabled: nil, isCurrent: value == harness)
+        }
+        let isActionable = statusControlReason == nil && capability?.supported == true && !footerOptions.isEmpty
+        let unavailableReason: String? = if let statusControlReason {
+            statusControlReason
+        } else if capability == nil {
+            "session_status_loading"
+        } else if capability?.supported != true {
+            capability?.reason ?? "set_harness_unsupported"
+        } else if footerOptions.isEmpty {
+            "harness_options_unavailable"
+        } else {
+            nil
         }
         return [
             FooterItem(
                 text: harness,
-                action: .setHarness,
+                action: isActionable ? .setHarness : nil,
                 options: footerOptions,
-                unsupportedReason: "harness_options_unavailable",
+                unsupportedReason: unavailableReason,
                 textColor: nil,
                 row: .secondary,
                 accessibilityLabel: "Harness \(harness)",
@@ -8427,7 +8477,8 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         for item: FooterItem,
         status: SessionStatus?,
         color: UIColor,
-        onSelect: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
+        onSelect: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?,
+        onUnavailableSelect: (@MainActor (String) -> Void)?
     ) -> UIView {
         if item.isStaticLabel {
             let label = UILabel()
@@ -8473,13 +8524,24 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         button.titleLabel?.adjustsFontForContentSizeCategory = true
         button.titleLabel?.lineBreakMode = .byTruncatingTail
         button.tintColor = color
-        button.isEnabled = item.action != nil && !item.options.isEmpty
-        button.showsMenuAsPrimaryAction = button.isEnabled
+        let hasActionMenu = item.action != nil && !item.options.isEmpty
+        let hasUnavailableFeedback = item.action == nil && item.unsupportedReason != nil && onUnavailableSelect != nil
+        button.isEnabled = hasActionMenu || hasUnavailableFeedback
+        button.showsMenuAsPrimaryAction = hasActionMenu
         button.accessibilityLabel = item.accessibilityLabel ?? item.text
         if !button.isEnabled, let reason = item.unsupportedReason {
             button.accessibilityHint = reason
         }
-        guard let sessionKey = status?.sessionKey, let action = item.action, button.isEnabled else {
+        if hasUnavailableFeedback, let reason = item.unsupportedReason {
+            button.accessibilityHint = reason
+            button.addAction(UIAction { _ in
+                Task { @MainActor in
+                    onUnavailableSelect?(reason)
+                }
+            }, for: .primaryActionTriggered)
+            return button
+        }
+        guard let sessionKey = status?.sessionKey, let action = item.action, hasActionMenu else {
             return button
         }
         button.menu = UIMenu(children: item.options.map { option in

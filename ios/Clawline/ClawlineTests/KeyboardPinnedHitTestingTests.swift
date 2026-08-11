@@ -262,9 +262,23 @@ private func makeConfiguredFooterCell() -> SessionMetadataFooterCell {
         capabilities: .init(
             cancelCurrentRun: nil,
             setModel: .init(supported: true, reason: nil),
-            setThinking: .init(supported: true, reason: nil),
+            setThinking: .init(
+                supported: true,
+                reason: nil,
+                options: [
+                    .init(title: "low", value: "low", enabled: true),
+                    .init(title: "high", value: "high", enabled: true),
+                ]
+            ),
             setReasoning: nil,
-            setFastMode: .init(supported: true, reason: nil),
+            setFastMode: .init(
+                supported: true,
+                reason: nil,
+                options: [
+                    .init(title: "On", value: nil, enabled: true),
+                    .init(title: "Off", value: nil, enabled: false),
+                ]
+            ),
             setMode: nil,
             setVerbosity: nil,
             canCancelCurrentRun: nil,

@@ -738,10 +738,74 @@ final class ChatViewModel {
 
     /// Whether a Tightbeam-gated session control may be applied right now. Used
     /// to keep a pending harness confirmation from driving set_harness after the
-    /// gate closed.
-    func canApplyTightbeamSessionControl(_ action: SessionControlAction) -> Bool {
+    /// gate, per-session capability, freshness, or selected option changed.
+    func canApplyTightbeamSessionControl(
+        _ action: SessionControlAction,
+        sessionKey: String? = nil,
+        value: String? = nil,
+        requiresSelectedValue: Bool = false
+    ) -> Bool {
         guard action == .setHarness else { return true }
-        return isTightbeamServer
+        return unavailableSessionControlReason(
+            action,
+            sessionKey: sessionKey,
+            value: value,
+            requiresSelectedValue: requiresSelectedValue
+        ) == nil
+    }
+
+    func unavailableSessionControlReason(
+        _ action: SessionControlAction,
+        sessionKey: String? = nil,
+        value: String? = nil,
+        requiresSelectedValue: Bool = false
+    ) -> String? {
+        guard action == .setHarness else { return nil }
+        let authorityKey = sessionStatusAuthorityKey(for: sessionKey ?? engineActiveSessionKey)
+        guard !authorityKey.isEmpty else { return "session_status_loading" }
+        if isSessionStatusUnavailable(for: authorityKey) {
+            return "session_status_unavailable"
+        }
+        if isSessionStatusStale(for: authorityKey) {
+            return "session_status_stale"
+        }
+        guard let capability = sessionStatus(for: authorityKey)?.capabilities.setHarness else {
+            return "session_status_loading"
+        }
+        guard capability.supported else { return capability.reason ?? "set_harness_unsupported" }
+        let options = enabledSetHarnessOptionValues(from: capability)
+        if let selectedValue = normalizedSetHarnessValue(value) {
+            return options.contains(selectedValue) ? nil : "harness_options_unavailable"
+        }
+        if requiresSelectedValue {
+            return "harness_options_unavailable"
+        }
+        return options.isEmpty ? "harness_options_unavailable" : nil
+    }
+
+    private func enabledSetHarnessOptionValues(from capability: SessionStatus.Capability) -> [String] {
+        capability.options?.compactMap { option in
+            guard option.enabled != false else { return nil }
+            return normalizedSetHarnessValue(option.value)
+        } ?? []
+    }
+
+    private func normalizedSetHarnessValue(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    func showUnavailableSessionControlReason(_ reason: String?) {
+        let trimmedReason = reason?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let reasonText: String
+        if let trimmedReason, !trimmedReason.isEmpty {
+            reasonText = trimmedReason
+        } else {
+            reasonText = "unknown_reason"
+        }
+        toastManager.show(
+            "This control is unavailable: \(reasonText). Refresh session status and try again."
+        )
     }
 
     func applySessionControl(
@@ -758,7 +822,22 @@ final class ChatViewModel {
             // between enqueueing this task and its execution (the modal's
             // synchronous check is not enough), and a Tightbeam-only control
             // must never post to a link that lost the feature.
-            guard self.canApplyTightbeamSessionControl(action) else { return }
+            guard self.canApplyTightbeamSessionControl(
+                action,
+                sessionKey: normalizedSessionKey,
+                value: value,
+                requiresSelectedValue: action == .setHarness
+            ) else {
+                self.showUnavailableSessionControlReason(
+                    self.unavailableSessionControlReason(
+                        action,
+                        sessionKey: normalizedSessionKey,
+                        value: value,
+                        requiresSelectedValue: action == .setHarness
+                    )
+                )
+                return
+            }
             do {
                 let response = try await self.chatService.applySessionControl(
                     sessionKey: normalizedSessionKey,
@@ -766,22 +845,18 @@ final class ChatViewModel {
                     value: value,
                     enabled: enabled
                 )
+                if let status = response.status {
+                    self.applyReturnedSessionStatus(status, requestedSessionKey: normalizedSessionKey)
+                }
                 if response.ok {
-                    if let status = response.status {
-                        let displayStatus = self.sessionStatusByKeepingStickyDisplayFields(
-                            from: status,
-                            requestedSessionKey: normalizedSessionKey
-                        )
-                        self.sessionStatusBySessionKey[normalizedSessionKey] = displayStatus
-                        if displayStatus.sessionKey != normalizedSessionKey {
-                            self.sessionStatusBySessionKey[displayStatus.sessionKey] = displayStatus
-                        }
-                    } else {
+                    if response.status == nil {
                         self.scheduleSessionStatusRefresh(for: normalizedSessionKey, reason: "sessionControlApplied")
                     }
                 } else {
                     self.toastManager.show(response.message ?? "This session control is not supported.")
-                    self.scheduleSessionStatusRefresh(for: normalizedSessionKey, reason: "sessionControlRejected")
+                    if response.status == nil {
+                        self.scheduleSessionStatusRefresh(for: normalizedSessionKey, reason: "sessionControlRejected")
+                    }
                 }
             } catch {
                 self.toastManager.show(error.localizedDescription)
@@ -1023,7 +1098,16 @@ final class ChatViewModel {
     /// harness picker (T1751); the creation sheet (T1750) will read the rest.
     private(set) var orgOptions: OrgOptions?
     private var isLoadingOrgOptions = false
-    var orgOptionsHarnesses: [String] { orgOptions?.harnesses ?? [] }
+    /// Harness picker options from the `setHarness` capability decoded off
+    /// session-status. The footer must not fall back to org-options here:
+    /// org-options are broad catalog data, while live session-status is the
+    /// per-session authority that says whether these options are actionable now.
+    var orgOptionsHarnesses: [String] {
+        guard let capability = sessionStatus(for: engineActiveSessionKey)?.capabilities.setHarness,
+              capability.supported
+        else { return [] }
+        return enabledSetHarnessOptionValues(from: capability)
+    }
     private var hasResolvedProvisioningCapability = true
     private var hasReceivedSessionProvisioning = false
     private var hasReceivedExplicitSessionInfo = false
@@ -5223,6 +5307,10 @@ final class ChatViewModel {
         sessionStatusUnavailableSessionKeys.contains(sessionStatusAuthorityKey(for: sessionKey))
     }
 
+    func isSessionStatusStale(for sessionKey: String) -> Bool {
+        sessionStatusRefreshTasks[sessionStatusAuthorityKey(for: sessionKey)] != nil
+    }
+
     private func sessionStatusAuthorityKey(for sessionKey: String) -> String {
         let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
         return runtimeSessionKeyByRoutingSessionKey[normalizedSessionKey] ?? normalizedSessionKey
@@ -5272,6 +5360,21 @@ final class ChatViewModel {
                 sessionStatusUnavailableSessionKeys.insert(sessionKey)
             }
             return .seconds(30)
+        }
+    }
+
+    private func applyReturnedSessionStatus(_ status: SessionStatus, requestedSessionKey: String) {
+        let displayStatus = sessionStatusByKeepingStickyDisplayFields(
+            from: status,
+            requestedSessionKey: requestedSessionKey
+        )
+        sessionStatusBySessionKey[requestedSessionKey] = displayStatus
+        if displayStatus.sessionKey != requestedSessionKey {
+            sessionStatusBySessionKey[displayStatus.sessionKey] = displayStatus
+        }
+        recordSessionStatusFetchSuccess(for: requestedSessionKey)
+        if displayStatus.sessionKey != requestedSessionKey {
+            recordSessionStatusFetchSuccess(for: displayStatus.sessionKey)
         }
     }
 

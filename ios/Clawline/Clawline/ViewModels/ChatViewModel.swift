@@ -16,6 +16,20 @@ enum SendButtonConnectionState: Equatable {
     case disconnected
 }
 
+enum SessionStatusAvailability: Equatable {
+    case stale
+    case unavailable
+
+    var unavailableReason: String {
+        switch self {
+        case .stale:
+            "session_status_stale"
+        case .unavailable:
+            "session_status_unavailable"
+        }
+    }
+}
+
 struct CrossChatAssistantNotificationEntry: Identifiable, Equatable {
     let id: String
     var content: String
@@ -736,6 +750,17 @@ final class ChatViewModel {
         sessionStatusBySessionKey[sessionStatusAuthorityKey(for: sessionKey)]
     }
 
+    func sessionStatusAvailability(for sessionKey: String) -> SessionStatusAvailability? {
+        let authorityKey = sessionStatusAuthorityKey(for: sessionKey)
+        if isSessionStatusUnavailable(for: authorityKey) {
+            return .unavailable
+        }
+        if isSessionStatusStale(for: authorityKey) {
+            return .stale
+        }
+        return nil
+    }
+
     /// Whether a Tightbeam-gated session control may be applied right now. Used
     /// to keep a pending harness confirmation from driving set_harness after the
     /// gate, per-session capability, freshness, or selected option changed.
@@ -761,13 +786,11 @@ final class ChatViewModel {
         requiresSelectedValue: Bool = false
     ) -> String? {
         guard action == .setHarness else { return nil }
+        guard isTightbeamServer else { return "tightbeam_capability_unavailable" }
         let authorityKey = sessionStatusAuthorityKey(for: sessionKey ?? engineActiveSessionKey)
         guard !authorityKey.isEmpty else { return "session_status_loading" }
-        if isSessionStatusUnavailable(for: authorityKey) {
-            return "session_status_unavailable"
-        }
-        if isSessionStatusStale(for: authorityKey) {
-            return "session_status_stale"
+        if let availability = sessionStatusAvailability(for: authorityKey) {
+            return availability.unavailableReason
         }
         guard let capability = sessionStatus(for: authorityKey)?.capabilities.setHarness else {
             return "session_status_loading"
@@ -1102,11 +1125,15 @@ final class ChatViewModel {
     /// session-status. The footer must not fall back to org-options here:
     /// org-options are broad catalog data, while live session-status is the
     /// per-session authority that says whether these options are actionable now.
-    var orgOptionsHarnesses: [String] {
-        guard let capability = sessionStatus(for: engineActiveSessionKey)?.capabilities.setHarness,
+    func setHarnessOptions(for sessionKey: String) -> [String] {
+        guard let capability = sessionStatus(for: sessionKey)?.capabilities.setHarness,
               capability.supported
         else { return [] }
         return enabledSetHarnessOptionValues(from: capability)
+    }
+
+    var orgOptionsHarnesses: [String] {
+        setHarnessOptions(for: engineActiveSessionKey)
     }
     private var hasResolvedProvisioningCapability = true
     private var hasReceivedSessionProvisioning = false

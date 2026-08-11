@@ -1860,9 +1860,12 @@ struct ChatViewModelTests {
         let auth = TestAuthManager()
         auth.storeCredentials(token: "jwt", userId: "user")
         let chatService = TestChatService()
+        let secondarySessionKey = "agent:main:clawline:user:s_secondary"
         chatService.streams = [
             makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: secondarySessionKey, displayName: "Secondary", kind: "custom", orderIndex: 1, isBuiltIn: false),
         ]
+        chatService.serverFeatures = ["tightbeam"]
         // Org-options load succeeds too, but the capability must win when both are present.
         chatService.orgOptions = OrgOptions(harnesses: ["org-only"], models: [:], hosts: [], archetypes: [])
         chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
@@ -1874,6 +1877,16 @@ struct ChatViewModelTests {
             queueDepth: 0,
             harness: "codex",
             harnessOptions: ["claude", "codex"]
+        )
+        chatService.sessionStatusBySessionKey[secondarySessionKey] = makeSessionStatus(
+            sessionKey: secondarySessionKey,
+            state: .idle,
+            provider: "openai",
+            model: "gpt-5.6-sol",
+            thinkingLevel: nil,
+            queueDepth: 0,
+            harness: "codex",
+            harnessOptions: ["codex", "luna"]
         )
         let viewModel = ChatViewModel(
             auth: auth, chatService: chatService, settings: SettingsManager(),
@@ -1892,6 +1905,17 @@ struct ChatViewModelTests {
 
         #expect(viewModel.orgOptionsHarnesses == ["claude", "codex"])
         #expect(viewModel.canApplyTightbeamSessionControl(.setHarness, sessionKey: personalSessionKey))
+
+        viewModel.setActiveSessionKeyForTesting(secondarySessionKey)
+        for _ in 0..<50 {
+            if viewModel.sessionStatus(for: secondarySessionKey)?.display.harness == "codex" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.setHarnessOptions(for: personalSessionKey) == ["claude", "codex"])
+        #expect(viewModel.setHarnessOptions(for: secondarySessionKey) == ["codex", "luna"])
+
+        viewModel.setActiveSessionKeyForTesting(personalSessionKey)
 
         // Capability absent (nil, distinct from empty) -> no actionable footer
         // options. Broad org-options must not become a live per-session action.
@@ -1918,9 +1942,9 @@ struct ChatViewModelTests {
         #expect(viewModel.canApplyTightbeamSessionControl(.setHarness, sessionKey: personalSessionKey) == false)
     }
 
-    @Test("setHarness uses per-session capability when the coarse Tightbeam flag is absent")
+    @Test("setHarness refuses cached per-session capability when the current Tightbeam server flag is absent")
     @MainActor
-    func setHarnessUsesCapabilityWhenCoarseTightbeamFlagIsAbsent() async throws {
+    func setHarnessRefusesCapabilityWhenCurrentTightbeamServerFlagIsAbsent() async throws {
         resetChatPersistence()
         let auth = TestAuthManager()
         auth.storeCredentials(token: "jwt", userId: "user")
@@ -1964,18 +1988,12 @@ struct ChatViewModelTests {
         }
 
         #expect(viewModel.isTightbeamServer == false)
-        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness, sessionKey: personalSessionKey))
-        #expect(viewModel.unavailableSessionControlReason(.setHarness, sessionKey: personalSessionKey) == nil)
+        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness, sessionKey: personalSessionKey) == false)
+        #expect(viewModel.unavailableSessionControlReason(.setHarness, sessionKey: personalSessionKey) == "tightbeam_capability_unavailable")
 
         viewModel.applySessionControl(sessionKey: personalSessionKey, action: .setHarness, value: "claude")
-        for _ in 0..<50 {
-            if chatService.lastSessionControl?.action == .setHarness { break }
-            try await Task.sleep(for: .milliseconds(20))
-        }
-
-        #expect(chatService.lastSessionControl?.sessionKey == personalSessionKey)
-        #expect(chatService.lastSessionControl?.action == .setHarness)
-        #expect(chatService.lastSessionControl?.value == "claude")
+        try await Task.sleep(for: .milliseconds(80))
+        #expect(chatService.lastSessionControl == nil)
     }
 
     @Test("setHarness refuses stale or unavailable status before posting the selected value")
@@ -1985,6 +2003,7 @@ struct ChatViewModelTests {
         let auth = TestAuthManager()
         auth.storeCredentials(token: "jwt", userId: "user")
         let chatService = TestChatService()
+        chatService.serverFeatures = ["tightbeam"]
         chatService.fetchSessionStatusDelay = .milliseconds(250)
         chatService.streams = [
             makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
@@ -2026,6 +2045,7 @@ struct ChatViewModelTests {
         }
 
         #expect(viewModel.isSessionStatusStale(for: personalSessionKey))
+        #expect(viewModel.sessionStatusAvailability(for: personalSessionKey) == .stale)
         #expect(viewModel.canApplyTightbeamSessionControl(.setHarness, sessionKey: personalSessionKey, value: "claude") == false)
         #expect(viewModel.unavailableSessionControlReason(.setHarness, sessionKey: personalSessionKey, value: "claude") == "session_status_stale")
 
@@ -2038,6 +2058,7 @@ struct ChatViewModelTests {
         _ = viewModel.recordSessionStatusFetchFailure(for: personalSessionKey)
 
         #expect(viewModel.isSessionStatusUnavailable(for: personalSessionKey))
+        #expect(viewModel.sessionStatusAvailability(for: personalSessionKey) == .unavailable)
         #expect(viewModel.canApplyTightbeamSessionControl(.setHarness, sessionKey: personalSessionKey, value: "claude") == false)
         #expect(viewModel.unavailableSessionControlReason(.setHarness, sessionKey: personalSessionKey, value: "claude") == "session_status_unavailable")
     }
@@ -2049,6 +2070,7 @@ struct ChatViewModelTests {
         let auth = TestAuthManager()
         auth.storeCredentials(token: "jwt", userId: "user")
         let chatService = TestChatService()
+        chatService.serverFeatures = ["tightbeam"]
         chatService.streams = [
             makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
         ]
@@ -2337,6 +2359,26 @@ struct ChatViewModelTests {
         let auth = TestAuthManager()
         auth.storeCredentials(token: "jwt", userId: "user")
         let chatService = TestChatService()
+        chatService.streams = [
+            makeStreamSession(
+                sessionKey: personalSessionKey,
+                displayName: "Personal",
+                kind: "main",
+                orderIndex: 0,
+                isBuiltIn: true
+            ),
+        ]
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .idle,
+            provider: "openai",
+            model: "gpt-5.6-sol",
+            thinkingLevel: nil,
+            queueDepth: 0,
+            harness: "codex",
+            harnessOptions: ["claude", "codex"]
+        )
+        chatService.serverFeatures = ["tightbeam"]
         let viewModel = ChatViewModel(
             auth: auth, chatService: chatService, settings: SettingsManager(),
             device: TestDevice(), uploadService: TestUploadService(),
@@ -2345,15 +2387,22 @@ struct ChatViewModelTests {
         defer { viewModel.prepareForReplacement() }
 
         await viewModel.activate(origin: "test.f1.reconnecting")
-        // Authenticated tightbeam link: service holds the features and emits them.
-        chatService.serverFeatures = ["tightbeam"]
         chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
         for _ in 0..<50 {
-            if viewModel.isTightbeamServer { break }
+            if viewModel.canApplyTightbeamSessionControl(
+                .setHarness,
+                sessionKey: personalSessionKey,
+                value: "claude"
+            ) { break }
             try await Task.sleep(forDuration: .milliseconds(10))
         }
         #expect(viewModel.isTightbeamServer)
-        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness) == false)
+        #expect(viewModel.canApplyTightbeamSessionControl(
+            .setHarness,
+            sessionKey: personalSessionKey,
+            value: "claude"
+        ))
 
         // The link drops: production's handleSocketClose clears the service's
         // authoritative feature set BEFORE it drives the coordinator, so the
@@ -2369,7 +2418,17 @@ struct ChatViewModelTests {
         // terminal disconnect.
         #expect(viewModel.connectionState == .reconnecting)
         #expect(viewModel.isTightbeamServer == false)
-        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness) == false)
+        #expect(viewModel.sessionStatus(for: personalSessionKey)?.display.harness == "codex")
+        #expect(viewModel.canApplyTightbeamSessionControl(
+            .setHarness,
+            sessionKey: personalSessionKey,
+            value: "claude"
+        ) == false)
+        #expect(viewModel.unavailableSessionControlReason(
+            .setHarness,
+            sessionKey: personalSessionKey,
+            value: "claude"
+        ) == "tightbeam_capability_unavailable")
 
         // A queued set_harness invoked during reconnect is refused at the async
         // boundary and never reaches the service.

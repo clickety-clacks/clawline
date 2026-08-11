@@ -2866,8 +2866,7 @@ struct ChatView: View {
             layoutCoordinator: layoutCoordinator,
             sessionKey: sessionKey,
             sessionStatus: viewModel.sessionStatus(for: sessionKey),
-            sessionStatusUnavailable: viewModel.isSessionStatusUnavailable(for: sessionKey)
-                || viewModel.isSessionStatusStale(for: sessionKey),
+            sessionStatusAvailability: viewModel.sessionStatusAvailability(for: sessionKey),
             streamSearchQuery: streamSearchQueryBySessionKey[sessionKey] ?? "",
             messageProjectionPublicationSequence: viewModel.messageProjectionPublicationSequence,
             forceReReadGeneration: viewModel.forceReReadGeneration(for: sessionKey),
@@ -3094,7 +3093,7 @@ struct ChatView: View {
                 shouldRegisterWithLayoutCoordinator: false,
                 sessionKey: sessionKey,
                 sessionStatus: viewModel.sessionStatus(for: sessionKey),
-                sessionStatusUnavailable: viewModel.isSessionStatusUnavailable(for: sessionKey),
+                sessionStatusAvailability: viewModel.sessionStatusAvailability(for: sessionKey),
                 messageProjectionPublicationSequence: viewModel.messageProjectionPublicationSequence,
                 forceReReadGeneration: viewModel.forceReReadGeneration(for: sessionKey),
                 sendIndicatorRevision: viewModel.sendIndicatorRevision,

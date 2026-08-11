@@ -66,14 +66,20 @@ struct T1475SessionStatusFailureStateTests {
 
     @Test("Footer renders unavailable, not loading, when status is marked unavailable")
     func footerRendersUnavailableState() {
-        let loading = SessionMetadataFooterCell.footerText(for: nil, isUnavailable: false)
+        let loading = SessionMetadataFooterCell.footerText(for: nil)
         #expect(loading?.contains("Model loading") == true)
         #expect(loading?.contains("Thinking loading") == true)
         #expect(loading?.contains("Fast loading") == true)
 
-        let unavailable = SessionMetadataFooterCell.footerText(for: nil, isUnavailable: true)
+        let unavailable = SessionMetadataFooterCell.footerText(
+            for: nil,
+            statusAvailability: .unavailable
+        )
         #expect(unavailable?.contains("Model unavailable") == true)
         #expect(unavailable?.contains("Thinking unavailable") == true)
         #expect(unavailable?.contains("Fast unavailable") == true)
+
+        #expect(SessionStatusAvailability.stale.unavailableReason == "session_status_stale")
+        #expect(SessionStatusAvailability.unavailable.unavailableReason == "session_status_unavailable")
     }
 }

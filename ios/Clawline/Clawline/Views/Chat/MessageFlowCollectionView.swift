@@ -187,7 +187,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     /// Optional session override - if provided, shows messages for this session instead of activeSessionKey
     var sessionKey: String?
     var sessionStatus: SessionStatus?
-    var sessionStatusUnavailable: Bool = false
+    var sessionStatusAvailability: SessionStatusAvailability?
     var streamSearchQuery: String = ""
     var messageProjectionPublicationSequence: Int = 0
     var forceReReadGeneration: Int = 0
@@ -242,7 +242,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             onOpenDetail: onOpenDetail,
             sessionKey: sessionKey,
             sessionStatus: sessionStatus,
-            sessionStatusUnavailable: sessionStatusUnavailable,
+            sessionStatusAvailability: sessionStatusAvailability,
             streamSearchQuery: streamSearchQuery,
             forceReReadGeneration: forceReReadGeneration,
             sendIndicatorRevision: sendIndicatorRevision,
@@ -287,7 +287,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             onOpenDetail: onOpenDetail,
             sessionKey: sessionKey,
             sessionStatus: sessionStatus,
-            sessionStatusUnavailable: sessionStatusUnavailable,
+            sessionStatusAvailability: sessionStatusAvailability,
             streamSearchQuery: streamSearchQuery,
             forceReReadGeneration: forceReReadGeneration,
             sendIndicatorRevision: sendIndicatorRevision,
@@ -335,7 +335,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let onOpenDetail: ((Message) -> Void)?
         let sessionKey: String?
         let sessionStatus: SessionStatus?
-        let sessionStatusUnavailable: Bool
+        let sessionStatusAvailability: SessionStatusAvailability?
         let streamSearchQuery: String
         let forceReReadGeneration: Int
         let sendIndicatorRevision: Int
@@ -596,7 +596,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var keepsKeyboardPinned: Bool = false
     private var isTypingActive: Bool = false
     private var sessionStatus: SessionStatus?
-    private var sessionStatusUnavailable = false
+    private var sessionStatusAvailability: SessionStatusAvailability?
     private var liveProgress: LiveAgentProgress?
     private var topInset: CGFloat = 0
     private var truncationBottomInset: CGFloat = 0
@@ -2491,7 +2491,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onOpenDetail: onOpenDetail,
             sessionKey: channelOverride,
             sessionStatus: sessionStatus,
-            sessionStatusUnavailable: sessionStatusUnavailable,
+            sessionStatusAvailability: sessionStatusAvailability,
             streamSearchQuery: streamSearchQuery,
             forceReReadGeneration: readState(for: sessionKey).lastSeenForceReReadGeneration,
             sendIndicatorRevision: currentSendIndicatorRevision,
@@ -2751,7 +2751,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onOpenDetail: onOpenDetail,
             sessionKey: channelOverride,
             sessionStatus: sessionStatus,
-            sessionStatusUnavailable: sessionStatusUnavailable,
+            sessionStatusAvailability: sessionStatusAvailability,
             streamSearchQuery: streamSearchQuery,
             forceReReadGeneration: 0,
             sendIndicatorRevision: viewModel.sendIndicatorRevision,
@@ -2976,7 +2976,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 onOpenDetail: request.onOpenDetail,
                 sessionKey: request.sessionKey,
                 sessionStatus: request.sessionStatus,
-                sessionStatusUnavailable: request.sessionStatusUnavailable,
+                sessionStatusAvailability: request.sessionStatusAvailability,
                 streamSearchQuery: request.streamSearchQuery,
                 forceReReadGeneration: request.forceReReadGeneration,
                 sendIndicatorRevision: request.sendIndicatorRevision,
@@ -3102,7 +3102,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         onOpenDetail: ((Message) -> Void)? = nil,
         sessionKey: String? = nil,
         sessionStatus: SessionStatus? = nil,
-        sessionStatusUnavailable: Bool = false,
+        sessionStatusAvailability: SessionStatusAvailability? = nil,
         streamSearchQuery: String = "",
         forceReReadGeneration: Int = 0,
         sendIndicatorRevision: Int = 0,
@@ -3138,7 +3138,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onOpenDetail: onOpenDetail,
             sessionKey: sessionKey,
             sessionStatus: sessionStatus,
-            sessionStatusUnavailable: sessionStatusUnavailable,
+            sessionStatusAvailability: sessionStatusAvailability,
             streamSearchQuery: streamSearchQuery,
             forceReReadGeneration: forceReReadGeneration,
             sendIndicatorRevision: sendIndicatorRevision,
@@ -3177,13 +3177,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         loadViewIfNeeded()
         let previousLastMessageId = lastMessageId
         let previousSessionStatus = self.sessionStatus
-        let previousSessionStatusUnavailable = self.sessionStatusUnavailable
+        let previousSessionStatusAvailability = self.sessionStatusAvailability
         // Controller-owned for the same reason as the gate below: `self.viewModel`
         // is the SAME instance as the incoming one, so reading both sides off it
         // would always compare equal and the footer would never reconfigure when
         // /api/org-options resolves after the first render.
         let previousHarnessOptions = currentHarnessOptions
-        let nextHarnessOptions = viewModel.orgOptionsHarnesses
+        let nextHarnessOptions = viewModel.setHarnessOptions(for: effectiveSessionKey)
         currentHarnessOptions = nextHarnessOptions
         // The tightbeam gate decides provenance chrome on every message cell and
         // the harness/host footer items. It flips mid-session (auth completes
@@ -3221,7 +3221,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         self.keepsKeyboardPinned = keepsKeyboardPinned
         self.isTypingActive = isTypingActive
         self.sessionStatus = sessionStatus
-        self.sessionStatusUnavailable = sessionStatusUnavailable
+        self.sessionStatusAvailability = sessionStatusAvailability
         self.liveProgress = nextLiveProgress
         self.currentSendIndicatorRevision = request.sendIndicatorRevision
         self.onExpand = onExpand
@@ -3628,7 +3628,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             removeBubbleV2PreviewVersions(for: changedIds)
         }
         if previousSessionStatus != sessionStatus
-            || previousSessionStatusUnavailable != sessionStatusUnavailable
+            || previousSessionStatusAvailability != sessionStatusAvailability
             || (previousHarnessOptions ?? nextHarnessOptions) != nextHarnessOptions
             || (previousIsTightbeam ?? nextIsTightbeam) != nextIsTightbeam,
            snapshot.indexOfItem(SessionMetadataFooterCell.itemId) != nil,
@@ -4192,7 +4192,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 width: availableContentWidth(),
                 compatibleWith: traitCollection,
                 isTightbeam: viewModel?.isTightbeamServer ?? false,
-                harnessOptions: viewModel?.orgOptionsHarnesses ?? []
+                harnessOptions: currentHarnessOptions ?? []
             ),
             hasFooter: dataSource.indexPath(for: SessionMetadataFooterCell.itemId) != nil
         )
@@ -5183,10 +5183,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 ) as? SessionMetadataFooterCell
                 cell?.configure(
                     status: self.sessionStatus,
-                    statusUnavailable: self.sessionStatusUnavailable,
+                    statusAvailability: self.sessionStatusAvailability,
                     isDark: self.currentIsDark,
                     isTightbeam: viewModel.isTightbeamServer,
-                    harnessOptions: viewModel.orgOptionsHarnesses,
+                    harnessOptions: self.currentHarnessOptions ?? [],
                     onSelect: self.onSessionControlSelected,
                     onUnavailableSelect: self.onUnavailableSessionControlSelected,
                     onTestMenuSelect: self.onFooterTestMenuSelected,
@@ -7850,7 +7850,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
 
     private struct FooterConfiguration {
         let status: SessionStatus?
-        let statusUnavailable: Bool
+        let statusAvailability: SessionStatusAvailability?
         let isDark: Bool
         let isSpatial: Bool
         let isTightbeam: Bool
@@ -8111,7 +8111,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         isReconfiguringForWidth = true
         configure(
             status: configuration.status,
-            statusUnavailable: configuration.statusUnavailable,
+            statusAvailability: configuration.statusAvailability,
             isDark: configuration.isDark,
             isSpatial: configuration.isSpatial,
             isTightbeam: configuration.isTightbeam,
@@ -8127,7 +8127,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
 
     func configure(
         status: SessionStatus?,
-        statusUnavailable: Bool = false,
+        statusAvailability: SessionStatusAvailability? = nil,
         isDark: Bool,
         isSpatial: Bool = SessionMetadataFooterCell.isSpatialPlatform,
         isTightbeam: Bool = false,
@@ -8140,7 +8140,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
     ) {
         lastFooterConfiguration = FooterConfiguration(
             status: status,
-            statusUnavailable: statusUnavailable,
+            statusAvailability: statusAvailability,
             isDark: isDark,
             isSpatial: isSpatial,
             isTightbeam: isTightbeam,
@@ -8166,7 +8166,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         }
         let items = Self.footerItems(
             for: status,
-            isUnavailable: statusUnavailable,
+            statusAvailability: statusAvailability,
             isDark: isDark,
             isTightbeam: isTightbeam,
             harnessOptions: harnessOptions
@@ -8274,13 +8274,13 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
 
     static func footerText(
         for status: SessionStatus?,
-        isUnavailable: Bool = false,
+        statusAvailability: SessionStatusAvailability? = nil,
         isTightbeam: Bool = false,
         harnessOptions: [String] = []
     ) -> String? {
         let parts = footerItems(
             for: status,
-            isUnavailable: isUnavailable,
+            statusAvailability: statusAvailability,
             isTightbeam: isTightbeam,
             harnessOptions: harnessOptions
         ).map(\.text)
@@ -8290,13 +8290,13 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
 
     private static func footerItems(
         for status: SessionStatus?,
-        isUnavailable: Bool = false,
+        statusAvailability: SessionStatusAvailability? = nil,
         isDark: Bool = false,
         isTightbeam: Bool = false,
         harnessOptions: [String] = []
     ) -> [FooterItem] {
         guard let status else {
-            if isUnavailable {
+            if statusAvailability == .unavailable {
                 return metadataPlaceholderFooterItems(state: "unavailable", reason: "session_status_unavailable")
             }
             return metadataPlaceholderFooterItems(state: "loading", reason: "session_status_loading")
@@ -8315,7 +8315,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             hasReasoningValue: reasoningValue != nil
         )
         let fastControl = fastModeControlAction(capabilities: capabilities)
-        let statusControlReason = isUnavailable ? "session_status_stale" : nil
+        let statusControlReason = statusAvailability?.unavailableReason
         let modelControlOptions = modelOptions(display: display, catalog: status.modelCatalog)
         let modelControlAction: SessionControlAction? = statusControlReason == nil
             && modelCapability.isSupported
@@ -8374,7 +8374,8 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                 display.harness,
                 capability: capabilities.setHarness,
                 options: statusControlReason == nil ? harnessOptions : [],
-                statusControlReason: statusControlReason
+                statusControlReason: statusControlReason,
+                isTightbeam: isTightbeam
             )
             + hostFooterItems(display.host, isTightbeam: isTightbeam)
     }
@@ -8383,7 +8384,8 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         _ harness: String?,
         capability: SessionStatus.Capability?,
         options: [String],
-        statusControlReason: String?
+        statusControlReason: String?,
+        isTightbeam: Bool
     ) -> [FooterItem] {
         // Absent harness renders nothing (openclaw payloads lack it). When a
         // session-status payload provides a harness, its setHarness capability
@@ -8395,9 +8397,14 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         let footerOptions = options.compactMap { normalized($0) }.map { value in
             FooterOption(title: value, value: value, enabled: nil, isCurrent: value == harness)
         }
-        let isActionable = statusControlReason == nil && capability?.supported == true && !footerOptions.isEmpty
+        let isActionable = statusControlReason == nil
+            && isTightbeam
+            && capability?.supported == true
+            && !footerOptions.isEmpty
         let unavailableReason: String? = if let statusControlReason {
             statusControlReason
+        } else if !isTightbeam {
+            "tightbeam_capability_unavailable"
         } else if capability == nil {
             "session_status_loading"
         } else if capability?.supported != true {
@@ -8650,7 +8657,11 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                 )
             }
         }
-        return []
+        let fallbackModels = ([current] + (display.fallbackModels ?? []).map { normalized($0) }).compactMap { $0 }
+        let uniqueModels = Array(NSOrderedSet(array: fallbackModels)) as? [String] ?? fallbackModels
+        return uniqueModels.map { model in
+            FooterOption(title: model, value: model, enabled: nil, isCurrent: model == current)
+        }
     }
 
     private static func displayModelText(display: SessionStatus.Display,
@@ -8675,14 +8686,21 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         return (title, isCurrent)
     }
 
-    private static func providerValueOptions(
+    private static func providerFooterOptions(
         _ options: [SessionStatus.Capability.Option]?
     ) -> [FooterOption]? {
         guard let options, !options.isEmpty else { return nil }
         return options.compactMap { option in
-            guard let value = normalized(option.value) else { return nil }
-            let title = normalized(option.title) ?? value
-            return FooterOption(title: title, value: value, enabled: option.enabled, isCurrent: false)
+            let title = normalized(option.title)
+                ?? normalized(option.value)
+                ?? (option.enabled == true ? "On" : option.enabled == false ? "Off" : nil)
+            guard let title else { return nil }
+            return FooterOption(
+                title: title,
+                value: normalized(option.value),
+                enabled: option.enabled,
+                isCurrent: false
+            )
         }
     }
 
@@ -8691,7 +8709,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         action: SessionControlAction?,
         providerOptions: [SessionStatus.Capability.Option]?
     ) -> [FooterOption] {
-        if let options = providerValueOptions(providerOptions) {
+        if let options = providerFooterOptions(providerOptions) {
             return options.map { option in
                 FooterOption(
                     title: option.title,
@@ -8701,7 +8719,23 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                 )
             }
         }
-        return []
+        let levels: [String]
+        switch action {
+        case .setThinking:
+            levels = ["off", "minimal", "low", "medium", "high", "xhigh", "adaptive", "max"]
+        case .setReasoning:
+            levels = ["off", "on", "stream"]
+        default:
+            return []
+        }
+        return levels.map { level in
+            FooterOption(
+                title: level,
+                value: level,
+                enabled: nil,
+                isCurrent: level == current
+            )
+        }
     }
 
     private static func fastModeOptions(
@@ -8709,20 +8743,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         action: SessionControlAction?,
         providerOptions: [SessionStatus.Capability.Option]?
     ) -> [FooterOption] {
-        guard let providerOptions, !providerOptions.isEmpty else { return [] }
-        if action == .setFastMode {
-            return providerOptions.compactMap { option in
-                guard let enabled = option.enabled else { return nil }
-                let title = normalized(option.title) ?? (enabled ? "On" : "Off")
-                return FooterOption(
-                    title: title,
-                    value: normalized(option.value),
-                    enabled: enabled,
-                    isCurrent: enabled == current
-                )
-            }
-        }
-        if let options = providerValueOptions(providerOptions) {
+        if let options = providerFooterOptions(providerOptions) {
             return options.map { option in
                 let optionCurrent: Bool
                 if let enabled = option.enabled {
@@ -8738,7 +8759,16 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                 )
             }
         }
-        return []
+        guard action != .setMode else {
+            return [
+                FooterOption(title: "On", value: "fast", enabled: nil, isCurrent: current == true),
+                FooterOption(title: "Off", value: "normal", enabled: nil, isCurrent: current == false),
+            ]
+        }
+        return [
+            FooterOption(title: "On", value: nil, enabled: true, isCurrent: current == true),
+            FooterOption(title: "Off", value: nil, enabled: false, isCurrent: current == false),
+        ]
     }
 
     private static func levelControlAction(

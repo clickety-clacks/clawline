@@ -91,8 +91,8 @@ struct T1751HarnessSelectorTests {
 
     // MARK: - footer picker gating
 
-    @Test("T1751 footer renders the harness from per-session capability when the coarse gate is absent")
-    func footerRendersHarnessFromCapabilityWhenCoarseGateIsAbsent() throws {
+    @Test("T1751 footer keeps the harness label visible when the current server gate is absent")
+    func footerKeepsHarnessLabelVisibleWhenCurrentServerGateIsAbsent() throws {
         let status = try decodedStatus(harness: "codex", harnessOptions: ["claude", "codex"])
 
         // Coarse gate on -> harness renders in the footer text.
@@ -102,7 +102,8 @@ struct T1751HarnessSelectorTests {
             harnessOptions: ["claude", "codex"]
         )?.contains("codex") == true)
 
-        // Coarse gate off -> per-session capability still renders the harness.
+        // The current value remains readable when the link gate closes; action
+        // availability is asserted separately below.
         #expect(SessionMetadataFooterCell.footerText(
             for: status,
             isTightbeam: false,
@@ -138,8 +139,8 @@ struct T1751HarnessSelectorTests {
         #expect(button.accessibilityHint == "harness_options_unavailable")
     }
 
-    @Test("T1751 capability-present coarse-flag-absent cell renders the harness picker")
-    func capabilityPresentCoarseFlagAbsentCellRendersHarness() throws {
+    @Test("T1751 capability-present cell disables the harness picker when the current server gate is absent")
+    func capabilityPresentCellDisablesHarnessPickerWithoutCurrentServerGate() throws {
         let status = try decodedStatus(harness: "codex", harnessOptions: ["claude", "codex"])
         let cell = configuredCell(status: status, isTightbeam: false, harnessOptions: ["claude", "codex"])
         let button = try #require(
@@ -147,8 +148,9 @@ struct T1751HarnessSelectorTests {
                 .compactMap { $0 as? UIButton }
                 .first { $0.accessibilityLabel == "Harness codex" }
         )
-        #expect(button.isEnabled)
-        #expect(button.menu != nil)
+        #expect(button.isEnabled == false)
+        #expect(button.menu == nil)
+        #expect(button.accessibilityHint == "tightbeam_capability_unavailable")
     }
 
     // MARK: - helpers

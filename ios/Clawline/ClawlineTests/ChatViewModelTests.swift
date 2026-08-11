@@ -1942,9 +1942,9 @@ struct ChatViewModelTests {
         #expect(viewModel.canApplyTightbeamSessionControl(.setHarness, sessionKey: personalSessionKey) == false)
     }
 
-    @Test("setHarness refuses cached per-session capability when the current Tightbeam server flag is absent")
+    @Test("setHarness uses fresh per-session capability when the coarse Tightbeam server flag is absent")
     @MainActor
-    func setHarnessRefusesCapabilityWhenCurrentTightbeamServerFlagIsAbsent() async throws {
+    func setHarnessUsesCapabilityWhenCurrentTightbeamServerFlagIsAbsent() async throws {
         resetChatPersistence()
         let auth = TestAuthManager()
         auth.storeCredentials(token: "jwt", userId: "user")
@@ -1988,12 +1988,17 @@ struct ChatViewModelTests {
         }
 
         #expect(viewModel.isTightbeamServer == false)
-        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness, sessionKey: personalSessionKey) == false)
-        #expect(viewModel.unavailableSessionControlReason(.setHarness, sessionKey: personalSessionKey) == "tightbeam_capability_unavailable")
+        #expect(viewModel.canApplyTightbeamSessionControl(.setHarness, sessionKey: personalSessionKey))
+        #expect(viewModel.unavailableSessionControlReason(.setHarness, sessionKey: personalSessionKey) == nil)
 
         viewModel.applySessionControl(sessionKey: personalSessionKey, action: .setHarness, value: "claude")
-        try await Task.sleep(for: .milliseconds(80))
-        #expect(chatService.lastSessionControl == nil)
+        for _ in 0..<50 {
+            if chatService.lastSessionControl?.action == .setHarness { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(chatService.lastSessionControl?.sessionKey == personalSessionKey)
+        #expect(chatService.lastSessionControl?.action == .setHarness)
+        #expect(chatService.lastSessionControl?.value == "claude")
     }
 
     @Test("setHarness refuses stale or unavailable status before posting the selected value")
@@ -2414,8 +2419,8 @@ struct ChatViewModelTests {
             from: .replaying, to: .recovering, epoch: 1, reason: .transportInterrupted
         )
 
-        // The gate must close on the reconnecting phase itself, not wait for a
-        // terminal disconnect.
+        // The coarse link gate closes on reconnect, but it is not set_harness
+        // authority. Fresh per-session capability and options remain actionable.
         #expect(viewModel.connectionState == .reconnecting)
         #expect(viewModel.isTightbeamServer == false)
         #expect(viewModel.sessionStatus(for: personalSessionKey)?.display.harness == "codex")
@@ -2423,18 +2428,21 @@ struct ChatViewModelTests {
             .setHarness,
             sessionKey: personalSessionKey,
             value: "claude"
-        ) == false)
+        ))
         #expect(viewModel.unavailableSessionControlReason(
             .setHarness,
             sessionKey: personalSessionKey,
             value: "claude"
-        ) == "tightbeam_capability_unavailable")
+        ) == nil)
 
-        // A queued set_harness invoked during reconnect is refused at the async
-        // boundary and never reaches the service.
-        viewModel.applySessionControl(sessionKey: personalSessionKey, action: .setHarness, value: "codex")
-        try await Task.sleep(forDuration: .milliseconds(80))
-        #expect(chatService.lastSessionControl == nil)
+        // The async boundary rechecks the same per-session authority and posts.
+        viewModel.applySessionControl(sessionKey: personalSessionKey, action: .setHarness, value: "claude")
+        for _ in 0..<50 {
+            if chatService.lastSessionControl?.action == .setHarness { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(chatService.lastSessionControl?.action == .setHarness)
+        #expect(chatService.lastSessionControl?.value == "claude")
 
         // A placement-carrying create during reconnect is likewise refused/unposted.
         let placement = await viewModel.createStream(

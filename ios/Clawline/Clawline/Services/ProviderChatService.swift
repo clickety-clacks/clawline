@@ -331,13 +331,6 @@ final class ProviderChatService: ChatServicing {
         value: String?,
         enabled: Bool?
     ) async throws -> SessionControlResponse {
-        // Current-link capability fence: set_harness is Tightbeam-only. Checked
-        // here (not just at the view-model) against the service's authoritative
-        // feature set immediately before posting, so a queued task whose link was
-        // retired/reconnected to a featureless link cannot post set_harness.
-        if action == .setHarness, !serverFeatures.contains("tightbeam") {
-            throw Error.tightbeamCapabilityUnavailable
-        }
         guard let token = await resolveControlPlaneToken() else {
             throw Error.notConnected
         }

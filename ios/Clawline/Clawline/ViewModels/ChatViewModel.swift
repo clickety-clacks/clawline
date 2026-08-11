@@ -761,9 +761,9 @@ final class ChatViewModel {
         return nil
     }
 
-    /// Whether a Tightbeam-gated session control may be applied right now. Used
+    /// Whether a capability-backed session control may be applied right now. Used
     /// to keep a pending harness confirmation from driving set_harness after the
-    /// gate, per-session capability, freshness, or selected option changed.
+    /// per-session capability, freshness, or selected option changed.
     func canApplyTightbeamSessionControl(
         _ action: SessionControlAction,
         sessionKey: String? = nil,
@@ -786,7 +786,6 @@ final class ChatViewModel {
         requiresSelectedValue: Bool = false
     ) -> String? {
         guard action == .setHarness else { return nil }
-        guard isTightbeamServer else { return "tightbeam_capability_unavailable" }
         let authorityKey = sessionStatusAuthorityKey(for: sessionKey ?? engineActiveSessionKey)
         guard !authorityKey.isEmpty else { return "session_status_loading" }
         if let availability = sessionStatusAvailability(for: authorityKey) {
@@ -841,10 +840,9 @@ final class ChatViewModel {
         guard !normalizedSessionKey.isEmpty else { return }
         Task { [weak self] in
             guard let self else { return }
-            // Recheck the gate INSIDE the async boundary: the gate can close
-            // between enqueueing this task and its execution (the modal's
-            // synchronous check is not enough), and a Tightbeam-only control
-            // must never post to a link that lost the feature.
+            // Recheck the per-session authority INSIDE the async boundary: the
+            // capability, freshness, or selected option can change between
+            // enqueueing this task and its execution.
             guard self.canApplyTightbeamSessionControl(
                 action,
                 sessionKey: normalizedSessionKey,

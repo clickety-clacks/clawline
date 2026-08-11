@@ -482,6 +482,33 @@ struct SessionMetadataFooterHitTestingTests {
         #expect(harnessButton.accessibilityHint == "harness_options_unavailable")
     }
 
+    @Test("Harness footer uses fresh per-session capability when the coarse server flag is absent")
+    func harnessFooterUsesCapabilityWithoutCoarseServerFlag() throws {
+        let status = makeStatus(
+            harness: "codex",
+            setHarness: .init(
+                supported: true,
+                reason: nil,
+                options: [
+                    .init(title: "codex", value: "codex", enabled: true),
+                    .init(title: "claude", value: "claude", enabled: true),
+                ]
+            )
+        )
+        let cell = makeConfiguredCell(
+            status: status,
+            isTightbeam: false,
+            harnessOptions: ["codex", "claude"]
+        )
+        let harnessButton = try #require(
+            footerActionButtons(in: cell).first { $0.accessibilityLabel == "Harness codex" }
+        )
+
+        #expect(harnessButton.isEnabled)
+        #expect(harnessButton.menu?.children.compactMap { ($0 as? UIAction)?.title } == ["codex", "claude"])
+        #expect(harnessButton.accessibilityHint == nil)
+    }
+
     @Test("Footer controls disable cached options while session status is stale")
     func footerControlsDisableCachedOptionsWhileSessionStatusIsStale() throws {
         let status = makeStatus(

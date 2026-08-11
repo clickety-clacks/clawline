@@ -8374,8 +8374,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                 display.harness,
                 capability: capabilities.setHarness,
                 options: statusControlReason == nil ? harnessOptions : [],
-                statusControlReason: statusControlReason,
-                isTightbeam: isTightbeam
+                statusControlReason: statusControlReason
             )
             + hostFooterItems(display.host, isTightbeam: isTightbeam)
     }
@@ -8384,8 +8383,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         _ harness: String?,
         capability: SessionStatus.Capability?,
         options: [String],
-        statusControlReason: String?,
-        isTightbeam: Bool
+        statusControlReason: String?
     ) -> [FooterItem] {
         // Absent harness renders nothing (openclaw payloads lack it). When a
         // session-status payload provides a harness, its setHarness capability
@@ -8398,13 +8396,10 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             FooterOption(title: value, value: value, enabled: nil, isCurrent: value == harness)
         }
         let isActionable = statusControlReason == nil
-            && isTightbeam
             && capability?.supported == true
             && !footerOptions.isEmpty
         let unavailableReason: String? = if let statusControlReason {
             statusControlReason
-        } else if !isTightbeam {
-            "tightbeam_capability_unavailable"
         } else if capability == nil {
             "session_status_loading"
         } else if capability?.supported != true {

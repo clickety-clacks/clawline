@@ -139,8 +139,8 @@ struct T1751HarnessSelectorTests {
         #expect(button.accessibilityHint == "harness_options_unavailable")
     }
 
-    @Test("T1751 capability-present cell disables the harness picker when the current server gate is absent")
-    func capabilityPresentCellDisablesHarnessPickerWithoutCurrentServerGate() throws {
+    @Test("T1751 capability-present cell enables the harness picker when the coarse server flag is absent")
+    func capabilityPresentCellEnablesHarnessPickerWithoutCurrentServerGate() throws {
         let status = try decodedStatus(harness: "codex", harnessOptions: ["claude", "codex"])
         let cell = configuredCell(status: status, isTightbeam: false, harnessOptions: ["claude", "codex"])
         let button = try #require(
@@ -148,9 +148,9 @@ struct T1751HarnessSelectorTests {
                 .compactMap { $0 as? UIButton }
                 .first { $0.accessibilityLabel == "Harness codex" }
         )
-        #expect(button.isEnabled == false)
-        #expect(button.menu == nil)
-        #expect(button.accessibilityHint == "tightbeam_capability_unavailable")
+        #expect(button.isEnabled)
+        #expect(button.menu?.children.compactMap { ($0 as? UIAction)?.title } == ["claude", "codex"])
+        #expect(button.accessibilityHint == nil)
     }
 
     // MARK: - helpers

@@ -476,6 +476,8 @@ private struct CrossChatNotificationObservationHost: View {
 
 struct ChatView: View {
     private static let spatialPromptFocusShortcutTargetLeaseDuration: TimeInterval = 10
+    static let harnessSwitchFreshContextTitle = "Switching harnesses starts a fresh engine context."
+    static let harnessSwitchContinuityMessage = "The durable session record stays intact. The new harness must inspect that record itself; Clawline will not transfer, replay, or summarize the prior engine context."
 
     private static var t217DiagnosticBuild: String {
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
@@ -1304,9 +1306,9 @@ struct ChatView: View {
             Button("Cancel", role: .cancel) {}
         }
         // Confirmation stays keyed to the selected session; the confirm action
-        // rechecks the per-session setHarness capability before posting.
+        // rechecks both that target and its per-session capability before posting.
         .confirmationDialog(
-            "Switching harnesses starts a fresh engine context.",
+            Self.harnessSwitchFreshContextTitle,
             isPresented: Binding(
                 get: { pendingHarnessChange != nil },
                 set: { presented in if !presented { pendingHarnessChange = nil } }
@@ -1315,6 +1317,13 @@ struct ChatView: View {
             presenting: pendingHarnessChange
         ) { change in
             Button("Switch to \(change.harness)", role: .destructive) {
+                guard viewModel.isSessionControlTargetCurrent(
+                    sessionKey: change.sessionKey,
+                    selectedSessionKey: viewModel.uiSelectedSessionKey
+                ) else {
+                    pendingHarnessChange = nil
+                    return
+                }
                 if viewModel.canApplyTightbeamSessionControl(
                     .setHarness,
                     sessionKey: change.sessionKey,
@@ -1338,7 +1347,16 @@ struct ChatView: View {
             }
             Button("Cancel", role: .cancel) { pendingHarnessChange = nil }
         } message: { _ in
-            Text("The durable session record stays intact. The new harness must inspect that record itself; Clawline will not transfer, replay, or summarize the prior engine context.")
+            Text(Self.harnessSwitchContinuityMessage)
+        }
+        .onChange(of: viewModel.uiSelectedSessionKey) { _, selectedSessionKey in
+            guard let pendingHarnessChange else { return }
+            if !viewModel.isSessionControlTargetCurrent(
+                sessionKey: pendingHarnessChange.sessionKey,
+                selectedSessionKey: selectedSessionKey
+            ) {
+                self.pendingHarnessChange = nil
+            }
         }
         .photosPicker(
             isPresented: $isPhotosPickerPresented,

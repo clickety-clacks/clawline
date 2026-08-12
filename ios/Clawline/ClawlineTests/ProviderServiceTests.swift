@@ -1792,6 +1792,8 @@ struct ProviderServiceTests {
             #expect(queryItems?.first(where: { $0.name == "sessionKey" })?.value == sessionKey)
             #expect(request.httpMethod == "GET")
             #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer jwt")
+            // The setHarness fragment below was captured from the real Gate D
+            // response observed on 2026-08-09; preserve its raw field shape.
             let data = #"""
             {
               "sessionKey": "agent:main:clawline:user:s_status",
@@ -1836,7 +1838,14 @@ struct ProviderServiceTests {
                 "setModel": { "supported": false, "reason": "provider_control_not_available" },
                 "setReasoning": { "supported": false, "reason": "provider_control_not_available" },
                 "setMode": { "supported": false, "reason": "provider_control_not_available" },
-                "setVerbosity": { "supported": false, "reason": "provider_control_not_available" }
+                "setVerbosity": { "supported": false, "reason": "provider_control_not_available" },
+                "setHarness": {
+                  "options": [
+                    { "enabled": true, "title": "claude", "value": "claude" },
+                    { "enabled": true, "title": "codex", "value": "codex" }
+                  ],
+                  "supported": true
+                }
               },
               "modelCatalog": {
                 "available": true,
@@ -1896,6 +1905,9 @@ struct ProviderServiceTests {
         #expect(status.run.state == .running)
         #expect(status.run.queueDepth == 2)
         #expect(status.capabilities.cancelCurrentRun?.supported == false)
+        #expect(status.capabilities.setHarness?.supported == true)
+        #expect(status.capabilities.setHarness?.options?.compactMap(\.value) == ["claude", "codex"])
+        #expect(status.capabilities.setHarness?.options?.allSatisfy { $0.enabled == true } == true)
         #expect(status.modelCatalog?.available == true)
         #expect(status.modelCatalog?.models.map(\.ref) == [
             "openai/gpt-5.5",

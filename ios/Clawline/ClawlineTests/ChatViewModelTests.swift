@@ -2186,6 +2186,41 @@ struct ChatViewModelTests {
         #expect(viewModel.unavailableSessionControlReason(.setHarness, sessionKey: personalSessionKey, value: "claude") == "harness_options_unavailable")
     }
 
+    @Test("Harness confirmation rejects a retained target after the displayed session changes")
+    @MainActor
+    func harnessConfirmationRejectsChangedDisplayedSession() {
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: TestAuthManager(),
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        let retainedSessionKey = "agent:main:clawline:user:s_old"
+        let displayedSessionKey = "agent:main:clawline:user:s_new"
+        if viewModel.isSessionControlTargetCurrent(
+            sessionKey: retainedSessionKey,
+            selectedSessionKey: displayedSessionKey
+        ) {
+            viewModel.applySessionControl(
+                sessionKey: retainedSessionKey,
+                action: .setHarness,
+                value: "claude"
+            )
+        }
+
+        #expect(chatService.lastSessionControl == nil)
+        #expect(viewModel.isSessionControlTargetCurrent(
+            sessionKey: displayedSessionKey,
+            selectedSessionKey: displayedSessionKey
+        ))
+    }
+
     @Test("F3 regression: prepareForReplacement cancels the in-flight org-options task")
     @MainActor
     func prepareForReplacementCancelsOrgOptionsTask() async throws {

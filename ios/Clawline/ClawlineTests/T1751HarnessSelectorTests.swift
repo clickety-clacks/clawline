@@ -153,7 +153,63 @@ struct T1751HarnessSelectorTests {
         #expect(button.accessibilityHint == nil)
     }
 
+    @Test("T1751 raw empty setHarness options decode without inventing choices")
+    func emptySetHarnessOptionsDecodeWithoutInventingChoices() throws {
+        let status = try decodedStatus(
+            harness: "codex",
+            setHarnessJSON: #"{"supported":true,"options":[]}"#
+        )
+
+        #expect(status.capabilities.setHarness?.supported == true)
+        #expect(status.capabilities.setHarness?.options == [])
+    }
+
+    @Test("T1751 raw unsupported setHarness preserves the server reason")
+    func unsupportedSetHarnessPreservesServerReason() throws {
+        let status = try decodedStatus(
+            harness: "codex",
+            setHarnessJSON: #"{"supported":false,"reason":"credential_unavailable","options":[]}"#
+        )
+
+        #expect(status.capabilities.setHarness?.supported == false)
+        #expect(status.capabilities.setHarness?.reason == "credential_unavailable")
+        #expect(status.capabilities.setHarness?.options == [])
+    }
+
+    @Test("T1751 raw disabled setHarness option preserves disabled truth")
+    func disabledSetHarnessOptionPreservesDisabledTruth() throws {
+        let status = try decodedStatus(
+            harness: "codex",
+            setHarnessJSON: #"{"supported":true,"options":[{"title":"claude","value":"claude","enabled":false},{"title":"codex","value":"codex","enabled":true}]}"#
+        )
+
+        #expect(status.capabilities.setHarness?.options?.map(\.enabled) == [false, true])
+    }
+
+    @Test("Harness continuity warning copy remains exact")
+    func harnessContinuityWarningCopyRemainsExact() {
+        #expect(ChatView.harnessSwitchFreshContextTitle == "Switching harnesses starts a fresh engine context.")
+        #expect(ChatView.harnessSwitchContinuityMessage == "The durable session record stays intact. The new harness must inspect that record itself; Clawline will not transfer, replay, or summarize the prior engine context.")
+    }
+
     // MARK: - helpers
+
+    private func decodedStatus(harness: String, setHarnessJSON: String) throws -> SessionStatus {
+        let json = """
+        {
+          "sessionKey": "agent:main:clawline:user:s_t1751",
+          "display": {
+            "model": "claude-fable-5",
+            "provider": "anthropic",
+            "harness": "\(harness)",
+            "authMode": "oauth"
+          },
+          "run": {"state": "idle"},
+          "capabilities": {"setHarness": \(setHarnessJSON)}
+        }
+        """
+        return try JSONDecoder().decode(SessionStatus.self, from: Data(json.utf8))
+    }
 
     private func decodedStatus(harness: String, harnessOptions: [String]? = nil) throws -> SessionStatus {
         let setHarnessCapability: String

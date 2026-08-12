@@ -830,6 +830,15 @@ final class ChatViewModel {
         )
     }
 
+    func isSessionControlTargetCurrent(
+        sessionKey: String,
+        selectedSessionKey: String
+    ) -> Bool {
+        let requestedKey = sessionStatusAuthorityKey(for: sessionKey)
+        let selectedKey = sessionStatusAuthorityKey(for: selectedSessionKey)
+        return !requestedKey.isEmpty && requestedKey == selectedKey
+    }
+
     func applySessionControl(
         sessionKey: String,
         action: SessionControlAction,
@@ -871,17 +880,29 @@ final class ChatViewModel {
                 }
                 if response.ok {
                     if response.status == nil {
-                        self.scheduleSessionStatusRefresh(for: normalizedSessionKey, reason: "sessionControlApplied")
+                        self.scheduleSessionStatusRefresh(
+                            for: normalizedSessionKey,
+                            reason: "sessionControlApplied",
+                            onlyIfSelected: false
+                        )
                     }
                 } else {
                     self.toastManager.show(response.message ?? "This session control is not supported.")
                     if response.status == nil {
-                        self.scheduleSessionStatusRefresh(for: normalizedSessionKey, reason: "sessionControlRejected")
+                        self.scheduleSessionStatusRefresh(
+                            for: normalizedSessionKey,
+                            reason: "sessionControlRejected",
+                            onlyIfSelected: false
+                        )
                     }
                 }
             } catch {
                 self.toastManager.show(error.localizedDescription)
-                self.scheduleSessionStatusRefresh(for: normalizedSessionKey, reason: "sessionControlFailed")
+                self.scheduleSessionStatusRefresh(
+                    for: normalizedSessionKey,
+                    reason: "sessionControlFailed",
+                    onlyIfSelected: false
+                )
             }
         }
     }
@@ -5267,13 +5288,16 @@ final class ChatViewModel {
     private func scheduleSessionStatusRefresh(
         for sessionKey: String,
         reason: String,
-        delay: Duration = .zero
+        delay: Duration = .zero,
+        onlyIfSelected: Bool = true
     ) {
         let normalizedSessionKey = sessionStatusAuthorityKey(for: sessionKey)
         guard !normalizedSessionKey.isEmpty else { return }
         guard auth.token != nil else { return }
         guard allowsSessionStatusRefreshes, !isRetired else { return }
-        guard normalizedSessionKey == sessionStatusAuthorityKey(for: uiSelectedSessionKey) else { return }
+        if onlyIfSelected {
+            guard normalizedSessionKey == sessionStatusAuthorityKey(for: uiSelectedSessionKey) else { return }
+        }
 
         sessionStatusRefreshTasks[normalizedSessionKey]?.cancel()
         sessionStatusRefreshTasks[normalizedSessionKey] = Task { [weak self] in
@@ -5312,7 +5336,8 @@ final class ChatViewModel {
                     self.scheduleSessionStatusRefresh(
                         for: normalizedSessionKey,
                         reason: "failure_retry",
-                        delay: retryDelay
+                        delay: retryDelay,
+                        onlyIfSelected: onlyIfSelected
                     )
                 }
             }

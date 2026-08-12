@@ -799,7 +799,7 @@ struct ProviderServiceTests {
         return (service, mockSocket)
     }
 
-    @Test("retired-link + fence: a delayed retired-link tightbeam auth_result cannot restore the gate after an OpenClaw reconnect, and queued set_harness/placement-create stay refused by the current-link fence")
+    @Test("retired-link + fence: a delayed auth_result cannot restore the placement gate, while set_harness remains independent of that coarse feature")
     func retiredLinkCannotRestoreTightbeamAndQueuedControlStaysRefused() async throws {
         let mockSocket = MockWebSocketClient()
         let connector = MockWebSocketConnector(client: mockSocket)
@@ -838,15 +838,20 @@ struct ProviderServiceTests {
         #expect(service.serverFeatures.contains("tightbeam") == false)
         #expect(service.serverFeatures.isEmpty)
 
-        // Because the gate stayed closed, a queued Tightbeam-only session control
-        // and a placement-bearing create are still refused by the current-link fence.
+        // set_harness authority comes from fresh per-session status in the caller,
+        // not this coarse link feature. The service must not reintroduce that veto.
         do {
             _ = try await service.applySessionControl(
                 sessionKey: "agent:main:clawline:user:main", action: .setHarness, value: "codex", enabled: nil
             )
-            Issue.record("queued set_harness must stay refused after a retired-link restore attempt")
         } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
-        } catch { Issue.record("expected tightbeamCapabilityUnavailable, got \(error)") }
+            Issue.record("set_harness must not use the coarse current-link feature")
+        } catch {
+            // No control-plane is installed in this fence test. Any downstream
+            // failure proves the obsolete capability veto did not fire.
+        }
+
+        // Placement-bearing creation remains guarded by the current-link feature.
         do {
             _ = try await service.createStream(
                 displayName: "P", idempotencyKey: "req_retired",
@@ -873,19 +878,61 @@ struct ProviderServiceTests {
         }
     }
 
-    @Test("TB-D5 fence: set_harness is refused at the service when the current link lacks the tightbeam feature")
-    func setHarnessRefusedWhenLinkLacksTightbeam() async throws {
-        let (service, _) = try await makeConnectedService(features: [])
-        do {
-            _ = try await service.applySessionControl(
-                sessionKey: "agent:main:clawline:user:main", action: .setHarness, value: "codex", enabled: nil
-            )
-            Issue.record("set_harness must be refused on a featureless link")
-        } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
-            // expected
-        } catch {
-            Issue.record("expected tightbeamCapabilityUnavailable, got \(error)")
+    @Test("set_harness is not gated by the coarse current-link tightbeam feature")
+    func setHarnessNotGatedWhenLinkLacksTightbeam() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "http://127.0.0.1:18800")!
+        final class RequestBox: @unchecked Sendable {
+            var path: String?
+            var body: Data?
         }
+        let box = RequestBox()
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            box.path = request.url?.path
+            box.body = request.httpBody ?? Self.bodyData(from: request.httpBodyStream)
+            let data = #"""
+            { "ok": true, "sessionKey": "agent:main:clawline:user:main", "action": "set_harness" }
+            """#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let streamAPIClient = StreamAPIClient(
+            baseURLProvider: { baseURL },
+            session: URLSession(configuration: configuration)
+        )
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_coarse_absent",
+            baseURLProvider: { baseURL },
+            authTokenProvider: { "jwt" },
+            streamAPIClient: streamAPIClient
+        )
+
+        #expect(service.serverFeatures.isEmpty)
+        let response = try await service.applySessionControl(
+            sessionKey: "agent:main:clawline:user:main",
+            action: .setHarness,
+            value: "codex",
+            enabled: nil
+        )
+
+        #expect(response.ok)
+        #expect(box.path == "/api/session-control")
+        let body = try #require(box.body)
+        let payload = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        #expect(payload?["action"] as? String == "set_harness")
+        #expect(payload?["harness"] as? String == "codex")
     }
 
     @Test("TB-D5 fence: a create that began on tightbeam and whose link RETIRED (socket close) is refused on the retry submission — the exact mid-operation gate-retirement hole")

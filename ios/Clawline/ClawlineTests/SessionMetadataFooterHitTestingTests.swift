@@ -411,6 +411,157 @@ struct SessionMetadataFooterHitTestingTests {
         #expect(disabledButtons.allSatisfy { !$0.isEnabled })
     }
 
+    @Test("Harness footer uses setHarness capability reason and does not build a menu when unsupported")
+    func harnessFooterSurfacesSetHarnessUnsupportedReason() async throws {
+        var unavailableReason: String?
+        let status = makeStatus(
+            harness: "codex",
+            setHarness: .init(
+                supported: false,
+                reason: "credential_unavailable",
+                options: [.init(title: "claude", value: "claude", enabled: true)]
+            )
+        )
+        let cell = makeConfiguredCell(
+            status: status,
+            isTightbeam: true,
+            harnessOptions: ["claude"],
+            onUnavailableSelect: { reason in unavailableReason = reason }
+        )
+
+        let harnessButton = try #require(
+            footerActionButtons(in: cell).first { $0.accessibilityLabel == "Harness codex" }
+        )
+        #expect(harnessButton.isEnabled)
+        #expect(harnessButton.menu == nil)
+        #expect(harnessButton.accessibilityHint == "credential_unavailable")
+
+        harnessButton.sendActions(for: .primaryActionTriggered)
+        try await Task.sleep(for: .milliseconds(20))
+
+        #expect(unavailableReason == "credential_unavailable")
+    }
+
+    @Test("Footer controls preserve fallback model, thinking, and Fast options when live catalogs are absent")
+    func footerControlsPreserveFallbackOptionsWhenLiveCatalogsAreAbsent() throws {
+        let status = makeStatus()
+        let cell = makeConfiguredCell(status: status)
+        let buttons = footerActionButtons(in: cell)
+
+        #expect(buttons.map(\.accessibilityLabel) == ["gpt-5.5", "Thinking high", "Fast on"])
+        #expect(buttons.allSatisfy { $0.menu != nil })
+        #expect(buttons.allSatisfy { $0.isEnabled })
+        #expect(buttons[0].menu?.children.compactMap { ($0 as? UIAction)?.title } == [
+            "gpt-5.5", "claude-sonnet-4.6"
+        ])
+        #expect(buttons[1].menu?.children.compactMap { ($0 as? UIAction)?.title }.contains("adaptive") == true)
+        #expect(buttons[2].menu?.children.compactMap { ($0 as? UIAction)?.title } == ["On", "Off"])
+    }
+
+    @Test("Harness footer requires server value before building an action")
+    func harnessFooterRequiresServerValueBeforeBuildingAction() throws {
+        let status = makeStatus(
+            harness: "codex",
+            setHarness: .init(
+                supported: true,
+                reason: nil,
+                options: [.init(title: "Claude Display", value: nil, enabled: true)]
+            )
+        )
+        let cell = makeConfiguredCell(
+            status: status,
+            isTightbeam: true,
+            harnessOptions: []
+        )
+
+        let harnessButton = try #require(
+            footerActionButtons(in: cell).first { $0.accessibilityLabel == "Harness codex" }
+        )
+        #expect(harnessButton.isEnabled == false)
+        #expect(harnessButton.menu == nil)
+        #expect(harnessButton.accessibilityHint == "harness_options_unavailable")
+    }
+
+    @Test("Harness footer uses fresh per-session capability when the coarse server flag is absent")
+    func harnessFooterUsesCapabilityWithoutCoarseServerFlag() throws {
+        let status = makeStatus(
+            harness: "codex",
+            setHarness: .init(
+                supported: true,
+                reason: nil,
+                options: [
+                    .init(title: "codex", value: "codex", enabled: true),
+                    .init(title: "claude", value: "claude", enabled: true),
+                ]
+            )
+        )
+        let cell = makeConfiguredCell(
+            status: status,
+            isTightbeam: false,
+            harnessOptions: ["codex", "claude"]
+        )
+        let harnessButton = try #require(
+            footerActionButtons(in: cell).first { $0.accessibilityLabel == "Harness codex" }
+        )
+
+        #expect(harnessButton.isEnabled)
+        #expect(harnessButton.menu?.children.compactMap { ($0 as? UIAction)?.title } == ["codex", "claude"])
+        #expect(harnessButton.accessibilityHint == nil)
+    }
+
+    @Test("Footer controls disable cached options while session status is stale")
+    func footerControlsDisableCachedOptionsWhileSessionStatusIsStale() throws {
+        let status = makeStatus(
+            harness: "codex",
+            setHarness: .init(
+                supported: true,
+                reason: nil,
+                options: [
+                    .init(title: "codex", value: "codex", enabled: true),
+                    .init(title: "claude", value: "claude", enabled: true),
+                ]
+            )
+        )
+        let cell = makeConfiguredCell(
+            status: status,
+            statusAvailability: .stale,
+            isTightbeam: true,
+            harnessOptions: ["codex", "claude"]
+        )
+        let buttons = footerActionButtons(in: cell)
+
+        #expect(Set(buttons.compactMap(\.accessibilityLabel)) == ["gpt-5.5", "Thinking high", "Fast on", "Harness codex"])
+        #expect(buttons.allSatisfy { $0.menu == nil })
+        #expect(buttons.allSatisfy { !$0.isEnabled })
+        #expect(buttons.allSatisfy { $0.accessibilityHint == "session_status_stale" })
+    }
+
+    @Test("Footer controls distinguish unavailable status from stale status")
+    func footerControlsSurfaceUnavailableStatusReason() throws {
+        let status = makeStatus(
+            harness: "codex",
+            setHarness: .init(
+                supported: true,
+                reason: nil,
+                options: [
+                    .init(title: "codex", value: "codex", enabled: true),
+                    .init(title: "claude", value: "claude", enabled: true),
+                ]
+            )
+        )
+        let cell = makeConfiguredCell(
+            status: status,
+            statusAvailability: .unavailable,
+            isTightbeam: true,
+            harnessOptions: ["codex", "claude"]
+        )
+        let buttons = footerActionButtons(in: cell)
+
+        #expect(buttons.allSatisfy { $0.menu == nil })
+        #expect(buttons.allSatisfy { !$0.isEnabled })
+        #expect(buttons.allSatisfy { $0.accessibilityHint == "session_status_unavailable" })
+    }
+
     @Test("Popup selectors mark current item with checkmark image instead of text")
     func popupSelectorsMarkCurrentItemWithCheckmarkImageInsteadOfText() throws {
         let cell = makeConfiguredCell()
@@ -442,16 +593,37 @@ private func makeConfiguredCell(authMode: String? = nil, isDark: Bool = false, i
     makeConfiguredCell(status: makeStatus(authMode: authMode), isDark: isDark, isSpatial: isSpatial)
 }
 
-private func makeConfiguredCell(status: SessionStatus?, isDark: Bool = false, isSpatial: Bool = false) -> SessionMetadataFooterCell {
+private func makeConfiguredCell(
+    status: SessionStatus?,
+    statusAvailability: SessionStatusAvailability? = nil,
+    isDark: Bool = false,
+    isSpatial: Bool = false,
+    isTightbeam: Bool = false,
+    harnessOptions: [String] = [],
+    onUnavailableSelect: (@MainActor (String) -> Void)? = nil
+) -> SessionMetadataFooterCell {
     let cell = SessionMetadataFooterCell(
         frame: CGRect(
             x: 0,
             y: 0,
             width: 320,
-            height: SessionMetadataFooterCell.height(for: status)
+            height: SessionMetadataFooterCell.height(
+                for: status,
+                isTightbeam: isTightbeam,
+                harnessOptions: harnessOptions
+            )
         )
     )
-    cell.configure(status: status, isDark: isDark, isSpatial: isSpatial, onSelect: { _, _, _, _ in })
+    cell.configure(
+        status: status,
+        statusAvailability: statusAvailability,
+        isDark: isDark,
+        isSpatial: isSpatial,
+        isTightbeam: isTightbeam,
+        harnessOptions: harnessOptions,
+        onSelect: { _, _, _, _ in },
+        onUnavailableSelect: onUnavailableSelect
+    )
     cell.setNeedsLayout()
     cell.layoutIfNeeded()
     return cell
@@ -462,17 +634,20 @@ private func makeStatus(
     model: String? = "gpt-5.5",
     thinkingLevel: String? = "high",
     fastMode: Bool? = true,
+    harness: String? = nil,
     setModel: SessionStatus.Capability? = .init(supported: true, reason: nil),
     setThinking: SessionStatus.Capability? = .init(supported: true, reason: nil),
-    setFastMode: SessionStatus.Capability? = .init(supported: true, reason: nil)
+    setFastMode: SessionStatus.Capability? = .init(supported: true, reason: nil),
+    setHarness: SessionStatus.Capability? = nil,
+    modelCatalog explicitModelCatalog: SessionStatus.ModelCatalog? = nil
 ) -> SessionStatus {
-    SessionStatus(
+    return SessionStatus(
         sessionKey: "agent:main:clawline:user:s_test",
         display: .init(
             model: model,
             fallbackModels: ["gpt-5.5", "claude-sonnet-4.6"],
             provider: "openai",
-            harness: nil,
+            harness: harness,
             authMode: authMode,
             reasoningLevel: nil,
             thinkingLevel: thinkingLevel,
@@ -497,6 +672,7 @@ private func makeStatus(
             setFastMode: setFastMode,
             setMode: nil,
             setVerbosity: nil,
+            setHarness: setHarness,
             canCancelCurrentRun: nil,
             canChangeModel: nil,
             canChangeReasoning: nil,
@@ -504,7 +680,7 @@ private func makeStatus(
             canChangeVerbosity: nil,
             readOnlyStatus: nil
         ),
-        modelCatalog: nil
+        modelCatalog: explicitModelCatalog
     )
 }
 

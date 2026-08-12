@@ -1303,14 +1303,10 @@ struct ChatView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
-        // Same gate rule as the creation sheet: a pending harness confirmation
-        // must not survive the Tightbeam gate closing and drive set_harness
-        // against an ungated server.
-        .onChange(of: viewModel.isTightbeamServer) { _, isTightbeam in
-            if !isTightbeam { pendingHarnessChange = nil }
-        }
+        // Confirmation stays keyed to the selected session; the confirm action
+        // rechecks the per-session setHarness capability before posting.
         .confirmationDialog(
-            "Switching harnesses will clear this chat.",
+            "Switching harnesses starts a fresh engine context.",
             isPresented: Binding(
                 get: { pendingHarnessChange != nil },
                 set: { presented in if !presented { pendingHarnessChange = nil } }
@@ -1319,18 +1315,30 @@ struct ChatView: View {
             presenting: pendingHarnessChange
         ) { change in
             Button("Switch to \(change.harness)", role: .destructive) {
-                if viewModel.canApplyTightbeamSessionControl(.setHarness) {
+                if viewModel.canApplyTightbeamSessionControl(
+                    .setHarness,
+                    sessionKey: change.sessionKey,
+                    value: change.harness
+                ) {
                     viewModel.applySessionControl(
                         sessionKey: change.sessionKey,
                         action: .setHarness,
                         value: change.harness
+                    )
+                } else {
+                    viewModel.showUnavailableSessionControlReason(
+                        viewModel.unavailableSessionControlReason(
+                            .setHarness,
+                            sessionKey: change.sessionKey,
+                            value: change.harness
+                        )
                     )
                 }
                 pendingHarnessChange = nil
             }
             Button("Cancel", role: .cancel) { pendingHarnessChange = nil }
         } message: { _ in
-            Text("The new engine starts with fresh model context — engines can't read each other's memory.")
+            Text("The durable session record stays intact. The new harness must inspect that record itself; Clawline will not transfer, replay, or summarize the prior engine context.")
         }
         .photosPicker(
             isPresented: $isPhotosPickerPresented,
@@ -2858,7 +2866,7 @@ struct ChatView: View {
             layoutCoordinator: layoutCoordinator,
             sessionKey: sessionKey,
             sessionStatus: viewModel.sessionStatus(for: sessionKey),
-            sessionStatusUnavailable: viewModel.isSessionStatusUnavailable(for: sessionKey),
+            sessionStatusAvailability: viewModel.sessionStatusAvailability(for: sessionKey),
             streamSearchQuery: streamSearchQueryBySessionKey[sessionKey] ?? "",
             messageProjectionPublicationSequence: viewModel.messageProjectionPublicationSequence,
             forceReReadGeneration: viewModel.forceReReadGeneration(for: sessionKey),
@@ -2877,7 +2885,8 @@ struct ChatView: View {
             },
             onSessionControlSelected: { sessionKey, action, value, enabled in
                 if action == .setHarness {
-                    // Confirm before switching engines — the swap clears the chat.
+                    // Confirm before switching engines — the swap starts a fresh
+                    // engine context on the same durable session.
                     requestHarnessChange(sessionKey: sessionKey, harness: value)
                     return
                 }
@@ -2887,6 +2896,9 @@ struct ChatView: View {
                     value: value,
                     enabled: enabled
                 )
+            },
+            onUnavailableSessionControlSelected: { reason in
+                viewModel.showUnavailableSessionControlReason(reason)
             },
             onFooterTestMenuSelected: { action in
                 switch action {
@@ -3081,7 +3093,7 @@ struct ChatView: View {
                 shouldRegisterWithLayoutCoordinator: false,
                 sessionKey: sessionKey,
                 sessionStatus: viewModel.sessionStatus(for: sessionKey),
-                sessionStatusUnavailable: viewModel.isSessionStatusUnavailable(for: sessionKey),
+                sessionStatusAvailability: viewModel.sessionStatusAvailability(for: sessionKey),
                 messageProjectionPublicationSequence: viewModel.messageProjectionPublicationSequence,
                 forceReReadGeneration: viewModel.forceReReadGeneration(for: sessionKey),
                 sendIndicatorRevision: viewModel.sendIndicatorRevision,

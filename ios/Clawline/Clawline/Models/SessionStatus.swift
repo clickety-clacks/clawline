@@ -152,12 +152,45 @@ struct SessionStatus: Decodable, Equatable {
         let setFastMode: Capability?
         let setMode: Capability?
         let setVerbosity: Capability?
+        let setHarness: Capability?
         let canCancelCurrentRun: Bool?
         let canChangeModel: Bool?
         let canChangeReasoning: Bool?
         let canChangeFastMode: Bool?
         let canChangeVerbosity: Bool?
         let readOnlyStatus: Bool?
+
+        init(
+            cancelCurrentRun: Capability?,
+            setModel: Capability?,
+            setThinking: Capability?,
+            setReasoning: Capability?,
+            setFastMode: Capability?,
+            setMode: Capability?,
+            setVerbosity: Capability?,
+            setHarness: Capability? = nil,
+            canCancelCurrentRun: Bool?,
+            canChangeModel: Bool?,
+            canChangeReasoning: Bool?,
+            canChangeFastMode: Bool?,
+            canChangeVerbosity: Bool?,
+            readOnlyStatus: Bool?
+        ) {
+            self.cancelCurrentRun = cancelCurrentRun
+            self.setModel = setModel
+            self.setThinking = setThinking
+            self.setReasoning = setReasoning
+            self.setFastMode = setFastMode
+            self.setMode = setMode
+            self.setVerbosity = setVerbosity
+            self.setHarness = setHarness
+            self.canCancelCurrentRun = canCancelCurrentRun
+            self.canChangeModel = canChangeModel
+            self.canChangeReasoning = canChangeReasoning
+            self.canChangeFastMode = canChangeFastMode
+            self.canChangeVerbosity = canChangeVerbosity
+            self.readOnlyStatus = readOnlyStatus
+        }
     }
 
     struct Capability: Decodable, Equatable {
@@ -189,6 +222,12 @@ struct SessionStatus: Decodable, Equatable {
             case models
         }
 
+        init(available: Bool, reason: String?, models: [Model]) {
+            self.available = available
+            self.reason = reason
+            self.models = models
+        }
+
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             available = try container.decodeIfPresent(Bool.self, forKey: .available) ?? false
@@ -202,6 +241,14 @@ struct SessionStatus: Decodable, Equatable {
             let ref: String
             let name: String?
             let alias: String?
+
+            init(id: String, provider: String, ref: String, name: String?, alias: String?) {
+                self.id = id
+                self.provider = provider
+                self.ref = ref
+                self.name = name
+                self.alias = alias
+            }
         }
     }
 }

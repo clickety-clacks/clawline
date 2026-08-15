@@ -45,9 +45,29 @@ enum MarkdownURLBoundarySanitizer {
     }
 
     private static func earliestBalancedMarkBoundary(in candidate: String) -> String.Index? {
+        var earliestBoundary: String.Index?
+
+        // "==" (mark highlight) must stay paired: a lone "==", such as base64 query-value
+        // padding, is legitimate URL content and must not be trimmed.
+        if let boundary = earliestBalancedPairBoundary(in: candidate, token: "==") {
+            earliestBoundary = boundary
+        }
+
+        // "**" (emphasis) has no such legitimate-content exception here, and GFM autolink's own
+        // trailing-punctuation trim can leave an unpaired "**" by the time it reaches us (e.g.
+        // "html**URL" from "html**URL**"), so any occurrence after a valid URL is a boundary.
+        if let boundary = earliestUnpairedBoundary(in: candidate, token: "**"),
+           earliestBoundary == nil || boundary < earliestBoundary! {
+            earliestBoundary = boundary
+        }
+
+        return earliestBoundary
+    }
+
+    private static func earliestBalancedPairBoundary(in candidate: String, token: String) -> String.Index? {
         var searchRange = candidate.startIndex..<candidate.endIndex
 
-        while let openingRange = candidate.range(of: "==", options: [], range: searchRange) {
+        while let openingRange = candidate.range(of: token, options: [], range: searchRange) {
             let prefix = String(candidate[..<openingRange.lowerBound])
             guard validatedHTTPURL(from: prefix) != nil else {
                 searchRange = openingRange.upperBound..<candidate.endIndex
@@ -55,12 +75,26 @@ enum MarkdownURLBoundarySanitizer {
             }
 
             guard openingRange.upperBound < candidate.endIndex,
-                  let closingRange = candidate.range(of: "==", options: [], range: openingRange.upperBound..<candidate.endIndex),
+                  let closingRange = candidate.range(of: token, options: [], range: openingRange.upperBound..<candidate.endIndex),
                   closingRange.lowerBound > openingRange.upperBound else {
                 return nil
             }
 
             return openingRange.lowerBound
+        }
+
+        return nil
+    }
+
+    private static func earliestUnpairedBoundary(in candidate: String, token: String) -> String.Index? {
+        var searchRange = candidate.startIndex..<candidate.endIndex
+
+        while let openingRange = candidate.range(of: token, options: [], range: searchRange) {
+            let prefix = String(candidate[..<openingRange.lowerBound])
+            if validatedHTTPURL(from: prefix) != nil {
+                return openingRange.lowerBound
+            }
+            searchRange = openingRange.upperBound..<candidate.endIndex
         }
 
         return nil

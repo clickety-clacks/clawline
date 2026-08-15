@@ -909,13 +909,15 @@ enum MessagePresentationBuilder {
         normalizedMimeType(raw) == expected
     }
 
-    private static func extractURLs(from text: String) -> [URL] {
+    private static func extractURLs(from attributed: NSAttributedString) -> [URL] {
         guard let detector = linkDetector else { return [] }
+        let text = attributed.string
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         var urls: [URL] = []
         detector.enumerateMatches(in: text, options: [], range: range) { match, _, _ in
             guard let match,
                   let matchRange = Range(match.range, in: text) else { return }
+            guard !isWithinInlineCode(attributed, characterRange: match.range) else { return }
             let rawMatch = String(text[matchRange])
             let validatedURL = wrappedMarkTrimmedURL(
                 displayedText: rawMatch,
@@ -928,6 +930,14 @@ enum MessagePresentationBuilder {
         return urls
     }
 
+    private static func isWithinInlineCode(_ attributed: NSAttributedString, characterRange: NSRange) -> Bool {
+        guard characterRange.location != NSNotFound, characterRange.location < attributed.length else { return false }
+        guard let rawIntent = attributed.attribute(.inlinePresentationIntent, at: characterRange.location, effectiveRange: nil) as? NSNumber else {
+            return false
+        }
+        return (rawIntent.uintValue & InlinePresentationIntent.code.rawValue) != 0
+    }
+
     private static func extractRenderedURLs(
         from attributed: NSAttributedString,
         excludingMediaURLs mediaURLs: [URL] = []
@@ -938,6 +948,7 @@ enum MessagePresentationBuilder {
         attributed.enumerateAttribute(.link, in: NSRange(location: 0, length: attributed.length)) { value, range, _ in
             guard let value else { return }
             guard !TextLinkURLTemplateRules.isGeneratedLink(in: attributed, characterRange: range) else { return }
+            guard !isWithinInlineCode(attributed, characterRange: range) else { return }
             let href: String
             if let url = value as? URL {
                 href = url.absoluteString
@@ -964,11 +975,14 @@ enum MessagePresentationBuilder {
             urls.append(sanitizedURL)
         }
 
-        let detectedBareURLs = extractURLs(from: text)
+        let detectedBareURLs = extractURLs(from: attributed)
         let seen = Set(urls.map(\.absoluteString))
+        // A bare match that merely extends an already-detected URL is boundary noise left behind
+        // by rendering (e.g. adjacent mark/emphasis content whose delimiters were stripped), not a
+        // second distinct URL.
         for url in detectedBareURLs where !seen.contains(url.absoluteString)
             && !seen.contains(where: { seenURL in
-                seenURL.hasPrefix(url.absoluteString) && seenURL.dropFirst(url.absoluteString.count).allSatisfy { $0 == "=" }
+                url.absoluteString.hasPrefix(seenURL) && seenURL != url.absoluteString
             })
             && !shouldExcludeRenderedURL(url, mediaURLStrings: mediaURLStrings) {
             urls.append(url)

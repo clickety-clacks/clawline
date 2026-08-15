@@ -989,11 +989,52 @@ enum UnifiedMarkdownRenderer {
             let trailingLength = update.range.length - update.trimmedLength
             if trailingLength > 0 {
                 let trailingRange = NSRange(location: update.range.location + update.trimmedLength, length: trailingLength)
-                // Explicitly clear underline styling on the trailing punctuation run so UITextView
-                // does not visually carry link styling one character too far.
-                attributed.addAttribute(.underlineStyle, value: 0, range: trailingRange)
+                if !recoverSwallowedEmphasis(attributed, trailingRange: trailingRange) {
+                    // Explicitly clear underline styling on the trailing punctuation run so UITextView
+                    // does not visually carry link styling one character too far.
+                    attributed.addAttribute(.underlineStyle, value: 0, range: trailingRange)
+                }
             }
         }
+    }
+
+    // GFM autolink matching claims a directly-adjacent "**word**" run as literal link text
+    // instead of parsing it as emphasis, because the run has no whitespace boundary. Once the
+    // boundary sanitizer above has trimmed the link back to just the URL, repair that one case:
+    // strip the asterisks and bold the recovered word, matching what native markdown parsing
+    // would have produced had the autolink not swallowed it.
+    @discardableResult
+    private static func recoverSwallowedEmphasis(_ attributed: NSMutableAttributedString, trailingRange: NSRange) -> Bool {
+        guard trailingRange.length >= 2 else { return false }
+        let nsText = attributed.string as NSString
+        guard nsText.substring(with: trailingRange).hasPrefix("**") else { return false }
+
+        // GFM's own trailing-punctuation trim can leave the link's remaining text as "**word"
+        // with its closing "**" sitting just past the link's original range, orphaned as plain
+        // text. Recover it by pairing with the next "**" that closes the same inline run (same
+        // line, no intervening emphasis-breaking content).
+        let openingRange = NSRange(location: trailingRange.location, length: 2)
+        let searchStart = openingRange.location + openingRange.length
+        let lineEnd = nsText.range(of: "\n", options: [], range: NSRange(location: searchStart, length: nsText.length - searchStart))
+        let searchLength = lineEnd.location == NSNotFound ? nsText.length - searchStart : lineEnd.location - searchStart
+        guard searchLength > 0 else { return false }
+        let afterOpening = NSRange(location: searchStart, length: searchLength)
+        let closingRange = nsText.range(of: "**", options: [], range: afterOpening)
+        guard closingRange.location != NSNotFound else { return false }
+
+        let boldLength = closingRange.location - searchStart
+        attributed.deleteCharacters(in: closingRange)
+        attributed.deleteCharacters(in: openingRange)
+
+        let boldRange = NSRange(location: openingRange.location, length: boldLength)
+        guard boldRange.length > 0 else { return true }
+        if let currentFont = attributed.attribute(.font, at: boldRange.location, effectiveRange: nil) as? UIFont,
+           let boldDescriptor = currentFont.fontDescriptor.withSymbolicTraits(
+               currentFont.fontDescriptor.symbolicTraits.union(.traitBold)
+           ) {
+            attributed.addAttribute(.font, value: UIFont(descriptor: boldDescriptor, size: currentFont.pointSize), range: boldRange)
+        }
+        return true
     }
 
     private static func stripDetectedLinks(from attributed: NSAttributedString) -> NSAttributedString {

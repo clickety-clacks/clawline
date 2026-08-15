@@ -31,9 +31,7 @@ enum MarkdownURLBoundarySanitizer {
             while let range = candidate.range(of: token, options: [], range: searchRange) {
                 let prefix = String(candidate[..<range.lowerBound])
                 if validatedHTTPURL(from: prefix) != nil {
-                    if earliestBoundary == nil || range.lowerBound < earliestBoundary! {
-                        earliestBoundary = range.lowerBound
-                    }
+                    earliestBoundary = earliestBoundary.map { min($0, range.lowerBound) } ?? range.lowerBound
                     break
                 }
                 searchRange = range.upperBound..<candidate.endIndex

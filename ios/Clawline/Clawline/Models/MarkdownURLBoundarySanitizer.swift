@@ -56,9 +56,8 @@ enum MarkdownURLBoundarySanitizer {
         // "**" (emphasis) has no such legitimate-content exception here, and GFM autolink's own
         // trailing-punctuation trim can leave an unpaired "**" by the time it reaches us (e.g.
         // "html**URL" from "html**URL**"), so any occurrence after a valid URL is a boundary.
-        if let boundary = earliestUnpairedBoundary(in: candidate, token: "**"),
-           earliestBoundary == nil || boundary < earliestBoundary! {
-            earliestBoundary = boundary
+        if let boundary = earliestUnpairedBoundary(in: candidate, token: "**") {
+            earliestBoundary = earliestBoundary.map { min($0, boundary) } ?? boundary
         }
 
         return earliestBoundary

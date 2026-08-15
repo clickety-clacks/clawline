@@ -289,6 +289,23 @@ final class GoalAFixtureChatService: ChatServicing {
             role: .user, sender: "process:tightbeam",
             content: "routing complete: this isolated substrate notice keeps its single primary identity."
         ))
+        guard await wait() else { return }
+
+        // T190 URL-boundary smoke: exercises the fixed seam across bubble families.
+        send(fixtureMessage(
+            role: .user, sender: nil,
+            content: "Visit https://example.com/html**URL** now"
+        ))
+        guard await wait() else { return }
+        send(fixtureMessage(
+            role: .assistant, sender: nil,
+            content: "Visit `https://example.com/path` now"
+        ))
+        guard await wait() else { return }
+        send(fixtureMessage(
+            role: .user, sender: nil,
+            content: "See https://example.com/html==nice=="
+        ))
     }
 
     private func fixtureMessage(role: Message.Role, sender: String?, content: String) -> Message {

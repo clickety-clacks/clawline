@@ -244,13 +244,14 @@ struct MessageDetailContentView: View {
 
 // MARK: - iOS / Catalyst layout (in-app modal-style layout, NOT a system sheet)
 
-/// ~80% of parent width, full height, top and bottom padding. Presented as a
-/// full-bleed overlay so the detail viewer's own frame — not a system sheet
-/// detent — controls the exact proportions the spec calls for.
+/// Full width on compact iPhone; ~80% of parent width on iPad and Catalyst.
+/// Presented as a full-bleed overlay so the detail viewer's own frame — not a
+/// system sheet detent — controls the exact proportions the spec calls for.
 struct MessageDetailViewer: View {
     private let message: Message
     private let payload: MessageDetailPayload?
     private let onDismiss: () -> Void
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     init(message: Message, onDismiss: @escaping () -> Void) {
         self.message = message
@@ -262,6 +263,26 @@ struct MessageDetailViewer: View {
         self.message = payload.message
         self.payload = payload
         self.onDismiss = onDismiss
+    }
+
+    static func contentWidth(
+        availableWidth: CGFloat,
+        horizontalSizeClass: UserInterfaceSizeClass?,
+        userInterfaceIdiom: UIUserInterfaceIdiom,
+        isMacCatalyst: Bool
+    ) -> CGFloat {
+        let isCompactPhone = !isMacCatalyst
+            && userInterfaceIdiom == .phone
+            && horizontalSizeClass == .compact
+        return isCompactPhone ? availableWidth : availableWidth * 0.8
+    }
+
+    private var isMacCatalyst: Bool {
+#if targetEnvironment(macCatalyst)
+        true
+#else
+        false
+#endif
     }
 
     var body: some View {
@@ -284,7 +305,14 @@ struct MessageDetailViewer: View {
                         MessageDetailContentView(message: message, onClose: onDismiss)
                     }
                 }
-                    .frame(width: proxy.size.width * 0.8)
+                    .frame(
+                        width: Self.contentWidth(
+                            availableWidth: proxy.size.width,
+                            horizontalSizeClass: horizontalSizeClass,
+                            userInterfaceIdiom: UIDevice.current.userInterfaceIdiom,
+                            isMacCatalyst: isMacCatalyst
+                        )
+                    )
                     .frame(maxHeight: .infinity)
                     .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .shadow(radius: 20)

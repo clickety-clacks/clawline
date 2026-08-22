@@ -167,6 +167,49 @@ struct MessageDetailContentViewTests {
         #expect(receivedMessageID == message.id)
     }
 
+    @Test("compact iPhone detail viewer uses the full available width")
+    func compactIPhoneDetailViewerUsesFullWidth() {
+        let width = MessageDetailViewer.contentWidth(
+            availableWidth: 390,
+            horizontalSizeClass: .compact,
+            userInterfaceIdiom: .phone,
+            isMacCatalyst: false
+        )
+
+        #expect(width == 390)
+    }
+
+    @Test("iPad detail viewer preserves 80 percent width in every size class")
+    func iPadDetailViewerPreservesWidth() {
+        let regularWidth = MessageDetailViewer.contentWidth(
+            availableWidth: 1_000,
+            horizontalSizeClass: .regular,
+            userInterfaceIdiom: .pad,
+            isMacCatalyst: false
+        )
+        let compactWidth = MessageDetailViewer.contentWidth(
+            availableWidth: 1_000,
+            horizontalSizeClass: .compact,
+            userInterfaceIdiom: .pad,
+            isMacCatalyst: false
+        )
+
+        #expect(regularWidth == 800)
+        #expect(compactWidth == 800)
+    }
+
+    @Test("Catalyst detail viewer preserves 80 percent width")
+    func catalystDetailViewerPreservesWidth() {
+        let width = MessageDetailViewer.contentWidth(
+            availableWidth: 1_000,
+            horizontalSizeClass: .compact,
+            userInterfaceIdiom: .mac,
+            isMacCatalyst: true
+        )
+
+        #expect(width == 800)
+    }
+
     @Test("large detail viewer renders expanded-sheet semantics and refreshed live content")
     @MainActor
     func largeViewerRendersPresentationFallbackAndRefreshesLiveContent() async {

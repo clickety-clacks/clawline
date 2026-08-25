@@ -4893,6 +4893,7 @@ final class ChatViewModel {
         let summary = progressSummary(from: event, isFailure: isFailure)
         guard !summary.isEmpty else { return }
         guard let stage = progressStage(from: event, isFailure: isFailure) else { return }
+        let toolActivity = liveToolActivity(from: event, stage: stage)
 
         recordLiveProgress(
             sessionKey: sessionKey,
@@ -4901,6 +4902,7 @@ final class ChatViewModel {
             seq: event.seq,
             stage: stage,
             summary: summary,
+            toolActivity: toolActivity,
             isFailure: isFailure
         )
     }
@@ -5065,7 +5067,22 @@ final class ChatViewModel {
         if ["tool", "item", "plan", "command-output", "patch", "compaction"].contains(kind) {
             return .toolActivity
         }
+        if event.event == nil, normalizedAgentProgressText(event.progressText) != nil {
+            // Compatibility with Tightbeam's original live_agent_progress_v1
+            // payload, which carries only a flat progressText value.
+            return .toolActivity
+        }
         return nil
+    }
+
+    private func liveToolActivity(from event: AgentProgressEvent,
+                                  stage: PromptProcessingStage) -> LiveToolActivity? {
+        guard stage == .toolActivity,
+              let verb = normalizedAgentProgressText(event.event?.name) else { return nil }
+        return LiveToolActivity(
+            verb: verb,
+            argumentsSummary: normalizedAgentProgressText(event.event?.summary)
+        )
     }
 
     private func normalizedAgentProgressText(_ value: String?) -> String? {

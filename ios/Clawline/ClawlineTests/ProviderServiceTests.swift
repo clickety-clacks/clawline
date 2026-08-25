@@ -247,7 +247,7 @@ struct ProviderServiceTests {
 
         try await service.connect(token: "jwt", lastMessageId: nil)
         mockSocket.enqueue(
-            text: #"{ "type": "agent_progress", "version": 1, "sessionKey": "agent:main:clawline:user:main", "runId": "run_1", "messageId": "c_1", "seq": 2, "timestamp": 1700000000000, "state": "running", "event": { "kind": "item", "phase": "start", "status": "running", "title": "Reading files", "summary": "Reading files" } }"#
+            text: #"{ "type": "agent_progress", "sessionKey": "agent:main:clawline:user:main", "messageId": "c_1", "seq": 2, "progressText": "Read config/runtime.exs" }"#
         )
 
         var event: ChatServiceEvent?
@@ -262,10 +262,22 @@ struct ProviderServiceTests {
             return
         }
         #expect(progress.sessionKey == sessionKey)
-        #expect(progress.runId == "run_1")
+        #expect(progress.runId == nil)
         #expect(progress.seq == 2)
-        #expect(progress.event?.summary == "Reading files")
+        #expect(progress.progressText == "Read config/runtime.exs")
+        #expect(progress.event == nil)
         #expect(service.replayCursorSnapshot()[sessionKey] == nil)
+    }
+
+    @Test("Structured tool progress preserves separate name and bounded arguments summary")
+    func structuredToolProgressPreservesNameAndArgumentsSummary() throws {
+        let payload = #"{ "type": "agent_progress", "version": 1, "sessionKey": "agent:main:clawline:user:main", "runId": "run_1", "messageId": "c_1", "seq": 2, "timestamp": 1700000000000, "state": "running", "event": { "kind": "tool", "status": "running", "title": "Running command", "name": "exec", "summary": "git status" } }"#
+
+        let progress = try JSONDecoder().decode(AgentProgressEvent.self, from: Data(payload.utf8))
+
+        #expect(progress.event?.kind == "tool")
+        #expect(progress.event?.name == "exec")
+        #expect(progress.event?.summary == "git status")
     }
 
     @Test("Prompt turn state events emit service events")

@@ -213,6 +213,43 @@ struct ClawlineTests {
         writeT1483ProofImageIfRequested(cell: cell, renderedFrame: renderedFrame, expectedHeight: expectedHeight)
     }
 
+    @Test("Tool activity renders a distinct verb and arguments pill")
+    @MainActor
+    func toolActivityRendersDistinctVerbAndArgumentsPill() throws {
+        let progress = LiveAgentProgress(
+            sessionKey: "test-session",
+            runId: "run_1",
+            messageId: "c_1",
+            seq: 1,
+            stage: .toolActivity,
+            summary: "Running command",
+            toolActivity: LiveToolActivity(verb: "exec", argumentsSummary: "git status"),
+            isFailure: false
+        )
+        let height = TypingIndicatorCell.height(progress: progress)
+        let cell = TypingIndicatorCell(frame: CGRect(
+            x: 0,
+            y: 0,
+            width: TypingIndicatorCell.bubbleWidth,
+            height: height
+        ))
+        cell.configure(
+            message: TypingIndicatorCell.makeMessage(sessionKey: "test-session"),
+            presentation: TypingIndicatorCell.makePresentation(metrics: ChatFlowTheme.Metrics(isCompact: true)),
+            isCompact: true,
+            maxWidth: TypingIndicatorCell.bubbleWidth,
+            progress: progress
+        )
+
+        #expect(cell.isShowingToolActivityPillForTests)
+        #expect(cell.toolVerbForTests == "exec")
+        #expect(cell.toolArgumentsForTests == "git status")
+        #expect(cell.toolVerbFontForTests?.fontDescriptor.symbolicTraits.contains(.traitBold) == true)
+        #expect(cell.toolArgumentsFontForTests?.fontDescriptor.symbolicTraits.contains(.traitBold) == false)
+        #expect(cell.accessibilityLabel == "exec, git status")
+        #expect(height > TypingIndicatorCell.height(progressSummary: progress.summary))
+    }
+
     @MainActor
     private func writeT1483ProofImageIfRequested(
         cell: TypingIndicatorCell,

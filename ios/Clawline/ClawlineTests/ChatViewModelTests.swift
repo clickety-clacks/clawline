@@ -1130,7 +1130,36 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
+        await viewModel.activate(origin: "test.liveAgentProgress")
         await viewModel.onAppear()
+        for _ in 0..<50 {
+            if viewModel.debugObservationStartupCount() > 0,
+               chatService.connectCallCount > 0 {
+                break
+            }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+        chatService.emitServiceEvent(
+            .agentProgress(
+                AgentProgressEvent(
+                    version: 1,
+                    sessionKey: personalSessionKey,
+                    runId: nil,
+                    messageId: "c_1",
+                    seq: 1,
+                    state: nil,
+                    progressText: "Read config/runtime.exs"
+                )
+            )
+        )
+        for _ in 0..<50 {
+            if viewModel.liveProgressSummary(for: personalSessionKey) == "Read config/runtime.exs" { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+        #expect(viewModel.liveProgress(for: personalSessionKey)?.stage == .toolActivity)
+        #expect(viewModel.liveProgressSummary(for: personalSessionKey) == "Read config/runtime.exs")
+        #expect(viewModel.liveProgress(for: personalSessionKey)?.toolActivity == nil)
+
         chatService.emitServiceEvent(
             .agentProgress(
                 AgentProgressEvent(
@@ -1268,7 +1297,7 @@ struct ChatViewModelTests {
                         status: "running",
                         title: "Running command",
                         name: "exec",
-                        summary: nil,
+                        summary: "git status",
                         progressText: nil
                     )
                 )
@@ -1280,6 +1309,10 @@ struct ChatViewModelTests {
         }
         #expect(viewModel.liveProgress(for: personalSessionKey)?.stage == .toolActivity)
         #expect(viewModel.liveProgressSummary(for: personalSessionKey) == "Running command")
+        #expect(
+            viewModel.liveProgress(for: personalSessionKey)?.toolActivity
+                == LiveToolActivity(verb: "exec", argumentsSummary: "git status")
+        )
 
         chatService.emitServiceEvent(
             .agentProgress(

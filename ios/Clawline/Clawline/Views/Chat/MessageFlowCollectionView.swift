@@ -5180,7 +5180,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                     isCompact: self.isCompact,
                     maxWidth: maxWidth,
                     isDark: self.currentIsDark,
-                    progressSummary: self.liveProgress?.summary,
+                    progress: self.liveProgress,
                     onTap: { [weak self, weak cell] in
                         guard let self else { return }
                         let anchorFrame = cell?.renderedBubbleFrame(in: nil) ?? .null
@@ -5865,7 +5865,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 paddingScale: TypingIndicatorCell.bubblePaddingScale,
                 minWidthOverride: TypingIndicatorCell.bubbleWidth,
                 maxWidthOverride: TypingIndicatorCell.bubbleWidth,
-                minHeightOverride: TypingIndicatorCell.height(progressSummary: liveProgress?.summary)
+                minHeightOverride: TypingIndicatorCell.height(progress: liveProgress)
             )
         }
 

@@ -238,7 +238,13 @@ struct LiveAgentProgress: Equatable {
     let seq: Int?
     let stage: PromptProcessingStage
     let summary: String
+    let toolActivity: LiveToolActivity?
     let isFailure: Bool
+}
+
+struct LiveToolActivity: Equatable {
+    let verb: String
+    let argumentsSummary: String?
 }
 
 enum ImageAttachmentPreparer {
@@ -4905,6 +4911,7 @@ final class ChatViewModel {
                                     seq: Int?,
                                     stage: PromptProcessingStage,
                                     summary: String,
+                                    toolActivity: LiveToolActivity? = nil,
                                     isFailure: Bool) {
         let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedSessionKey.isEmpty else { return }
@@ -4917,6 +4924,7 @@ final class ChatViewModel {
             seq: seq,
             stage: stage,
             summary: normalizedSummary,
+            toolActivity: toolActivity,
             isFailure: isFailure
         )
         ensureStreamEntry(for: normalizedSessionKey)

@@ -23,6 +23,7 @@ final class TypingIndicatorCell: UICollectionViewCell {
     private let dotsView = TypingDotsView()
     private let progressStack = UIStackView()
     private let progressLabel = UILabel()
+    private let toolActivityPill = ToolActivityPillView()
 #if os(visionOS)
     private let spatialTapButton = UIButton(type: .custom)
 #endif
@@ -52,6 +53,9 @@ final class TypingIndicatorCell: UICollectionViewCell {
         progressLabel.setContentCompressionResistancePriority(.required, for: .vertical)
         progressStack.addArrangedSubview(progressLabel)
         progressLabel.widthAnchor.constraint(equalToConstant: Self.progressLabelWidth).isActive = true
+
+        progressStack.addArrangedSubview(toolActivityPill)
+        toolActivityPill.widthAnchor.constraint(lessThanOrEqualToConstant: Self.progressLabelWidth).isActive = true
 
         containerView.translatesAutoresizingMaskIntoConstraints = false
         containerView.isUserInteractionEnabled = false
@@ -88,6 +92,7 @@ final class TypingIndicatorCell: UICollectionViewCell {
                    isCompact: Bool,
                    maxWidth: CGFloat,
                    isDark: Bool? = nil,
+                   progress: LiveAgentProgress? = nil,
                    progressSummary: String? = nil,
                    onTap: (() -> Void)? = nil) {
         self.onTap = onTap
@@ -100,10 +105,12 @@ final class TypingIndicatorCell: UICollectionViewCell {
         let effectiveIsDark = isDark ?? (traitCollection.userInterfaceStyle == .dark)
         let palette = ChatFlowUIKitTheme.palette(isDark: effectiveIsDark)
         dotsView.updateColor(palette.ink)
-        let trimmedProgress = progressSummary?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedProgress = (progress?.summary ?? progressSummary)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let toolActivity = progress?.toolActivity
         progressLabel.text = trimmedProgress
-        progressLabel.isHidden = trimmedProgress?.isEmpty ?? true
+        progressLabel.isHidden = toolActivity != nil || (trimmedProgress?.isEmpty ?? true)
         progressLabel.textColor = palette.ink.withAlphaComponent(0.82)
+        toolActivityPill.configure(toolActivity, palette: palette)
         containerView.configure(
             message: message,
             stream: .personal,
@@ -115,7 +122,7 @@ final class TypingIndicatorCell: UICollectionViewCell {
             paddingScale: paddingScale,
             minWidthOverride: Self.bubbleWidth,
             maxWidthOverride: Self.bubbleWidth,
-            minHeightOverride: Self.height(progressSummary: trimmedProgress),
+            minHeightOverride: Self.height(progress: progress, progressSummary: trimmedProgress),
             isDark: isDark,
             onRequestExpand: nil,
             onRequestLayout: nil,
@@ -125,7 +132,9 @@ final class TypingIndicatorCell: UICollectionViewCell {
             onResend: nil
         )
         containerView.setCenteredOverlayView(progressStack)
-        if let trimmedProgress, !trimmedProgress.isEmpty {
+        if let toolActivity {
+            accessibilityLabel = toolActivity.accessibilityLabel
+        } else if let trimmedProgress, !trimmedProgress.isEmpty {
             accessibilityLabel = trimmedProgress
         } else {
             accessibilityLabel = "Assistant is working"
@@ -140,6 +149,7 @@ final class TypingIndicatorCell: UICollectionViewCell {
         containerView.setCenteredOverlayView(nil)
         progressLabel.text = nil
         progressLabel.isHidden = true
+        toolActivityPill.configure(nil, palette: ChatFlowUIKitTheme.palette(isDark: false))
         onTap = nil
     }
 
@@ -197,6 +207,105 @@ final class TypingIndicatorCell: UICollectionViewCell {
 
     static func height(progressSummary: String?, font: UIFont = .preferredFont(forTextStyle: .caption1)) -> CGFloat {
         MessageBubbleGeometry.typingHeight(progressSummary: progressSummary, font: font)
+    }
+
+    static func height(progress: LiveAgentProgress?,
+                       progressSummary: String? = nil,
+                       font: UIFont = .preferredFont(forTextStyle: .caption1)) -> CGFloat {
+        let summary = progress?.summary ?? progressSummary
+        let baseHeight = height(progressSummary: summary, font: font)
+        return progress?.toolActivity == nil ? baseHeight : baseHeight + ToolActivityPillView.verticalPadding
+    }
+
+    var isShowingToolActivityPillForTests: Bool { !toolActivityPill.isHidden }
+    var toolVerbForTests: String? { toolActivityPill.verbText }
+    var toolArgumentsForTests: String? { toolActivityPill.argumentsText }
+    var toolVerbFontForTests: UIFont? { toolActivityPill.verbFont }
+    var toolArgumentsFontForTests: UIFont? { toolActivityPill.argumentsFont }
+}
+
+private extension LiveToolActivity {
+    var accessibilityLabel: String {
+        guard let argumentsSummary else { return verb }
+        return "\(verb), \(argumentsSummary)"
+    }
+}
+
+private final class ToolActivityPillView: UIView {
+    static let verticalPadding: CGFloat = 8
+
+    private let stack = UIStackView()
+    private let verbLabel = UILabel()
+    private let argumentsLabel = UILabel()
+
+    var verbText: String? { verbLabel.text }
+    var argumentsText: String? { argumentsLabel.text }
+    var verbFont: UIFont? { verbLabel.font }
+    var argumentsFont: UIFont? { argumentsLabel.font }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        translatesAutoresizingMaskIntoConstraints = false
+        layer.cornerRadius = 10
+        layer.cornerCurve = .continuous
+        clipsToBounds = true
+        isAccessibilityElement = false
+        isHidden = true
+
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 6
+
+        verbLabel.font = .preferredFont(forTextStyle: .caption1).bold()
+        verbLabel.adjustsFontForContentSizeCategory = true
+        verbLabel.numberOfLines = 1
+        verbLabel.lineBreakMode = .byTruncatingTail
+        verbLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        argumentsLabel.font = .preferredFont(forTextStyle: .caption1)
+        argumentsLabel.adjustsFontForContentSizeCategory = true
+        argumentsLabel.numberOfLines = 1
+        argumentsLabel.lineBreakMode = .byTruncatingTail
+        argumentsLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        stack.addArrangedSubview(verbLabel)
+        stack.addArrangedSubview(argumentsLabel)
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: Self.verticalPadding / 2),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.verticalPadding / 2)
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func configure(_ activity: LiveToolActivity?, palette: ChatFlowUIKitTheme.Palette) {
+        guard let activity else {
+            verbLabel.text = nil
+            argumentsLabel.text = nil
+            argumentsLabel.isHidden = true
+            isHidden = true
+            return
+        }
+        verbLabel.text = activity.verb
+        verbLabel.textColor = palette.terracotta
+        argumentsLabel.text = activity.argumentsSummary
+        argumentsLabel.textColor = palette.ink.withAlphaComponent(0.82)
+        argumentsLabel.isHidden = activity.argumentsSummary == nil
+        backgroundColor = palette.borderSubtle
+        isHidden = false
+    }
+}
+
+private extension UIFont {
+    func bold() -> UIFont {
+        guard let descriptor = fontDescriptor.withSymbolicTraits(.traitBold) else { return self }
+        return UIFont(descriptor: descriptor, size: pointSize)
     }
 }
 

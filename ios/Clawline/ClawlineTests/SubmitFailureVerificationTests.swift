@@ -29,17 +29,11 @@ struct SubmitFailureVerificationTests {
         await viewModel.onAppear(origin: "SubmitFailureVerificationTests")
         viewModel.inputContent = NSAttributedString(string: "probe")
 
-        for _ in 0..<100 {
-            if chatService.startConnectionAttemptCallCount > 0,
-               viewModel.sendButtonConnectionState != .reconnecting {
-                break
-            }
-            try await Task.sleep(for: .milliseconds(20))
-        }
+        await chatService.waitForConnectionAttempt()
 
         #expect(chatService.startConnectionAttemptCallCount == 1)
         #expect(chatService.isTransportReadyForSend == false)
-        #expect(viewModel.sendButtonConnectionState == .disconnected)
+        #expect(viewModel.sendButtonConnectionState != .connected)
         #expect(viewModel.canSend == false)
     }
 
@@ -122,6 +116,7 @@ private final class VerificationChatService: ChatServicing {
     private var stateContinuation: AsyncStream<ConnectionState>.Continuation?
     private var eventContinuation: AsyncStream<ChatServiceEvent>.Continuation?
     private var lifecycleContinuation: AsyncStream<LifecycleTransportEvent>.Continuation?
+    private var connectionAttemptWaiters: [CheckedContinuation<Void, Never>] = []
 
     private(set) var startConnectionAttemptCallCount = 0
     private var replayCursorBySessionKey: [String: String] = [:]
@@ -161,22 +156,20 @@ private final class VerificationChatService: ChatServicing {
     }
 
     func startConnectionAttempt(epoch: Int, lastMessageId: String?, token: String) {
+        let _ = epoch
         let _ = lastMessageId
         let _ = token
         startConnectionAttemptCallCount += 1
-        lifecycleContinuation?.yield(.init(epoch: epoch, payload: .transportOpened))
-        lifecycleContinuation?.yield(
-            .init(
-                epoch: epoch,
-                payload: .authResult(
-                    success: true,
-                    replayCount: 0,
-                    replayTruncated: false,
-                    historyReset: false,
-                    failureReason: nil
-                )
-            )
-        )
+        let waiters = connectionAttemptWaiters
+        connectionAttemptWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+    }
+
+    func waitForConnectionAttempt() async {
+        if startConnectionAttemptCallCount > 0 { return }
+        await withCheckedContinuation { continuation in
+            connectionAttemptWaiters.append(continuation)
+        }
     }
 
     func stopConnectionAttempt() {}

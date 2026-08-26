@@ -136,34 +136,66 @@ struct StreamToast: View {
 @Observable
 @MainActor
 final class StreamToastManager {
+    @MainActor
+    struct Timing {
+        typealias Action = @MainActor () -> Void
+        typealias Cancellation = @MainActor () -> Void
+
+        let now: @MainActor () -> Duration
+        let schedule: @MainActor (Duration, @escaping Action) -> Cancellation
+
+        static var continuous: Timing {
+            let clock = ContinuousClock()
+            let origin = clock.now
+            return Timing(
+                now: { origin.duration(to: clock.now) },
+                schedule: { delay, action in
+                    let task = Task { @MainActor in
+                        do {
+                            try await Task.sleep(for: delay)
+                        } catch is CancellationError {
+                            return
+                        } catch {
+                            return
+                        }
+                        guard !Task.isCancelled else { return }
+                        action()
+                    }
+                    return { task.cancel() }
+                }
+            )
+        }
+    }
+
     private(set) var isVisible = false
     private(set) var displayName: String = ""
     private(set) var sessionKey: String = ""
     private(set) var isBusy = false
 
-    private let clock = ContinuousClock()
     private let dismissDelay: Duration
-    private var shownAt: ContinuousClock.Instant?
-    private var dismissTask: Task<Void, Never>?
+    private let timing: Timing
+    private var shownAt: Duration?
+    private var cancelDismiss: Timing.Cancellation?
     private(set) var isAutoDismissEnabled = true
 
-    init(dismissDelay: Duration = .seconds(2)) {
+    init(dismissDelay: Duration = .seconds(2), timing: Timing? = nil) {
         self.dismissDelay = dismissDelay
+        self.timing = timing ?? .continuous
     }
 
     /// Shows or updates the toast with stream display metadata.
     /// If already visible, just updates the name without dismissing.
     func show(displayName: String, sessionKey: String, isBusy: Bool = false, autoDismiss: Bool = true) {
         // Cancel any pending dismiss
-        dismissTask?.cancel()
-        dismissTask = nil
+        cancelDismiss?()
+        cancelDismiss = nil
 
         // Update displayed metadata and show
         self.displayName = displayName
         self.sessionKey = sessionKey
         self.isBusy = isBusy
         isAutoDismissEnabled = autoDismiss
-        shownAt = clock.now
+        shownAt = timing.now()
         isVisible = true
 
         scheduleDismissIfIdle()
@@ -171,8 +203,8 @@ final class StreamToastManager {
 
     func setBusy(_ busy: Bool) {
         guard isVisible else { return }
-        dismissTask?.cancel()
-        dismissTask = nil
+        cancelDismiss?()
+        cancelDismiss = nil
         isBusy = busy
         scheduleDismissIfIdle()
     }
@@ -184,30 +216,24 @@ final class StreamToastManager {
             hide()
             return
         }
-        dismissTask = Task {
-            do {
-                try await Task.sleep(for: remaining)
-            } catch is CancellationError {
-                return
-            } catch {
-                return
-            }
-            guard !Task.isCancelled else { return }
-            isVisible = false
-            shownAt = nil
+        cancelDismiss = timing.schedule(remaining) { [weak self] in
+            guard let self else { return }
+            self.cancelDismiss = nil
+            self.isVisible = false
+            self.shownAt = nil
         }
     }
 
     private func remainingDismissDelay() -> Duration {
         guard let shownAt else { return dismissDelay }
-        let elapsed = shownAt.duration(to: clock.now)
+        let elapsed = timing.now() - shownAt
         return max(.zero, dismissDelay - elapsed)
     }
 
     /// Immediately hides the toast.
     func hide() {
-        dismissTask?.cancel()
-        dismissTask = nil
+        cancelDismiss?()
+        cancelDismiss = nil
         isBusy = false
         isAutoDismissEnabled = true
         isVisible = false

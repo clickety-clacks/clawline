@@ -2332,12 +2332,9 @@ final class ChatViewModel {
                 sender: nil
             ),
         ])
-        sessionMessages[mainSessionKey] = mainMessages
-        sessionMessages[alphaSessionKey] = [alphaMessage]
-        sessionMessages[betaSessionKey] = [betaMessage]
-        persistMessages(mainMessages, for: mainSessionKey)
-        persistMessages([alphaMessage], for: alphaSessionKey)
-        persistMessages([betaMessage], for: betaSessionKey)
+        applyMessagesWrite(mainMessages, for: mainSessionKey, projectionMutation: .replaceAll)
+        applyMessagesWrite([alphaMessage], for: alphaSessionKey, projectionMutation: .replaceAll)
+        applyMessagesWrite([betaMessage], for: betaSessionKey, projectionMutation: .replaceAll)
         recalculateOrderedSessionKeys()
         ensureDefaultActiveSessionIfNeeded()
 

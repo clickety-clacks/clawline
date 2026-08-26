@@ -22,6 +22,9 @@ struct ClawlineApp: App {
     // injected into every scene's RootView (and thereby every ChatViewModel) so
     // cache ordering holds across scenes and overlapping view models.
     @State private var messageCacheIO: any MessageCacheIOServicing = MessageCacheIO()
+    // One process-wide authority keeps exactly one ChatViewModel responsible
+    // for the connection lifecycle across every scene.
+    @State private var chatViewModelConnectionOwnership = ChatViewModelConnectionOwnership()
     // Owns which message (if any) the detail viewer is currently showing.
     @State private var detailPresentation = MessageDetailPresentation()
 
@@ -75,7 +78,11 @@ struct ClawlineApp: App {
                 Color.clear
             } else {
                 @Bindable var settingsManager = settingsManager
-                RootView(uploadService: uploadService, messageCacheIO: messageCacheIO)
+                RootView(
+                    uploadService: uploadService,
+                    messageCacheIO: messageCacheIO,
+                    chatViewModelConnectionOwnership: chatViewModelConnectionOwnership
+                )
                     .environment(authManager)
                     .environment(\.connectionService, connectionService)
                     .environment(\.deviceIdentifier, deviceIdentifier)

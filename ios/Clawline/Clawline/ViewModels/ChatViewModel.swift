@@ -326,8 +326,7 @@ enum ImageAttachmentPreparer {
 final class ChatViewModel {
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessagePipeline")
     private let instanceId = UUID().uuidString
-    @MainActor
-    private static var currentConnectionOwnerId: String?
+    private let connectionOwnership: ChatViewModelConnectionOwnership
     static let missingReplyVisibleIdMessage = "Please update to the newest Clawline fork to reply to this message."
     private static let providerMaxTextMessageBytes = 65_536
     private static let liveProgressStaleTimeout: Duration = .seconds(120)
@@ -351,7 +350,7 @@ final class ChatViewModel {
     }
 
     private func ownerStateFlags() -> String {
-        "isOwner=\(isConnectionOwner) currentOwner=\(Self.currentConnectionOwnerId ?? "nil") isRetired=\(isRetired) isChatVisible=\(isChatVisible) isAppInForeground=\(isAppInForeground)"
+        "isOwner=\(isConnectionOwner) currentOwner=\(connectionOwnership.currentOwnerId ?? "nil") isRetired=\(isRetired) isChatVisible=\(isChatVisible) isAppInForeground=\(isAppInForeground)"
     }
 
     private func emitPinpointLog(event: String, origin: String, phaseHint: ConnectionLifecyclePhase? = nil) {
@@ -369,12 +368,11 @@ final class ChatViewModel {
     }
 
     private var isConnectionOwner: Bool {
-        Self.currentConnectionOwnerId == instanceId
+        connectionOwnership.isOwner(instanceId)
     }
 
     private func claimConnectionOwnership(reason: String) {
-        let previousOwner = Self.currentConnectionOwnerId ?? "none"
-        Self.currentConnectionOwnerId = instanceId
+        let previousOwner = connectionOwnership.claim(instanceId) ?? "none"
         logger.info(
             "ChatViewModel connection-owner claim id=\(self.instanceId, privacy: .public) previous=\(previousOwner, privacy: .public) reason=\(reason, privacy: .public)"
         )
@@ -382,18 +380,12 @@ final class ChatViewModel {
     }
 
     private func releaseConnectionOwnershipIfNeeded(reason: String) {
-        guard Self.currentConnectionOwnerId == instanceId else { return }
-        Self.currentConnectionOwnerId = nil
+        guard connectionOwnership.release(instanceId) else { return }
         logger.info(
             "ChatViewModel connection-owner release id=\(self.instanceId, privacy: .public) reason=\(reason, privacy: .public)"
         )
         emitPinpointLog(event: "connectionOwner_release", origin: reason)
     }
-#if DEBUG
-    static func resetConnectionOwnershipForTesting() {
-        currentConnectionOwnerId = nil
-    }
-#endif
     private(set) var messages: [Message] = []
     private(set) var streamsBySessionKey: [String: StreamSession] = [:]
     private(set) var orderedSessionKeys: [String] = []
@@ -1528,6 +1520,7 @@ final class ChatViewModel {
          uploadService: any UploadServicing,
          toastManager: ToastManager,
          salientHighlightService: any SalientHighlightServicing,
+         connectionOwnership: ChatViewModelConnectionOwnership,
          messageCacheIO: any MessageCacheIOServicing = MessageCacheIO(),
          connectionAlertGracePeriod: Duration = .seconds(2),
          nowProvider: @escaping () -> Date = Date.init,
@@ -1538,6 +1531,7 @@ final class ChatViewModel {
              #endif
          }) {
         logger.info("ChatViewModel init id=\(self.instanceId, privacy: .public)")
+        self.connectionOwnership = connectionOwnership
         self.messageCacheIO = messageCacheIO
         self.auth = auth
         self.chatService = chatService
@@ -1637,6 +1631,10 @@ final class ChatViewModel {
         guard isConnectionOwner else {
             coordinatorDiag("onAppear ignored non-owner")
             return
+        }
+        if connectionOwnership.activationPolicy == .onFirstAppearance,
+           !hasActivatedLifecycleOwnership {
+            await activate(origin: "isolated-test-onAppear[\(origin)]")
         }
         coordinatorDiag("onAppear enter visibility-only tokenPresent=\(auth.token != nil)")
         emitPinpointLog(event: "onAppear_enter", origin: origin)

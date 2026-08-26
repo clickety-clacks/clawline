@@ -10539,7 +10539,8 @@ private final class PreviewUploadService: UploadServicing {
         device: device,
         uploadService: PreviewUploadService(),
         toastManager: toastManager,
-        salientHighlightService: SalientHighlightService()
+        salientHighlightService: SalientHighlightService(),
+        connectionOwnership: ChatViewModelConnectionOwnership()
     )
     return ChatView(
         viewModel: viewModel,
@@ -10561,7 +10562,8 @@ private final class PreviewUploadService: UploadServicing {
         device: device,
         uploadService: PreviewUploadService(),
         toastManager: toastManager,
-        salientHighlightService: SalientHighlightService()
+        salientHighlightService: SalientHighlightService(),
+        connectionOwnership: ChatViewModelConnectionOwnership()
     )
     return ChatView(
         viewModel: viewModel,

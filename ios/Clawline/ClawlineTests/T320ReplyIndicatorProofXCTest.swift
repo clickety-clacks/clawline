@@ -267,7 +267,6 @@ private func findSubview(in root: UIView, where predicate: (UIView) -> Bool) -> 
 @MainActor
 private func makeReplyProofContext() async throws -> (chatService: TestChatService, viewModel: ChatViewModel) {
     resetReplyProofPersistence()
-    ChatViewModel.resetConnectionOwnershipForTesting()
     let auth = TestAuthManager()
     auth.storeCredentials(token: "jwt", userId: "user")
     let chatService = TestChatService()

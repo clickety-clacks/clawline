@@ -18,6 +18,7 @@ struct RootView: View {
     // write/delete ordering holds across overlapping/replaced instances AND
     // across scenes that share the on-disk cache (spec §T-A). No global state.
     let messageCacheIO: any MessageCacheIOServicing
+    let chatViewModelConnectionOwnership: ChatViewModelConnectionOwnership
     @State private var toastManager = ToastManager()
     @State private var salientHighlightService = SalientHighlightService()
     @State private var chatViewModel: ChatViewModel?
@@ -154,6 +155,7 @@ struct RootView: View {
             uploadService: uploadService,
             toastManager: toastManager,
             salientHighlightService: salientHighlightService,
+            connectionOwnership: chatViewModelConnectionOwnership,
             messageCacheIO: messageCacheIO
         )
         if let created = chatViewModel {
@@ -201,7 +203,11 @@ private struct KeyboardSafeAreaMode: ViewModifier {
 // MARK: - Previews
 
 #Preview("Unauthenticated") {
-    RootView(uploadService: PreviewUploadService(), messageCacheIO: MessageCacheIO())
+    RootView(
+        uploadService: PreviewUploadService(),
+        messageCacheIO: MessageCacheIO(),
+        chatViewModelConnectionOwnership: ChatViewModelConnectionOwnership()
+    )
         .environment(AuthManager())
         .environment(\.connectionService, StubConnectionService())
         .environment(\.deviceIdentifier, DeviceIdentifier())
@@ -211,7 +217,11 @@ private struct KeyboardSafeAreaMode: ViewModifier {
 #Preview("Authenticated") {
     let auth = AuthManager()
     auth.storeCredentials(token: "preview-token", userId: "preview-user")
-    return RootView(uploadService: PreviewUploadService(), messageCacheIO: MessageCacheIO())
+    return RootView(
+        uploadService: PreviewUploadService(),
+        messageCacheIO: MessageCacheIO(),
+        chatViewModelConnectionOwnership: ChatViewModelConnectionOwnership()
+    )
         .environment(auth)
         .environment(\.connectionService, StubConnectionService())
         .environment(\.deviceIdentifier, DeviceIdentifier())

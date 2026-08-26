@@ -1781,7 +1781,6 @@ struct ChatViewModelTests {
     @MainActor
     func realServiceSocketCloseClosesViewModelGate() async throws {
         resetChatPersistence()
-        ChatViewModel.resetConnectionOwnershipForTesting()
         let auth = TestAuthManager()
         auth.storeCredentials(token: "jwt", userId: "user")
         let socket = IntegrationMockSocket()
@@ -2281,7 +2280,7 @@ struct ChatViewModelTests {
         #expect(viewModel.orgOptions == nil)
     }
 
-    @Test("R4 composition: RootView preserves one injected cache-IO identity across scenes — no per-view default/static escape")
+    @Test("R4/S1 composition: RootView preserves app-injected cache and connection authorities across scenes")
     @MainActor
     func rootViewPreservesInjectedCacheIOIdentityAcrossScenes() {
         // The @main App owns ONE MessageCacheIO and injects it into every scene's
@@ -2291,11 +2290,22 @@ struct ChatViewModelTests {
         // instance, must therefore hold THAT exact identity — a per-RootView
         // default or static would surface as a different object here.
         let appOwned = MessageCacheIO()
-        let sceneA = RootView(uploadService: TestUploadService(), messageCacheIO: appOwned)
-        let sceneB = RootView(uploadService: TestUploadService(), messageCacheIO: appOwned)
+        let connectionOwnership = ChatViewModelConnectionOwnership()
+        let sceneA = RootView(
+            uploadService: TestUploadService(),
+            messageCacheIO: appOwned,
+            chatViewModelConnectionOwnership: connectionOwnership
+        )
+        let sceneB = RootView(
+            uploadService: TestUploadService(),
+            messageCacheIO: appOwned,
+            chatViewModelConnectionOwnership: connectionOwnership
+        )
         #expect((sceneA.messageCacheIO as AnyObject) === (appOwned as AnyObject))
         #expect((sceneB.messageCacheIO as AnyObject) === (appOwned as AnyObject))
         #expect((sceneA.messageCacheIO as AnyObject) === (sceneB.messageCacheIO as AnyObject))
+        #expect(sceneA.chatViewModelConnectionOwnership === connectionOwnership)
+        #expect(sceneB.chatViewModelConnectionOwnership === connectionOwnership)
         // A DIFFERENT app-owned instance is a distinct identity (sanity: identity
         // comparison is meaningful, not trivially true).
         let otherApp = MessageCacheIO()
@@ -8879,6 +8889,81 @@ struct ChatViewModelTests {
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(auth.isAdmin == false)
+    }
+
+    @Test("S1: test-created view models hold isolated connection ownership")
+    @MainActor
+    func testCreatedViewModelsHoldIsolatedConnectionOwnership() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let first = ChatViewModel(
+            auth: auth,
+            chatService: TestChatService(),
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        let second = ChatViewModel(
+            auth: auth,
+            chatService: TestChatService(),
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer {
+            first.prepareForReplacement()
+            second.prepareForReplacement()
+        }
+
+        await first.activate(origin: "test.isolated.first")
+        await second.activate(origin: "test.isolated.second")
+
+        #expect(first.debugObservationStartupCount() == 1)
+        #expect(second.debugObservationStartupCount() == 1)
+    }
+
+    @Test("S1: production authority permits one active connection owner")
+    @MainActor
+    func productionAuthorityPermitsOneActiveConnectionOwner() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let ownership = ChatViewModelConnectionOwnership()
+        let first = ChatViewModel(
+            auth: auth,
+            chatService: TestChatService(),
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService(),
+            connectionOwnership: ownership
+        )
+        let second = ChatViewModel(
+            auth: auth,
+            chatService: TestChatService(),
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService(),
+            connectionOwnership: ownership
+        )
+        defer {
+            first.prepareForReplacement()
+            second.prepareForReplacement()
+        }
+
+        await first.activate(origin: "test.production.first")
+        await second.activate(origin: "test.production.second")
+
+        #expect(first.debugObservationStartupCount() == 0)
+        #expect(second.debugObservationStartupCount() == 1)
     }
 
     @Test("activate is idempotent and initializes lifecycle observers once")

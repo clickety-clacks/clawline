@@ -1122,10 +1122,10 @@ private func renderT1185ProofImage<Content: View>(_ view: Content, size: CGSize)
 
 private func t1185ProofDirectory() throws -> URL {
     let environment = ProcessInfo.processInfo.environment
-    let directoryPath = environment["T1185_RENDER_PROOF_DIR"]
-        ?? environment["TEST_RUNNER_T1185_RENDER_PROOF_DIR"]
-        ?? "scratch/t1185-render-proof"
-    let directory = URL(fileURLWithPath: directoryPath, isDirectory: true)
+    let directory = environment["T1185_RENDER_PROOF_DIR"].map {
+        URL(fileURLWithPath: $0, isDirectory: true)
+    } ?? FileManager.default.temporaryDirectory
+        .appendingPathComponent("clawline-t1185-render-proof", isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     return directory
 }

@@ -1935,18 +1935,22 @@ struct ProviderServiceTests {
         let baseURL = URL(string: "https://example.com")!
         let sessionKey = "agent:main:clawline:user:s_status"
         defer { HTTPStubURLProtocol.requestHandler = nil }
-        var requestBodies: [[String: Any]] = []
+        var requestBodies: [Data] = []
         HTTPStubURLProtocol.requestHandler = { request in
             #expect(request.url?.path == "/api/session-control")
             #expect(request.httpMethod == "POST")
             #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer jwt")
-            let body = try? JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]
-            requestBodies.append(body ?? [:])
-            let action = body?["action"] as? String
+            let bodyData = try #require(request.httpBody)
+            #expect(!bodyData.isEmpty)
+            requestBodies.append(bodyData)
+            let body = try #require(
+                JSONSerialization.jsonObject(with: bodyData) as? [String: Any]
+            )
+            let action = body["action"] as? String
             let data: Data
             if action == "cancel_current_run" {
-                #expect(body?["sessionKey"] as? String == sessionKey)
-                #expect(body?["content"] == nil)
+                #expect(body["sessionKey"] as? String == sessionKey)
+                #expect(body["content"] == nil)
                 data = #"""
                 {
                   "ok": false,
@@ -1965,9 +1969,9 @@ struct ProviderServiceTests {
                 """#.data(using: .utf8) ?? Data()
             } else {
                 #expect(action == "set_fast_mode")
-                #expect(body?["sessionKey"] as? String == sessionKey)
-                #expect(body?["fastMode"] as? Bool == true)
-                #expect(body?["content"] == nil)
+                #expect(body["sessionKey"] as? String == sessionKey)
+                #expect(body["fastMode"] as? Bool == true)
+                #expect(body["content"] == nil)
                 data = #"""
                 {
                   "ok": true,
@@ -2058,10 +2062,23 @@ struct ProviderServiceTests {
         )
 
         #expect(requestBodies.count == 2)
-        #expect(requestBodies.first?["action"] as? String == "cancel_current_run")
-        #expect(requestBodies.first?["fastMode"] == nil)
-        #expect(requestBodies.last?["action"] as? String == "set_fast_mode")
-        #expect(requestBodies.last?["fastMode"] as? Bool == true)
+        let cancelBodyData = try #require(requestBodies.first)
+        let fastModeBodyData = try #require(requestBodies.last)
+        let cancelBody = try #require(
+            JSONSerialization.jsonObject(with: cancelBodyData) as? [String: Any]
+        )
+        let fastModeBody = try #require(
+            JSONSerialization.jsonObject(with: fastModeBodyData) as? [String: Any]
+        )
+        #expect((cancelBody as NSDictionary).isEqual(to: [
+            "sessionKey": sessionKey,
+            "action": "cancel_current_run"
+        ]))
+        #expect((fastModeBody as NSDictionary).isEqual(to: [
+            "sessionKey": sessionKey,
+            "action": "set_fast_mode",
+            "fastMode": true
+        ]))
         #expect(cancelResponse.ok == false)
         #expect(cancelResponse.sessionKey == sessionKey)
         #expect(cancelResponse.action == "cancel_current_run")
@@ -2681,13 +2698,40 @@ private final class HTTPStubURLProtocol: URLProtocol, @unchecked Sendable {
         }
 
         do {
-            let (response, data) = try handler(request)
+            let normalizedRequest = try Self.normalizedRequest(from: request)
+            let (response, data) = try handler(normalizedRequest)
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: data)
             client?.urlProtocolDidFinishLoading(self)
         } catch {
             client?.urlProtocol(self, didFailWithError: error)
         }
+    }
+
+    private static func normalizedRequest(from request: URLRequest) throws -> URLRequest {
+        guard request.httpBody == nil, let bodyStream = request.httpBodyStream else {
+            return request
+        }
+
+        bodyStream.open()
+        defer { bodyStream.close() }
+
+        var body = Data()
+        var buffer = [UInt8](repeating: 0, count: 1024)
+        while true {
+            let count = bodyStream.read(&buffer, maxLength: buffer.count)
+            if count < 0 {
+                throw bodyStream.streamError ?? URLError(.cannotDecodeRawData)
+            }
+            if count == 0 {
+                break
+            }
+            body.append(buffer, count: count)
+        }
+
+        var normalizedRequest = request
+        normalizedRequest.httpBody = body
+        return normalizedRequest
     }
 
     override func stopLoading() {}

@@ -1050,6 +1050,7 @@ final class ChatViewModel {
     private var observationStartupTask: Task<Void, Never>?
     private var activationTask: Task<Void, Never>?
     private var hasActivatedLifecycleOwnership = false
+    private var incomingMessagesSubscription: AsyncStream<Message>?
     private var lifecycleTransportEventsSubscription: AsyncStream<LifecycleTransportEvent>?
     private var lifecycleOutputsSubscription: AsyncStream<ConnectionLifecycleOutput>?
     private var lifecycleStartupGateDebugSubscription: AsyncStream<StartupGateDebugEvent>?
@@ -1796,6 +1797,9 @@ final class ChatViewModel {
             await self.ensureLifecycleOutputsSubscription()
             self.coordinatorDiag("startObservingIfNeeded after ensureLifecycleOutputsSubscription")
             if Task.isCancelled { return }
+            self.ensureIncomingMessagesSubscription()
+            self.coordinatorDiag("startObservingIfNeeded after ensureIncomingMessagesSubscription")
+            if Task.isCancelled { return }
             await self.ensureLifecycleStartupGateDebugSubscription()
             self.coordinatorDiag("startObservingIfNeeded after ensureLifecycleStartupGateDebugSubscription")
             if Task.isCancelled { return }
@@ -1809,6 +1813,10 @@ final class ChatViewModel {
             self.coordinatorDiag("startObservingIfNeeded creating observationTask")
             self.observationTask = Task {
                 await withTaskGroup(of: Void.self) { group in
+                    group.addTask { [weak self] in
+                        await self?.observeIncomingMessages()
+                    }
+
                     group.addTask { [weak self] in
                         await self?.observeLifecycleTransportEvents()
                     }
@@ -1847,6 +1855,7 @@ final class ChatViewModel {
         activationTask = nil
         observationTask?.cancel()
         observationTask = nil
+        incomingMessagesSubscription = nil
         lifecycleTransportEventsSubscription = nil
         lifecycleOutputsSubscription = nil
         lifecycleStartupGateDebugSubscription = nil
@@ -1885,6 +1894,12 @@ final class ChatViewModel {
         releaseConnectionOwnershipIfNeeded(reason: "prepareForReplacement")
     }
 
+    private func ensureIncomingMessagesSubscription() {
+        guard incomingMessagesSubscription == nil else { return }
+        incomingMessagesSubscription = chatService.incomingMessages
+        coordinatorDiag("ensureIncomingMessagesSubscription created")
+    }
+
     private func ensureLifecycleTransportSubscription() {
         guard lifecycleTransportEventsSubscription == nil else {
             coordinatorDiag("ensureLifecycleTransportSubscription already-subscribed")
@@ -1913,6 +1928,14 @@ final class ChatViewModel {
         }
         lifecycleStartupGateDebugSubscription = await lifecycleCoordinator.startupGateDebugEvents
         coordinatorDiag("ensureLifecycleStartupGateDebugSubscription created")
+    }
+
+    @MainActor
+    private func observeIncomingMessages() async {
+        guard let incomingMessagesSubscription else { return }
+        for await message in incomingMessagesSubscription {
+            handleIncoming(message)
+        }
     }
 
     @MainActor
@@ -2871,6 +2894,7 @@ final class ChatViewModel {
         clearSessionStatusRefreshes()
         observationTask?.cancel()
         observationTask = nil
+        incomingMessagesSubscription = nil
         lifecycleTransportEventsSubscription = nil
         lifecycleOutputsSubscription = nil
         lifecycleStartupGateDebugSubscription = nil

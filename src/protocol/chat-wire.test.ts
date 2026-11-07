@@ -183,7 +183,7 @@ describe("chat-wire protocol fixtures", () => {
           content: "hello from provider",
           timestamp: 1774910000000,
           streaming: false,
-          sessionKey: "agent:main:clawline:flynn:main"
+          sessionKey: "agent:main:clawline:example-user:main"
         })
       )
     ).toEqual({
@@ -193,7 +193,7 @@ describe("chat-wire protocol fixtures", () => {
       content: "hello from provider",
       timestamp: 1774910000000,
       streaming: false,
-      sessionKey: "agent:main:clawline:flynn:main",
+      sessionKey: "agent:main:clawline:example-user:main",
       attachments: []
     });
   });
@@ -209,7 +209,7 @@ describe("chat-wire protocol fixtures", () => {
           content: "hello from provider",
           timestamp: 1774910000000,
           streaming: false,
-          sessionKey: "agent:main:clawline:flynn:main"
+          sessionKey: "agent:main:clawline:example-user:main"
         })
       )
     ).toEqual({
@@ -220,7 +220,7 @@ describe("chat-wire protocol fixtures", () => {
       content: "hello from provider",
       timestamp: 1774910000000,
       streaming: false,
-      sessionKey: "agent:main:clawline:flynn:main",
+      sessionKey: "agent:main:clawline:example-user:main",
       attachments: []
     });
   });
@@ -235,7 +235,7 @@ describe("chat-wire protocol fixtures", () => {
           content: "",
           timestamp: 1774910000001,
           streaming: true,
-          sessionKey: "agent:main:clawline:flynn:main"
+          sessionKey: "agent:main:clawline:example-user:main"
         })
       )
     ).toEqual({
@@ -245,7 +245,7 @@ describe("chat-wire protocol fixtures", () => {
       content: "",
       timestamp: 1774910000001,
       streaming: true,
-      sessionKey: "agent:main:clawline:flynn:main",
+      sessionKey: "agent:main:clawline:example-user:main",
       attachments: []
     });
   });
@@ -260,7 +260,7 @@ describe("chat-wire protocol fixtures", () => {
           content: "attachment message",
           timestamp: 1774910000002,
           streaming: false,
-          sessionKey: "agent:main:clawline:flynn:main",
+          sessionKey: "agent:main:clawline:example-user:main",
           attachments: [
             {
               type: "image",
@@ -286,7 +286,7 @@ describe("chat-wire protocol fixtures", () => {
       content: "attachment message",
       timestamp: 1774910000002,
       streaming: false,
-      sessionKey: "agent:main:clawline:flynn:main",
+      sessionKey: "agent:main:clawline:example-user:main",
       attachments: [
         {
           type: "image",
@@ -352,13 +352,13 @@ describe("chat-wire protocol fixtures", () => {
       parseServerPayload(
         JSON.stringify({
           type: "stream_read_state",
-          sessionKey: "agent:main:clawline:flynn:main",
+          sessionKey: "agent:main:clawline:example-user:main",
           lastReadMessageId: "s_101"
         })
       )
     ).toEqual({
       type: "stream_read_state",
-      sessionKey: "agent:main:clawline:flynn:main",
+      sessionKey: "agent:main:clawline:example-user:main",
       lastReadMessageId: "s_101"
     });
 
@@ -366,14 +366,14 @@ describe("chat-wire protocol fixtures", () => {
       parseServerPayload(
         JSON.stringify({
           type: "stream_tail_state",
-          sessionKey: "agent:main:clawline:flynn:main",
+          sessionKey: "agent:main:clawline:example-user:main",
           lastMessageId: "s_102",
           lastMessageRole: "assistant"
         })
       )
     ).toEqual({
       type: "stream_tail_state",
-      sessionKey: "agent:main:clawline:flynn:main",
+      sessionKey: "agent:main:clawline:example-user:main",
       lastMessageId: "s_102",
       lastMessageRole: "assistant"
     });
@@ -384,7 +384,7 @@ describe("chat-wire protocol fixtures", () => {
           type: "event",
           event: "activity",
           payload: {
-            sessionKey: "agent:main:clawline:flynn:main"
+            sessionKey: "agent:main:clawline:example-user:main"
           }
         })
       )
@@ -392,7 +392,7 @@ describe("chat-wire protocol fixtures", () => {
       type: "event",
       event: "activity",
       payload: {
-        sessionKey: "agent:main:clawline:flynn:main"
+        sessionKey: "agent:main:clawline:example-user:main"
       }
     });
 

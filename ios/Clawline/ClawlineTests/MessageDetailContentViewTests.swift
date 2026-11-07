@@ -28,7 +28,7 @@ struct MessageDetailContentViewTests {
             streaming: false,
             attachments: [],
             deviceId: nil,
-            sessionKey: "agent:main:clawline:mike:main s_test",
+            sessionKey: "agent:main:clawline:example-user:main s_test",
             sender: sender
         )
     }
@@ -117,12 +117,12 @@ struct MessageDetailContentViewTests {
 
     @Test("a provenance-stamped message strips the [from ...] line before rendering")
     func stampedMessageStripsFirstLineBeforeRendering() {
-        let message = detailMessage(content: "Report: revision drafted.", sender: "agent:coder:gibson")
+        let message = detailMessage(content: "Report: revision drafted.", sender: "agent:coder:host-a")
         guard let attributed = firstAttributedText(blocks(message)) else {
             Issue.record("expected an attributed text block")
             return
         }
-        #expect(!attributed.string.contains("[from agent:coder:gibson]"))
+        #expect(!attributed.string.contains("[from agent:coder:host-a]"))
         #expect(attributed.string.contains("Report: revision drafted."))
     }
 

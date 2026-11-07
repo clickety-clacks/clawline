@@ -386,7 +386,7 @@ struct BubbleScrollTests {
             streaming: false,
             attachments: [],
             deviceId: nil,
-            sessionKey: "agent:main:clawline:flynn:s_111df227"
+            sessionKey: "agent:main:clawline:example-user:s_111df227"
         )
         let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
         let sizeClass = MessageFlowRules.sizeClass(for: presentation)
@@ -921,7 +921,7 @@ struct BubbleScrollTests {
             streaming: false,
             attachments: [],
             deviceId: nil,
-            sessionKey: "agent:main:clawline:flynn:main"
+            sessionKey: "agent:main:clawline:example-user:main"
         )
         let secondMessage = Message(
             id: "shared-id",
@@ -931,7 +931,7 @@ struct BubbleScrollTests {
             streaming: false,
             attachments: [],
             deviceId: nil,
-            sessionKey: "agent:main:clawline:flynn:s_other"
+            sessionKey: "agent:main:clawline:example-user:s_other"
         )
 
         let firstPresentation = buildPresentation(firstMessage, metrics: metrics, enableLinkPreviews: false)
@@ -1111,7 +1111,7 @@ struct BubbleScrollTests {
                 streaming: false,
                 attachments: [],
                 deviceId: nil,
-                sessionKey: "agent:main:clawline:flynn:s_111df227"
+                sessionKey: "agent:main:clawline:example-user:s_111df227"
             )
             let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
             let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 360, height: 1))
@@ -1196,7 +1196,7 @@ struct BubbleScrollTests {
             streaming: false,
             attachments: [],
             deviceId: nil,
-            sessionKey: "agent:main:clawline:flynn:s_111df227"
+            sessionKey: "agent:main:clawline:example-user:s_111df227"
         )
         let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
         let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 360, height: 1))
@@ -1229,19 +1229,19 @@ struct BubbleScrollTests {
         #expect(bodyStack.spacing == 6)
     }
 
-    @Test("T1193: Ansible normal text bubble uses the available internal width")
+    @Test("T1193: Device A normal text bubble uses the available internal width")
     @MainActor
-    func ansibleNormalTextBubbleUsesAvailableInternalWidth() {
+    func deviceANormalTextBubbleUsesAvailableInternalWidth() {
         let metrics = ChatFlowTheme.Metrics(isCompact: true)
         let message = Message(
-            id: "t1193-ansible-narrow-column",
+            id: "t1193-device-a-narrow-column",
             role: .assistant,
-            content: "TARS task registry is repaired: 7 corrupt June 19 rows were normalized, 4 stale June 28 running rows were marked lost, and the restore warning is cleared.",
+            content: "Host task registry is repaired: 7 corrupt June 19 rows were normalized, 4 stale June 28 running rows were marked lost, and the restore warning is cleared.",
             timestamp: Date(),
             streaming: false,
             attachments: [],
             deviceId: nil,
-            sessionKey: "agent:main:clawline:flynn:main"
+            sessionKey: "agent:main:clawline:example-user:main"
         )
         let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
         let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 390, height: 1))
@@ -1275,9 +1275,9 @@ struct BubbleScrollTests {
 
         let geometry = bubble.renderedGeometryForTests(in: bubble)
         guard let body = textViews(in: bubble).first(where: {
-            $0.attributedText.string.contains("TARS task registry")
+            $0.attributedText.string.contains("Host task registry")
         }) else {
-            Issue.record("Expected Ansible transcript body text view")
+            Issue.record("Expected Device A transcript body text view")
             return
         }
 
@@ -1292,14 +1292,14 @@ struct BubbleScrollTests {
     func tallReusedCellFrameDoesNotCreateBlankInternalBubbleSpace() {
         let metrics = ChatFlowTheme.Metrics(isCompact: true)
         let message = Message(
-            id: "t1193-ansible-blank-internal-space",
+            id: "t1193-device-a-blank-internal-space",
             role: .assistant,
             content: "Cron job led-ticker art failed: run python3 www/ticker/generate_june30.py failed",
             timestamp: Date(),
             streaming: false,
             attachments: [],
             deviceId: nil,
-            sessionKey: "agent:main:clawline:flynn:main"
+            sessionKey: "agent:main:clawline:example-user:main"
         )
         let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
         let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 366, height: 760))
@@ -1330,7 +1330,7 @@ struct BubbleScrollTests {
         guard let body = textViews(in: bubble).first(where: {
             $0.attributedText.string.contains("Cron job")
         }) else {
-            Issue.record("Expected Ansible transcript body text view")
+            Issue.record("Expected Device A transcript body text view")
             return
         }
         let textFrame = renderedGlyphFrame(for: body, in: bubble)
@@ -1355,7 +1355,7 @@ struct BubbleScrollTests {
             streaming: false,
             attachments: [],
             deviceId: nil,
-            sessionKey: "agent:main:clawline:flynn:s_111df227"
+            sessionKey: "agent:main:clawline:example-user:s_111df227"
         )
         let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
         let cell = MessageBubbleUIKitCell(frame: CGRect(x: 0, y: 0, width: 366, height: 420))
@@ -1406,7 +1406,7 @@ struct BubbleScrollTests {
             streaming: false,
             attachments: [],
             deviceId: nil,
-            sessionKey: "agent:main:clawline:flynn:s_original"
+            sessionKey: "agent:main:clawline:example-user:s_original"
         )
         let reusedMessage = Message(
             id: messageId,
@@ -1416,7 +1416,7 @@ struct BubbleScrollTests {
             streaming: false,
             attachments: [],
             deviceId: nil,
-            sessionKey: "agent:main:clawline:flynn:s_reused"
+            sessionKey: "agent:main:clawline:example-user:s_reused"
         )
         let cell = MessageBubbleUIKitCell(frame: CGRect(x: 0, y: 0, width: 366, height: 420))
         cell.contentView.frame = cell.bounds
@@ -1504,7 +1504,7 @@ struct BubbleScrollTests {
                 streaming: false,
                 attachments: [],
                 deviceId: nil,
-                sessionKey: "agent:main:clawline:flynn:s_111df227"
+                sessionKey: "agent:main:clawline:example-user:s_111df227"
             )
             let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
             let naturalBubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: maxWidth, height: 1))
@@ -1644,7 +1644,7 @@ struct BubbleScrollTests {
             streaming: false,
             attachments: [],
             deviceId: nil,
-            sessionKey: "agent:main:clawline:flynn:s_111df227"
+            sessionKey: "agent:main:clawline:example-user:s_111df227"
         )
         let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
         let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 360, height: 1))
@@ -1704,7 +1704,7 @@ struct BubbleScrollTests {
             streaming: false,
             attachments: [],
             deviceId: nil,
-            sessionKey: "agent:main:clawline:flynn:s_111df227"
+            sessionKey: "agent:main:clawline:example-user:s_111df227"
         )
         let measured = measuredUserBubble(
             message: message,
@@ -1722,12 +1722,12 @@ struct BubbleScrollTests {
         let message = Message(
             id: "t1390-multiline-user",
             role: .user,
-            content: "First line for Ansible.\nSecond line stays visible.\nThird line keeps natural height.",
+            content: "First line for Device A.\nSecond line stays visible.\nThird line keeps natural height.",
             timestamp: Date(),
             streaming: false,
             attachments: [],
             deviceId: nil,
-            sessionKey: "agent:main:clawline:flynn:s_111df227"
+            sessionKey: "agent:main:clawline:example-user:s_111df227"
         )
         let measured = measuredUserBubble(
             message: message,
@@ -1742,7 +1742,7 @@ struct BubbleScrollTests {
             streaming: false,
             attachments: [],
             deviceId: nil,
-            sessionKey: "agent:main:clawline:flynn:s_111df227"
+            sessionKey: "agent:main:clawline:example-user:s_111df227"
         )
         let shortMeasured = measuredUserBubble(
             message: shortMessage,
@@ -1761,12 +1761,12 @@ struct BubbleScrollTests {
         let message = Message(
             id: "t1193-two-line-user",
             role: .user,
-            content: "E2E smoke shrdlu-ui-e2e-1782938516501. Reply only: shrdlu-ui-e2e-1782938516501-reply",
+            content: "E2E smoke host-b-ui-e2e-1782938516501. Reply only: host-b-ui-e2e-1782938516501-reply",
             timestamp: Date(),
             streaming: false,
             attachments: [],
             deviceId: nil,
-            sessionKey: "agent:main:clawline:flynn:s_111df227"
+            sessionKey: "agent:main:clawline:example-user:s_111df227"
         )
         let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
         let sizeClass = MessageFlowRules.sizeClass(for: presentation)
@@ -1911,7 +1911,7 @@ struct BubbleScrollTests {
         #expect(layout.contentSize.height == sectionInset.top + 96 + 17 + 71 + sectionInset.bottom)
     }
 
-    @Test("T1193: compact Cyberbrain message rows use documented container padding gap")
+    @Test("T1193: compact Test Device message rows use documented container padding gap")
     func compactMessageRowsUseDocumentedContainerPaddingGap() {
         let metrics = ChatFlowTheme.Metrics(isCompact: true)
         let rowGap = MessageBubbleGeometry.adjacentMessageRowSpacing(metrics: metrics)

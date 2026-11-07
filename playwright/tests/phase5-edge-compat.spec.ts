@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { expect, test } from "@playwright/test";
 import { WebSocketServer } from "ws";
 
-const MAIN_SESSION_KEY = "agent:main:clawline:flynn:main";
+const MAIN_SESSION_KEY = "agent:main:clawline:example-user:main";
 
 test.describe("Phase 5 Edge-on-Android compatibility", () => {
   test("send, viewport width, and keyboard-up scrolling stay usable on Edge Android", async ({
@@ -175,7 +175,7 @@ async function startEdgeCompatServer(
           JSON.stringify({
             type: "auth_result",
             success: true,
-            userId: "user_flynn",
+            userId: "user_example",
             replayCount: transcript.length,
             sessionKeys: [MAIN_SESSION_KEY]
           })
@@ -183,7 +183,7 @@ async function startEdgeCompatServer(
         socket.send(
           JSON.stringify({
             type: "session_info",
-            userId: "user_flynn",
+            userId: "user_example",
             isAdmin: false,
             sessionKeys: [MAIN_SESSION_KEY]
           })
@@ -267,12 +267,12 @@ async function startEdgeCompatServer(
 
 function makeSession(port: number) {
   return {
-    claimedName: "Flynn Browser",
+    claimedName: "Example Browser",
     deviceId: "browser-device-1",
     isAdmin: false,
     serverUrl: `ws://127.0.0.1:${port}/ws`,
     token: "jwt-edge-token",
-    userId: "user_flynn"
+    userId: "user_example"
   };
 }
 

@@ -144,7 +144,7 @@
 <body>
 <main>
   <h1>T319/T320 Message Composer Input</h1>
-  <p class="meta">Self-contained Clawline product and technical specification for modified Enter behavior, Catalyst message-bubble context menus, and structured composer message references. Prepared 2026-05-17 from T319 and T320 tracker text supplied by Flynn.</p>
+  <p class="meta">Self-contained Clawline product and technical specification for modified Enter behavior, Catalyst message-bubble context menus, and structured composer message references. Prepared 2026-05-17 from T319 and T320 tracker text supplied by the operator.</p>
 
   <section class="callout">
     <p class="decision">Decision: modified Enter is composer text editing, plain Enter remains prompt submit, and message references are visible composer tokens backed by structured message identity rather than pasted quoted text.</p>
@@ -154,8 +154,8 @@
   <h2>Source Notes</h2>
   <ul>
     <li>The source ticket text for T319 and T320 was supplied in the agent prompt on 2026-05-17 after the local ticket files were unavailable to this spec agent.</li>
-    <li>The requested Clawline invariant path <code>/Users/mike/shared-workspace/clawline/specs/clawline-invariants.md</code> was absent. The available canonical mirror <code>/Users/mike/shared-workspace/clawline/implementation_details/clawline-invariants.md</code> was consulted.</li>
-    <li>This spec is grounded in Flynn's requested behavior and the supplied ticket text, not in current implementation behavior.</li>
+    <li>The requested Clawline invariant path <code>$HOME/shared-workspace/clawline/specs/clawline-invariants.md</code> was absent. The available canonical mirror <code>$HOME/shared-workspace/clawline/implementation_details/clawline-invariants.md</code> was consulted.</li>
+    <li>This spec is grounded in the operator's requested behavior and the supplied ticket text, not in current implementation behavior.</li>
     <li>No app source, deploy state, merge state, branch state, or runtime configuration is in scope for this spec task.</li>
   </ul>
 
@@ -175,7 +175,7 @@
     <li>No change to plain <code>Enter</code>/<code>Return</code> prompt submission.</li>
     <li>No new message sanitization, security filtering, permissions model, or legacy compatibility layer beyond the behavior explicitly specified here.</li>
     <li>No hidden prompt-text quoting by copying the referenced message body into the user's prompt draft.</li>
-    <li>No requirement for context menus on every platform. The product scope named by Flynn is Catalyst; other platforms receive compatibility notes and proof expectations where relevant.</li>
+    <li>No requirement for context menus on every platform. The product scope named by the operator is Catalyst; other platforms receive compatibility notes and proof expectations where relevant.</li>
     <li>No transcript mutation when a message is merely referenced. Referencing a message affects the composer draft and the outgoing send context only.</li>
   </ul>
 
@@ -400,7 +400,7 @@
   "references": [
     {
       "kind": "message",
-      "sessionKey": "agent:main:clawline:flynn:s_...",
+      "sessionKey": "agent:main:clawline:example-user:s_...",
       "streamId": "stable stream/session identifier when distinct from sessionKey",
       "messageId": "stable transcript message identifier",
       "messageRole": "user | assistant | tool | system | terminal | status",
@@ -512,7 +512,7 @@
 
   <h2>Implementation Handoff</h2>
   <ul>
-    <li>Implement exactly the specified T319/T320 behavior. Do not add additional validation, hidden prompt rewriting, new routing fallback, or broad context-menu actions unless Flynn updates this spec.</li>
+    <li>Implement exactly the specified T319/T320 behavior. Do not add additional validation, hidden prompt rewriting, new routing fallback, or broad context-menu actions unless the operator updates this spec.</li>
     <li>Use the existing composer send path for plain Enter and final prompt submit. The spec changes the key handling for modified Enter, not the send architecture.</li>
     <li>Use stable transcript/session identity for references. If the current model lacks a stable identity for a message class, hide or disable reference action for that class rather than inventing unstable identity.</li>
     <li>Use the platform clipboard path for <strong>Copy to Clipboard</strong>. If a transcript item has no copyable readable text, hide or disable the action rather than copying placeholders, structured metadata, or hidden transport content.</li>

@@ -8,7 +8,7 @@ struct StreamToastManagerTests {
     func dismissesAfterConfiguredIdleDelay() async {
         let manager = StreamToastManager(dismissDelay: .milliseconds(120))
 
-        manager.show(displayName: "Main", sessionKey: "agent:main:clawline:flynn:main")
+        manager.show(displayName: "Main", sessionKey: "agent:main:clawline:example-user:main")
         #expect(manager.isVisible)
 
         do {
@@ -34,7 +34,7 @@ struct StreamToastManagerTests {
 
         manager.show(
             displayName: "Main",
-            sessionKey: "agent:main:clawline:flynn:main",
+            sessionKey: "agent:main:clawline:example-user:main",
             isBusy: true
         )
         #expect(manager.isVisible)
@@ -72,7 +72,7 @@ struct StreamToastManagerTests {
 
         manager.show(
             displayName: "Preview",
-            sessionKey: "agent:main:clawline:flynn:preview",
+            sessionKey: "agent:main:clawline:example-user:preview",
             autoDismiss: false
         )
 
@@ -82,7 +82,7 @@ struct StreamToastManagerTests {
 
         manager.show(
             displayName: "Released",
-            sessionKey: "agent:main:clawline:flynn:released"
+            sessionKey: "agent:main:clawline:example-user:released"
         )
 
         #expect(manager.isVisible)

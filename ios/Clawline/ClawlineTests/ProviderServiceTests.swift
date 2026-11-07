@@ -867,7 +867,7 @@ struct ProviderServiceTests {
         do {
             _ = try await service.createStream(
                 displayName: "P", idempotencyKey: "req_retired",
-                harness: "codex", model: nil, host: "eezo", archetype: nil
+                harness: "codex", model: nil, host: "dev-host", archetype: nil
             )
             Issue.record("queued placement create must stay refused after a retired-link restore attempt")
         } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
@@ -880,7 +880,7 @@ struct ProviderServiceTests {
         do {
             _ = try await service.createStream(
                 displayName: "Placement", idempotencyKey: "req_x",
-                harness: "codex", model: nil, host: "eezo", archetype: nil
+                harness: "codex", model: nil, host: "dev-host", archetype: nil
             )
             Issue.record("placement create must be refused on a featureless link")
         } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
@@ -965,7 +965,7 @@ struct ProviderServiceTests {
         do {
             _ = try await service.createStream(
                 displayName: "Placement", idempotencyKey: "req_retry",
-                harness: "codex", model: nil, host: "eezo", archetype: nil
+                harness: "codex", model: nil, host: "dev-host", archetype: nil
             )
             Issue.record("retry after link retirement must be refused")
         } catch ProviderChatService.Error.tightbeamCapabilityUnavailable {
@@ -997,7 +997,7 @@ struct ProviderServiceTests {
                 if op == "create" {
                     _ = try await service.createStream(
                         displayName: "P", idempotencyKey: "req_ok",
-                        harness: "codex", model: nil, host: "eezo", archetype: nil
+                        harness: "codex", model: nil, host: "dev-host", archetype: nil
                     )
                 } else {
                     _ = try await service.applySessionControl(
@@ -1470,7 +1470,7 @@ struct ProviderServiceTests {
         {
           "streams": [
             {
-              "sessionKey": "agent:main:clawline:flynn:s_direct",
+              "sessionKey": "agent:main:clawline:example-user:s_direct",
               "displayName": "Direct",
               "kind": "main",
               "orderIndex": 0,
@@ -1511,7 +1511,7 @@ struct ProviderServiceTests {
 
         let streams = try await client.fetchStreams(token: "jwt")
 
-        #expect(streams.map(\.sessionKey) == ["agent:main:clawline:flynn:s_direct"])
+        #expect(streams.map(\.sessionKey) == ["agent:main:clawline:example-user:s_direct"])
         #expect(requestBox.urls == [
             "https://tars.tail4105e8.ts.net:19443/api/streams",
             "http://100.85.66.60:18800/api/streams"
@@ -1538,7 +1538,7 @@ struct ProviderServiceTests {
         {
           "streams": [
             {
-              "sessionKey": "agent:main:clawline:flynn:s_recovery",
+              "sessionKey": "agent:main:clawline:example-user:s_recovery",
               "displayName": "Recovery",
               "kind": "main",
               "orderIndex": 0,
@@ -2250,16 +2250,16 @@ struct ProviderServiceTests {
         let mockSocket = MockWebSocketClient()
         let connector = MockWebSocketConnector(client: mockSocket)
         let baseURL = URL(string: "https://example.com")!
-        let sessionKey = "agent:main:clawline:flynn:main s_request_path"
+        let sessionKey = "agent:main:clawline:example-user:main s_request_path"
         var capturedRequests: [URLRequest] = []
         defer { HTTPStubURLProtocol.requestHandler = nil }
         HTTPStubURLProtocol.requestHandler = { request in
             capturedRequests.append(request)
             let body: String
             if request.httpMethod == "PATCH" {
-                body = #"{"stream":{"sessionKey":"agent:main:clawline:flynn:main s_request_path","displayName":"Renamed","kind":"custom","orderIndex":2,"isBuiltIn":false,"createdAt":1700000000000,"updatedAt":1700000000001,"adopted":false}}"#
+                body = #"{"stream":{"sessionKey":"agent:main:clawline:example-user:main s_request_path","displayName":"Renamed","kind":"custom","orderIndex":2,"isBuiltIn":false,"createdAt":1700000000000,"updatedAt":1700000000001,"adopted":false}}"#
             } else {
-                body = #"{"deletedSessionKey":"agent:main:clawline:flynn:main s_request_path"}"#
+                body = #"{"deletedSessionKey":"agent:main:clawline:example-user:main s_request_path"}"#
             }
             let data = body.data(using: .utf8) ?? Data()
             return (
@@ -2297,7 +2297,7 @@ struct ProviderServiceTests {
             )
             #expect(
                 components.percentEncodedPath
-                    == "/api/streams/agent%3Amain%3Aclawline%3Aflynn%3Amain%20s_request_path"
+                    == "/api/streams/agent%3Amain%3Aclawline%3Aexample-user%3Amain%20s_request_path"
             )
             #expect(!components.percentEncodedPath.contains("%253A"))
             #expect(!components.percentEncodedPath.contains("%2520"))
@@ -2398,7 +2398,7 @@ struct ProviderServiceTests {
                 "claude": [{"id": "m1", "ref": "claude-fable-5", "name": "Fable 5", "provider": "anthropic"}],
                 "codex": [{"id": "m2", "ref": "gpt-5.6-sol", "name": "Sol", "provider": "openai"}]
               },
-              "hosts": ["eezo", "tars"],
+              "hosts": ["dev-host", "host-b"],
               "archetypes": [{"name": "researcher", "where": ["*"], "defaults": {"harness": "claude"}}]
             }
             """#.data(using: .utf8) ?? Data()
@@ -2423,7 +2423,7 @@ struct ProviderServiceTests {
         #expect(box.authorization == "Bearer jwt")
         #expect(options.harnesses == ["claude", "codex"])
         #expect(options.models["codex"]?.first?.ref == "gpt-5.6-sol")
-        #expect(options.hosts == ["eezo", "tars"])
+        #expect(options.hosts == ["dev-host", "host-b"])
         #expect(options.archetypes.first?.where == ["*"])
     }
 

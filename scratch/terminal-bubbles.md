@@ -1,4 +1,5 @@
 # Embedded Terminal Bubbles (GitHub #46)
+> Machine, user, and session values in examples are illustrative.
 
 ## Goal
 Embed interactive terminal sessions directly inside chat message bubbles. When CLU needs to show live logs/debugging output, it should send a *terminal session bubble* instead of streaming plain text. The user can scroll, select/copy, and interact (keyboard input) within the bubble.
@@ -18,7 +19,7 @@ This spec targets Clawline’s existing message/bubble pipeline and adapts the p
 - **tmux session/pane**: The backing terminal state.
   - v1 supports two deployment shapes:
     - **Local tmux**: provider host can create/manage tmux sessions locally.
-    - **Remote tmux**: provider SSHes to a dedicated terminal host (e.g. provider runs on TARS, tmux lives on eezo).
+    - **Remote tmux**: provider SSHes to a dedicated terminal host (e.g. the provider runs on a primary host and tmux runs on a dedicated development host).
 
 ## Architecture (Client)
 
@@ -135,7 +136,7 @@ Server message payload excerpt:
   "content": "",
   "timestamp": 1700000000000,
   "streaming": false,
-  "sessionKey": "agent:main:clawline:mike:main",
+  "sessionKey": "agent:main:clawline:example-user:main",
   "attachments": [
     {
       "id": "term_8e1d",
@@ -329,7 +330,7 @@ In split deployments (provider host != terminal host), the provider connects to 
 
 Config (provider):
 - `terminal.tmux.mode`: `"local"` (default) or `"ssh"`
-- `terminal.tmux.ssh.target`: ssh target, e.g. `"mike@eezo.tail4105e8.ts.net"`
+- `terminal.tmux.ssh.target`: ssh target, e.g. `"user@terminal-host.example"`
 - Optional: `terminal.tmux.ssh.identityFile`, `port`, `knownHostsFile`, `strictHostKeyChecking`, `extraArgs`
 
 Security notes:
@@ -489,7 +490,7 @@ Fallback behavior:
 - If terminal WS connect fails, show error state with `Reconnect` and optionally allow “View as text” (provider could also provide a static log snippet in `content`).
 
 ## Open Questions
-Resolved by Flynn decisions:
+Resolved by operator decisions:
 - DM-only for personal Clawline DMs (`agent:main:clawline:{userId}:main`).
 - Auto-connect immediately on render.
 - No bubble chrome; sizing and scroll capture match HTML link previews.

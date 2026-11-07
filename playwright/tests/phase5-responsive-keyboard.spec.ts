@@ -849,16 +849,16 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
   });
 });
 
-const MAIN_SESSION_KEY = "agent:main:clawline:flynn:main";
-const SIDE_SESSION_KEY = "agent:main:clawline:flynn:side";
-const RESEARCH_SESSION_KEY = "agent:main:clawline:flynn:research";
-const DESIGN_SESSION_KEY = "agent:main:clawline:flynn:design";
-const OPS_SESSION_KEY = "agent:main:clawline:flynn:ops";
-const REVIEW_SESSION_KEY = "agent:main:clawline:flynn:review";
-const QA_SESSION_KEY = "agent:main:clawline:flynn:qa";
-const NOTES_SESSION_KEY = "agent:main:clawline:flynn:notes";
-const PLANNING_SESSION_KEY = "agent:main:clawline:flynn:planning";
-const INCIDENTS_SESSION_KEY = "agent:main:clawline:flynn:incidents";
+const MAIN_SESSION_KEY = "agent:main:clawline:example-user:main";
+const SIDE_SESSION_KEY = "agent:main:clawline:example-user:side";
+const RESEARCH_SESSION_KEY = "agent:main:clawline:example-user:research";
+const DESIGN_SESSION_KEY = "agent:main:clawline:example-user:design";
+const OPS_SESSION_KEY = "agent:main:clawline:example-user:ops";
+const REVIEW_SESSION_KEY = "agent:main:clawline:example-user:review";
+const QA_SESSION_KEY = "agent:main:clawline:example-user:qa";
+const NOTES_SESSION_KEY = "agent:main:clawline:example-user:notes";
+const PLANNING_SESSION_KEY = "agent:main:clawline:example-user:planning";
+const INCIDENTS_SESSION_KEY = "agent:main:clawline:example-user:incidents";
 
 async function startPhase5Server(options?: {
   mainTranscript?: Array<{
@@ -901,7 +901,7 @@ async function startPhase5Server(options?: {
           JSON.stringify({
             type: "auth_result",
             success: true,
-            userId: "user_flynn",
+            userId: "user_example",
             replayCount: mainTranscript.length,
             sessionKeys: [
               MAIN_SESSION_KEY,
@@ -920,7 +920,7 @@ async function startPhase5Server(options?: {
         socket.send(
           JSON.stringify({
             type: "session_info",
-            userId: "user_flynn",
+            userId: "user_example",
             isAdmin: false,
             sessionKeys: [
               MAIN_SESSION_KEY,
@@ -1123,12 +1123,12 @@ async function startPhase5Server(options?: {
 
 function makeSession(port: number) {
   return {
-    claimedName: "Flynn Browser",
+    claimedName: "Example Browser",
     deviceId: "browser-device-1",
     isAdmin: false,
     serverUrl: `ws://127.0.0.1:${port}/ws`,
     token: "jwt-phase5-token",
-    userId: "user_flynn"
+    userId: "user_example"
   };
 }
 

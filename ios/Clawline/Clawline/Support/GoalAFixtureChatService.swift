@@ -3,7 +3,7 @@
 //  Clawline
 //
 //  Cycle-3 Goal A, DEBUG-only sim verification hook (orchestrator direction,
-//  2026-08-07): no live gateway is reachable on eezo, so this drives the
+//  2026-08-07): no live gateway is reachable on the development host, so this drives the
 //  REAL app (not a Swift Testing fixture, not an Xcode-canvas preview) with
 //  message data shaped exactly like the real wire (same Message/
 //  MessageProvenance shapes MessageKindClassifierTests validates against),
@@ -19,7 +19,7 @@
 import Foundation
 
 final class GoalAFixtureChatService: ChatServicing {
-    static let sessionKey = "agent:main:clawline:mike:main s_goalA_fixture"
+    static let sessionKey = "agent:main:clawline:example-user:main s_goalA_fixture"
 
     // Required by ChatServicing but NOT how messages actually reach the UI:
     // ChatViewModel never subscribes to this stream (grep confirms zero call
@@ -258,7 +258,7 @@ final class GoalAFixtureChatService: ChatServicing {
         guard await wait() else { return }
 
         serviceEventsContinuation.yield(.sessionInfo(SessionInfo(
-            userId: "mike",
+            userId: "example-user",
             isAdmin: true,
             dmScope: nil,
             sessionKeys: [Self.sessionKey]
@@ -276,12 +276,12 @@ final class GoalAFixtureChatService: ChatServicing {
         ))
         guard await wait() else { return }
         send(fixtureMessage(
-            role: .user, sender: "agent:coder:gibson",
+            role: .user, sender: "agent:coder:host-a",
             content: "Report: marker dividers, segment-anchor, and the agent-compact seam are wired end-to-end. Screenshots attached to the verification artifact."
         ))
         guard await wait() else { return }
         send(fixtureMessage(
-            role: .user, sender: "user:mike",
+            role: .user, sender: "user:example-user",
             content: "Review the direct wake rendering before release."
         ))
         guard await wait() else { return }

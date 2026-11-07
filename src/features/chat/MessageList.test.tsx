@@ -43,7 +43,7 @@ const RICH_MESSAGE: ChatMessageRecord = {
   ].join("\n"),
   timestamp: 1_764_201_200_000,
   streaming: false,
-  sessionKey: "agent:main:clawline:flynn:main",
+  sessionKey: "agent:main:clawline:example-user:main",
   attachments: [],
   delivery: "server",
   sender: "Assistant"
@@ -55,7 +55,7 @@ const ATTACHMENT_MESSAGE: ChatMessageRecord = {
   content: "Attachment surface",
   timestamp: 1_764_201_200_100,
   streaming: false,
-  sessionKey: "agent:main:clawline:flynn:main",
+  sessionKey: "agent:main:clawline:example-user:main",
   attachments: [
     {
       type: "image",
@@ -105,7 +105,7 @@ const LINK_MESSAGE: ChatMessageRecord = {
   ].join("\n"),
   timestamp: 1_764_201_200_200,
   streaming: false,
-  sessionKey: "agent:main:clawline:flynn:main",
+  sessionKey: "agent:main:clawline:example-user:main",
   attachments: [],
   delivery: "server",
   sender: "Assistant"
@@ -118,7 +118,7 @@ function makeMessage(index: number): ChatMessageRecord {
     content: `Message ${index} ${"detail ".repeat(24)}`,
     timestamp: 1_764_201_300_000 + index,
     streaming: false,
-    sessionKey: "agent:main:clawline:flynn:main",
+    sessionKey: "agent:main:clawline:example-user:main",
     attachments: [],
     delivery: "server",
     sender: index % 3 === 0 ? undefined : "Assistant"
@@ -348,7 +348,7 @@ describe("MessageList rich rendering", () => {
         content: "Fresh reply",
         timestamp: new Date("2026-04-02T17:58:00.000Z").getTime(),
         streaming: false,
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         attachments: [],
         delivery: "server",
         sender: "Assistant"
@@ -359,7 +359,7 @@ describe("MessageList rich rendering", () => {
         content: "From yesterday",
         timestamp: new Date("2026-04-01T17:12:00.000Z").getTime(),
         streaming: false,
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         attachments: [],
         delivery: "server",
         sender: "Assistant"
@@ -386,7 +386,7 @@ describe("MessageList rich rendering", () => {
         content: "Absolutely yes",
         timestamp: 1_764_201_200_025,
         streaming: false,
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         attachments: [],
         delivery: "server",
         sender: "Assistant"
@@ -397,7 +397,7 @@ describe("MessageList rich rendering", () => {
         content: "Found a better route through the market if you still want plants later.",
         timestamp: 1_764_201_200_030,
         streaming: false,
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         attachments: [],
         delivery: "server",
         sender: "Assistant"
@@ -409,7 +409,7 @@ describe("MessageList rich rendering", () => {
           "This should settle into the long-form body treatment because it crosses the medium threshold and reads more like a full thought than a quick exchange.",
         timestamp: 1_764_201_200_035,
         streaming: false,
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         attachments: [],
         delivery: "server",
         sender: "Assistant"
@@ -426,7 +426,7 @@ describe("MessageList rich rendering", () => {
         ].join("\n"),
         timestamp: 1_764_201_200_040,
         streaming: false,
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         attachments: [],
         delivery: "server",
         sender: "Assistant"
@@ -448,7 +448,7 @@ describe("MessageList rich rendering", () => {
         content: "On it.",
         timestamp: 1_764_201_200_050,
         streaming: false,
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         attachments: [],
         delivery: "server"
       }
@@ -477,7 +477,7 @@ describe("MessageList rich rendering", () => {
         content: "",
         timestamp: 1_764_201_200_051,
         streaming: false,
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         attachments: [
           {
             type: "image",
@@ -494,7 +494,7 @@ describe("MessageList rich rendering", () => {
         content: ["```ts", "console.log('hi');", "```"].join("\n"),
         timestamp: 1_764_201_200_052,
         streaming: false,
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         attachments: [],
         delivery: "server",
         sender: "Assistant"
@@ -505,7 +505,7 @@ describe("MessageList rich rendering", () => {
         content: "🌿✨",
         timestamp: 1_764_201_200_053,
         streaming: false,
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         attachments: [],
         delivery: "server"
       },
@@ -515,7 +515,7 @@ describe("MessageList rich rendering", () => {
         content: ["Before", "", "```ts", "console.log('hi');", "```"].join("\n"),
         timestamp: 1_764_201_200_054,
         streaming: false,
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         attachments: [],
         delivery: "server",
         sender: "Assistant"
@@ -551,7 +551,7 @@ describe("MessageList rich rendering", () => {
         content: "Let me think through that.",
         timestamp: 1_764_201_200_055,
         streaming: false,
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         attachments: [],
         delivery: "server",
         sender: "Assistant"
@@ -562,7 +562,7 @@ describe("MessageList rich rendering", () => {
         content: "Working on it",
         timestamp: 1_764_201_200_056,
         streaming: true,
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         attachments: [],
         delivery: "server",
         sender: "Assistant"
@@ -609,7 +609,7 @@ describe("MessageList rich rendering", () => {
     });
     chatStore.applySessionInfo({
       type: "session_info",
-      sessionKeys: ["agent:main:clawline:flynn:main"]
+      sessionKeys: ["agent:main:clawline:example-user:main"]
     });
 
     chatStore.enqueueOptimisticMessage({
@@ -617,7 +617,7 @@ describe("MessageList rich rendering", () => {
       content: "Retry me",
       deviceId: "browser-device-1",
       id: "c_failed",
-      sessionKey: "agent:main:clawline:flynn:main",
+      sessionKey: "agent:main:clawline:example-user:main",
       timestamp: 1_764_201_200_070,
       wireAttachments: []
     });
@@ -628,7 +628,7 @@ describe("MessageList rich rendering", () => {
         <ChatDomainStoreProvider value={chatStore}>
           <TransportMachineProvider value={transportStore}>
             <MessageList
-              messages={chatStore.getState().messagesBySessionKey["agent:main:clawline:flynn:main"]}
+              messages={chatStore.getState().messagesBySessionKey["agent:main:clawline:example-user:main"]}
             />
           </TransportMachineProvider>
         </ChatDomainStoreProvider>
@@ -642,10 +642,10 @@ describe("MessageList rich rendering", () => {
       attachments: [],
       content: "Retry me",
       id: "c_failed",
-      sessionKey: "agent:main:clawline:flynn:main"
+      sessionKey: "agent:main:clawline:example-user:main"
     });
     expect(
-      chatStore.getState().messagesBySessionKey["agent:main:clawline:flynn:main"][0].delivery
+      chatStore.getState().messagesBySessionKey["agent:main:clawline:example-user:main"][0].delivery
     ).toBe("pending");
   });
 
@@ -684,7 +684,7 @@ describe("MessageList rich rendering", () => {
     });
     chatStore.applySessionInfo({
       type: "session_info",
-      sessionKeys: ["agent:main:clawline:flynn:main"]
+      sessionKeys: ["agent:main:clawline:example-user:main"]
     });
 
     chatStore.enqueueOptimisticMessage({
@@ -692,7 +692,7 @@ describe("MessageList rich rendering", () => {
       content: "Do not retry me",
       deviceId: "browser-device-1",
       id: "c_failed_unprovisioned",
-      sessionKey: "agent:main:clawline:flynn:side",
+      sessionKey: "agent:main:clawline:example-user:side",
       timestamp: 1_764_201_200_075,
       wireAttachments: []
     });
@@ -703,7 +703,7 @@ describe("MessageList rich rendering", () => {
         <ChatDomainStoreProvider value={chatStore}>
           <TransportMachineProvider value={transportStore}>
             <MessageList
-              messages={chatStore.getState().messagesBySessionKey["agent:main:clawline:flynn:side"]}
+              messages={chatStore.getState().messagesBySessionKey["agent:main:clawline:example-user:side"]}
             />
           </TransportMachineProvider>
         </ChatDomainStoreProvider>
@@ -715,7 +715,7 @@ describe("MessageList rich rendering", () => {
     expect(retryNow).not.toHaveBeenCalled();
     expect(sendMessage).not.toHaveBeenCalled();
     expect(
-      chatStore.getState().messagesBySessionKey["agent:main:clawline:flynn:side"][0].delivery
+      chatStore.getState().messagesBySessionKey["agent:main:clawline:example-user:side"][0].delivery
     ).toBe("failed");
   });
 
@@ -754,7 +754,7 @@ describe("MessageList rich rendering", () => {
     });
     chatStore.applySessionInfo({
       type: "session_info",
-      sessionKeys: ["agent:main:clawline:flynn:main"]
+      sessionKeys: ["agent:main:clawline:example-user:main"]
     });
 
     chatStore.enqueueOptimisticMessage({
@@ -762,7 +762,7 @@ describe("MessageList rich rendering", () => {
       content: "Retry me later",
       deviceId: "browser-device-1",
       id: "c_failed_recovering",
-      sessionKey: "agent:main:clawline:flynn:main",
+      sessionKey: "agent:main:clawline:example-user:main",
       timestamp: 1_764_201_200_080,
       wireAttachments: []
     });
@@ -773,7 +773,7 @@ describe("MessageList rich rendering", () => {
         <ChatDomainStoreProvider value={chatStore}>
           <TransportMachineProvider value={transportStore}>
             <MessageList
-              messages={chatStore.getState().messagesBySessionKey["agent:main:clawline:flynn:main"]}
+              messages={chatStore.getState().messagesBySessionKey["agent:main:clawline:example-user:main"]}
             />
           </TransportMachineProvider>
         </ChatDomainStoreProvider>
@@ -785,7 +785,7 @@ describe("MessageList rich rendering", () => {
     expect(retryNow).toHaveBeenCalledTimes(1);
     expect(sendMessage).not.toHaveBeenCalled();
     expect(
-      chatStore.getState().messagesBySessionKey["agent:main:clawline:flynn:main"][0].delivery
+      chatStore.getState().messagesBySessionKey["agent:main:clawline:example-user:main"][0].delivery
     ).toBe("failed");
   });
 
@@ -828,7 +828,7 @@ describe("MessageList rich rendering", () => {
       content: "Do not reconnect me",
       deviceId: "browser-device-1",
       id: "c_failed_unprovisioned_recovering",
-      sessionKey: "agent:main:clawline:flynn:side",
+      sessionKey: "agent:main:clawline:example-user:side",
       timestamp: 1_764_201_200_085,
       wireAttachments: []
     });
@@ -839,7 +839,7 @@ describe("MessageList rich rendering", () => {
         <ChatDomainStoreProvider value={chatStore}>
           <TransportMachineProvider value={transportStore}>
             <MessageList
-              messages={chatStore.getState().messagesBySessionKey["agent:main:clawline:flynn:side"]}
+              messages={chatStore.getState().messagesBySessionKey["agent:main:clawline:example-user:side"]}
             />
           </TransportMachineProvider>
         </ChatDomainStoreProvider>
@@ -851,7 +851,7 @@ describe("MessageList rich rendering", () => {
     expect(retryNow).not.toHaveBeenCalled();
     expect(sendMessage).not.toHaveBeenCalled();
     expect(
-      chatStore.getState().messagesBySessionKey["agent:main:clawline:flynn:side"][0].delivery
+      chatStore.getState().messagesBySessionKey["agent:main:clawline:example-user:side"][0].delivery
     ).toBe("failed");
   });
 
@@ -863,7 +863,7 @@ describe("MessageList rich rendering", () => {
         content: "Want tea?",
         timestamp: 1_764_201_200_060,
         streaming: false,
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         attachments: [],
         delivery: "server",
         sender: "Assistant"
@@ -874,7 +874,7 @@ describe("MessageList rich rendering", () => {
         content: "Yes please!",
         timestamp: 1_764_201_200_061,
         streaming: false,
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         attachments: [],
         delivery: "server"
       },
@@ -885,7 +885,7 @@ describe("MessageList rich rendering", () => {
           "This longer bubble should break onto its own row so the flow layout keeps the reading rhythm clear instead of trying to squeeze everything into one horizontal strip.",
         timestamp: 1_764_201_200_062,
         streaming: false,
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         attachments: [],
         delivery: "server",
         sender: "Assistant"
@@ -923,7 +923,7 @@ describe("MessageList rich rendering", () => {
         content: "Pulled the latest notes this morning.",
         timestamp: 1_764_201_200_063,
         streaming: false,
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         attachments: [],
         delivery: "server"
       },
@@ -933,7 +933,7 @@ describe("MessageList rich rendering", () => {
         content: "Sent the draft reply to Chris.",
         timestamp: 1_764_201_200_064,
         streaming: false,
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         attachments: [],
         delivery: "server"
       },
@@ -943,7 +943,7 @@ describe("MessageList rich rendering", () => {
         content: "Queued the follow-up for this afternoon.",
         timestamp: 1_764_201_200_065,
         streaming: false,
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         attachments: [],
         delivery: "server",
         sender: "Assistant"
@@ -982,7 +982,7 @@ describe("MessageList rich rendering", () => {
             "This right-aligned message should wrap naturally while staying fully inside the visible transcript row.",
           timestamp: 1_764_201_200_066,
           streaming: false,
-          sessionKey: "agent:main:clawline:flynn:main",
+          sessionKey: "agent:main:clawline:example-user:main",
           attachments: [],
           delivery: "server"
         }
@@ -1110,7 +1110,7 @@ describe("MessageList rich rendering", () => {
         content: "",
         timestamp: 1_764_201_200_101,
         streaming: false,
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         attachments: [
           {
             type: "asset",
@@ -1216,7 +1216,7 @@ describe("MessageList rich rendering", () => {
         offsetTop: 100_000,
         stickToBottom: false
       },
-      sessionKey: "agent:main:clawline:flynn:main"
+      sessionKey: "agent:main:clawline:example-user:main"
     });
 
     expect(await screen.findByTestId("message-s_bulk_240")).toBeInTheDocument();
@@ -1240,7 +1240,7 @@ describe("MessageList rich rendering", () => {
         offsetTop: Number.MAX_SAFE_INTEGER,
         stickToBottom: true
       },
-      sessionKey: "agent:main:clawline:flynn:main"
+      sessionKey: "agent:main:clawline:example-user:main"
     });
 
     const list = screen.getByTestId("message-list");
@@ -1261,7 +1261,7 @@ describe("MessageList rich rendering", () => {
   it("anchors to the first unread message before unread clears", async () => {
     renderMessageListWithProps({
       messages: Array.from({ length: 240 }, (_, index) => makeMessage(index + 1)),
-      sessionKey: "agent:main:clawline:flynn:main",
+      sessionKey: "agent:main:clawline:example-user:main",
       unreadAnchorMessageId: "s_bulk_200"
     });
 
@@ -1310,7 +1310,7 @@ describe("MessageList rich rendering", () => {
               <MessageList
                 messages={messages}
                 onUnreadAnchorConsumed={onUnreadAnchorConsumed}
-                sessionKey="agent:main:clawline:flynn:main"
+                sessionKey="agent:main:clawline:example-user:main"
                 unreadAnchorMessageId={null}
               />
             </TransportMachineProvider>
@@ -1327,7 +1327,7 @@ describe("MessageList rich rendering", () => {
               <MessageList
                 messages={messages}
                 onUnreadAnchorConsumed={onUnreadAnchorConsumed}
-                sessionKey="agent:main:clawline:flynn:main"
+                sessionKey="agent:main:clawline:example-user:main"
                 unreadAnchorMessageId="s_bulk_200"
               />
             </TransportMachineProvider>
@@ -1343,7 +1343,7 @@ describe("MessageList rich rendering", () => {
   it("shows a jump-to-latest affordance when scrolled away from bottom", async () => {
     renderMessageListWithProps({
       messages: Array.from({ length: 240 }, (_, index) => makeMessage(index + 1)),
-      sessionKey: "agent:main:clawline:flynn:main"
+      sessionKey: "agent:main:clawline:example-user:main"
     });
 
     const list = screen.getByTestId("message-list");
@@ -1357,7 +1357,7 @@ describe("MessageList rich rendering", () => {
   it("keeps short transcripts at bottom without overriding native overscroll", async () => {
     renderMessageListWithProps({
       messages: [makeMessage(1), makeMessage(2)],
-      sessionKey: "agent:main:clawline:flynn:main"
+      sessionKey: "agent:main:clawline:example-user:main"
     });
 
     const list = screen.getByTestId("message-list");
@@ -1373,7 +1373,7 @@ describe("MessageList rich rendering", () => {
   it("keeps bottom overscroll native without showing the jump affordance", async () => {
     renderMessageListWithProps({
       messages: Array.from({ length: 240 }, (_, index) => makeMessage(index + 1)),
-      sessionKey: "agent:main:clawline:flynn:main"
+      sessionKey: "agent:main:clawline:example-user:main"
     });
 
     const list = screen.getByTestId("message-list");
@@ -1389,9 +1389,9 @@ describe("MessageList rich rendering", () => {
   it("shows the typing indicator from in-flight session status", async () => {
     renderMessageListWithProps({
       messages: [],
-      sessionKey: "agent:main:clawline:flynn:main",
+      sessionKey: "agent:main:clawline:example-user:main",
       sessionStatus: {
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         run: {
           state: "running"
         },
@@ -1409,9 +1409,9 @@ describe("MessageList rich rendering", () => {
     renderMessageListWithProps({
       messages: [makeMessage(1)],
       onCancelCurrentPrompt,
-      sessionKey: "agent:main:clawline:flynn:main",
+      sessionKey: "agent:main:clawline:example-user:main",
       sessionStatus: {
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         run: {
           state: "running"
         },
@@ -1426,7 +1426,7 @@ describe("MessageList rich rendering", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-    expect(onCancelCurrentPrompt).toHaveBeenCalledWith("agent:main:clawline:flynn:main");
+    expect(onCancelCurrentPrompt).toHaveBeenCalledWith("agent:main:clawline:example-user:main");
   });
 
   it("opens typing cancellation with Cmd-period and dismisses with Escape", async () => {
@@ -1434,9 +1434,9 @@ describe("MessageList rich rendering", () => {
     renderMessageListWithProps({
       messages: [makeMessage(1)],
       onCancelCurrentPrompt,
-      sessionKey: "agent:main:clawline:flynn:main",
+      sessionKey: "agent:main:clawline:example-user:main",
       sessionStatus: {
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         run: {
           state: "queued"
         },
@@ -1457,7 +1457,7 @@ describe("MessageList rich rendering", () => {
 
     screen.getByRole("button", { name: "Assistant is typing. Cancel current prompt" }).focus();
     fireEvent.keyDown(window, { key: "Enter" });
-    expect(onCancelCurrentPrompt).toHaveBeenCalledWith("agent:main:clawline:flynn:main");
+    expect(onCancelCurrentPrompt).toHaveBeenCalledWith("agent:main:clawline:example-user:main");
   });
 
   it("renders interactive session footer controls from session status", async () => {
@@ -1465,9 +1465,9 @@ describe("MessageList rich rendering", () => {
     renderMessageListWithProps({
       messages: [makeMessage(1)],
       onSessionControlSelected,
-      sessionKey: "agent:main:clawline:flynn:main",
+      sessionKey: "agent:main:clawline:example-user:main",
       sessionStatus: {
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         display: {
           model: "gpt-5.5",
           thinkingLevel: "medium",
@@ -1506,7 +1506,7 @@ describe("MessageList rich rendering", () => {
     });
 
     expect(onSessionControlSelected).toHaveBeenCalledWith(
-      "agent:main:clawline:flynn:main",
+      "agent:main:clawline:example-user:main",
       "set_model",
       "openai/gpt-5.4",
       undefined
@@ -1516,9 +1516,9 @@ describe("MessageList rich rendering", () => {
   it("renders read-only fast mode status when mutation is unsupported", async () => {
     renderMessageListWithProps({
       messages: [makeMessage(1)],
-      sessionKey: "agent:main:clawline:flynn:main",
+      sessionKey: "agent:main:clawline:example-user:main",
       sessionStatus: {
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         display: {
           fastMode: false
         },
@@ -1557,9 +1557,9 @@ describe("MessageList rich rendering", () => {
           models: [
             {
               id: "qwen3.6-35b-a3b",
-              provider: "gibson",
-              ref: "gibson/qwen3.6-35b-a3b",
-              name: "Qwen 3.6 35B-A3B Q4_K_M (gibson)",
+              provider: "example-provider",
+              ref: "example-provider/qwen3.6-35b-a3b",
+              name: "Qwen 3.6 35B-A3B Q4_K_M (example-provider)",
               alias: "qwen"
             }
           ]
@@ -1568,8 +1568,8 @@ describe("MessageList rich rendering", () => {
     });
 
     const footer = await screen.findByTestId("session-status-footer");
-    expect(footer).toHaveAccessibleName("Qwen 3.6 35B-A3B Q4_K_M (gibson) · Thinking high · Fast off");
-    expect(screen.getByLabelText("Qwen 3.6 35B-A3B Q4_K_M (gibson)")).toBeInTheDocument();
+    expect(footer).toHaveAccessibleName("Qwen 3.6 35B-A3B Q4_K_M (example-provider) · Thinking high · Fast off");
+    expect(screen.getByLabelText("Qwen 3.6 35B-A3B Q4_K_M (example-provider)")).toBeInTheDocument();
     expect(screen.queryByLabelText("qwen3.6-35b-a3b")).not.toBeInTheDocument();
   });
 
@@ -1578,9 +1578,9 @@ describe("MessageList rich rendering", () => {
     renderMessageListWithProps({
       messages: [makeMessage(1)],
       onSessionControlSelected,
-      sessionKey: "agent:main:clawline:flynn:main",
+      sessionKey: "agent:main:clawline:example-user:main",
       sessionStatus: {
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         display: {
           model: "gpt-5.5",
           thinkingLevel: "medium",
@@ -1624,7 +1624,7 @@ describe("MessageList rich rendering", () => {
       target: { value: "2" }
     });
     expect(onSessionControlSelected).toHaveBeenCalledWith(
-      "agent:main:clawline:flynn:main",
+      "agent:main:clawline:example-user:main",
       "set_thinking",
       "xhigh",
       undefined
@@ -1642,9 +1642,9 @@ describe("MessageList rich rendering", () => {
   it("renders sanitized auth mode as the right-most footer item", async () => {
     renderMessageListWithProps({
       messages: [makeMessage(1)],
-      sessionKey: "agent:main:clawline:flynn:main",
+      sessionKey: "agent:main:clawline:example-user:main",
       sessionStatus: {
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         display: {
           model: "gpt-5.5",
           thinkingLevel: "medium",
@@ -1670,9 +1670,9 @@ describe("MessageList rich rendering", () => {
   it("renders OAuth auth mode with the theme green footer color", async () => {
     renderMessageListWithProps({
       messages: [makeMessage(1)],
-      sessionKey: "agent:main:clawline:flynn:main",
+      sessionKey: "agent:main:clawline:example-user:main",
       sessionStatus: {
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         display: {
           model: "gpt-5.5",
           thinkingLevel: "medium",
@@ -1698,9 +1698,9 @@ describe("MessageList rich rendering", () => {
   it("hides unknown auth mode in the footer", async () => {
     renderMessageListWithProps({
       messages: [makeMessage(1)],
-      sessionKey: "agent:main:clawline:flynn:main",
+      sessionKey: "agent:main:clawline:example-user:main",
       sessionStatus: {
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         display: {
           fastMode: false,
           authMode: "unknown"

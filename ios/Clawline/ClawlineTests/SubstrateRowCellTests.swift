@@ -11,7 +11,7 @@
 //  UI-level
 //  verification of the full collection view against a LIVE connected
 //  session was not reachable in this environment (no gateway credentials
-//  configured on eezo -- the same "Loading chats..." wall Goal B's step-1
+//  configured on the development host -- the same "Loading chats..." wall Goal B's step-1
 //  smoke hit; flagged, not silently worked around).
 //
 
@@ -34,7 +34,7 @@ struct SubstrateRowCellTests {
             streaming: false,
             attachments: [],
             deviceId: nil,
-            sessionKey: "agent:main:clawline:mike:main s_test",
+            sessionKey: "agent:main:clawline:example-user:main s_test",
             sender: sender
         )
     }

@@ -5,7 +5,7 @@ test("pair -> auth -> send -> receive -> reload -> transcript still usable", asy
   page,
 }) => {
   const port = 18_801 + Math.floor(Math.random() * 1_000);
-  const sessionKey = "agent:main:clawline:flynn:main";
+  const sessionKey = "agent:main:clawline:example-user:main";
   const transcript = [
     {
       type: "message",
@@ -50,7 +50,7 @@ test("pair -> auth -> send -> receive -> reload -> transcript still usable", asy
             type: "pair_result",
             success: true,
             token: "jwt-test-token",
-            userId: "user_flynn",
+            userId: "user_example",
           }),
         );
         return;
@@ -62,7 +62,7 @@ test("pair -> auth -> send -> receive -> reload -> transcript still usable", asy
           JSON.stringify({
             type: "auth_result",
             success: true,
-            userId: "user_flynn",
+            userId: "user_example",
             sessionId: "sess_1",
             isAdmin: false,
             replayCount: transcript.length,
@@ -74,7 +74,7 @@ test("pair -> auth -> send -> receive -> reload -> transcript still usable", asy
         socket.send(
           JSON.stringify({
             type: "session_info",
-            userId: "user_flynn",
+            userId: "user_example",
             isAdmin: false,
             sessionKeys: [sessionKey],
           }),
@@ -146,7 +146,7 @@ test("pair -> auth -> send -> receive -> reload -> transcript still usable", asy
 
   try {
     await page.goto("/pair");
-    await page.getByLabel("Name").fill("Flynn Browser");
+    await page.getByLabel("Name").fill("Example Browser");
     await page.getByLabel("Provider address").fill(`ws://127.0.0.1:${port}/ws`);
     await page.getByRole("button", { name: "Pair browser" }).click();
 

@@ -27,20 +27,20 @@ struct AgentCompactCellTests {
             streaming: false,
             attachments: [],
             deviceId: nil,
-            sessionKey: "agent:main:clawline:mike:main s_test",
+            sessionKey: "agent:main:clawline:example-user:main s_test",
             sender: "agent:\(handle)"
         )
     }
 
     @Test("a real agent DM classifies as .agent")
     func agentMessageClassifiesAsAgent() {
-        let message = agentMessage(handle: "coder:gibson", content: "Design pass complete.")
+        let message = agentMessage(handle: "coder:host-a", content: "Design pass complete.")
         #expect(message.messageKind == .agent)
     }
 
     @Test("displaySenderLine formats a colon-delimited handle with the middle-dot separator")
     func displaySenderLineFormatsHandle() {
-        #expect(AgentCompactCell.displaySenderLine(forHandle: "coder:gibson") == "coder \u{00B7} gibson")
+        #expect(AgentCompactCell.displaySenderLine(forHandle: "coder:host-a") == "coder \u{00B7} host-a")
         #expect(AgentCompactCell.displaySenderLine(forHandle: "atlas") == "atlas")
     }
 
@@ -51,7 +51,7 @@ struct AgentCompactCellTests {
         contentSizeCategory: UIContentSizeCategory = .large
     ) -> CGFloat {
         AgentCompactCell.measuredHeight(
-            senderLine: "coder \u{00B7} gibson",
+            senderLine: "coder \u{00B7} host-a",
             previewText: previewText,
             rowWidth: width,
             compatibleWith: UITraitCollection(preferredContentSizeCategory: contentSizeCategory)
@@ -130,7 +130,7 @@ struct AgentCompactCellTests {
     @Test("configures sender/preview text and accessibility from a real message")
     @MainActor
     func configuresFromRealMessage() {
-        let message = agentMessage(handle: "coder:gibson", content: "Report: canonical design system read from shared-workspace.")
+        let message = agentMessage(handle: "coder:host-a", content: "Report: canonical design system read from shared-workspace.")
         let displayMessage = message.strippingProvenanceStampForDisplay()
         guard case let .agent(handle)? = message.provenanceOrigin else {
             Issue.record("expected .agent provenance origin")
@@ -143,7 +143,7 @@ struct AgentCompactCellTests {
             isDark: false,
             onTap: {}
         )
-        #expect(cell.accessibilityLabel == "Agent report from coder \u{00B7} gibson. Open full content.")
+        #expect(cell.accessibilityLabel == "Agent report from coder \u{00B7} host-a. Open full content.")
         #expect(cell.contentTextForTesting?.contains("canonical design system") == true)
         #expect(cell.previewLineLimitForTesting == 3)
         #expect(cell.previewLineBreakModeForTesting == .byTruncatingTail)
@@ -154,7 +154,7 @@ struct AgentCompactCellTests {
     func tapInvokesClosure() {
         let cell = AgentCompactCell()
         var tapped = false
-        cell.configure(senderLine: "coder \u{00B7} gibson", previewText: "preview", isDark: false) {
+        cell.configure(senderLine: "coder \u{00B7} host-a", previewText: "preview", isDark: false) {
             tapped = true
         }
         cell.handleTap()
@@ -165,7 +165,7 @@ struct AgentCompactCellTests {
     @MainActor
     func touchDownShowsPressWash() {
         let cell = AgentCompactCell()
-        cell.configure(senderLine: "coder \u{00B7} gibson", previewText: "preview", isDark: false) {}
+        cell.configure(senderLine: "coder \u{00B7} host-a", previewText: "preview", isDark: false) {}
         #expect(cell.isWashVisibleForTesting == false)
         cell.touchesBegan([], with: nil)
         #expect(cell.isWashVisibleForTesting == true)
@@ -177,7 +177,7 @@ struct AgentCompactCellTests {
     @MainActor
     func cancelledTouchHidesPressWash() {
         let cell = AgentCompactCell()
-        cell.configure(senderLine: "coder \u{00B7} gibson", previewText: "preview", isDark: false) {}
+        cell.configure(senderLine: "coder \u{00B7} host-a", previewText: "preview", isDark: false) {}
         cell.touchesBegan([], with: nil)
         #expect(cell.isWashVisibleForTesting == true)
         cell.touchesCancelled([], with: nil)
@@ -189,7 +189,7 @@ struct AgentCompactCellTests {
     func reuseClearsContentAndTap() {
         let cell = AgentCompactCell()
         var tapCount = 0
-        cell.configure(senderLine: "coder \u{00B7} gibson", previewText: "preview", isDark: false) {
+        cell.configure(senderLine: "coder \u{00B7} host-a", previewText: "preview", isDark: false) {
             tapCount += 1
         }
         cell.handleTap()

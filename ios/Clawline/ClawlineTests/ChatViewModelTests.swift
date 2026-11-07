@@ -2419,7 +2419,7 @@ struct ChatViewModelTests {
 
         // A placement-carrying create is likewise refused and not posted.
         let placement = await viewModel.createStream(
-            displayName: "Late Placement", harness: "codex", model: nil, host: "eezo", archetype: nil
+            displayName: "Late Placement", harness: "codex", model: nil, host: "dev-host", archetype: nil
         )
         #expect(placement == .failed(message: "New-chat options are unavailable on this server."))
         #expect(chatService.lastCreatePlacement == nil)
@@ -2514,7 +2514,7 @@ struct ChatViewModelTests {
 
         // A placement-carrying create during reconnect is likewise refused/unposted.
         let placement = await viewModel.createStream(
-            displayName: "Reconnect Placement", harness: "codex", model: nil, host: "eezo", archetype: nil
+            displayName: "Reconnect Placement", harness: "codex", model: nil, host: "dev-host", archetype: nil
         )
         #expect(placement == .failed(message: "New-chat options are unavailable on this server."))
         #expect(chatService.lastCreatePlacement == nil)
@@ -2732,16 +2732,16 @@ struct ChatViewModelTests {
         let stamped = Message(
             id: "m_provenance_stamped",
             role: .user,
-            content: "[from user:mike]\nshort body",
+            content: "[from user:example-user]\nshort body",
             timestamp: Date(timeIntervalSince1970: 1_700_000_000),
             streaming: false,
             attachments: [],
             deviceId: nil,
             sessionKey: personalSessionKey,
-            sender: "user:mike"
+            sender: "user:example-user"
         )
         let stampedText = markdownText(viewModel.presentation(for: stamped, metrics: metrics))
-        #expect(stampedText.contains("[from user:mike]") == false)
+        #expect(stampedText.contains("[from user:example-user]") == false)
         #expect(stampedText.contains("short body"))
 
         // Anti-forgery: a first line that fails the sender cross-check stays
@@ -2755,7 +2755,7 @@ struct ChatViewModelTests {
             attachments: [],
             deviceId: nil,
             sessionKey: personalSessionKey,
-            sender: "user:mike"
+            sender: "user:example-user"
         )
         let forgedText = markdownText(viewModel.presentation(for: forged, metrics: metrics))
         #expect(forgedText.contains("[from agent:notetaker]"))
@@ -2765,7 +2765,7 @@ struct ChatViewModelTests {
         let typed = Message(
             id: "m_provenance_typed",
             role: .user,
-            content: "[from user:mike]\ntyped literal",
+            content: "[from user:example-user]\ntyped literal",
             timestamp: Date(timeIntervalSince1970: 1_700_000_002),
             streaming: false,
             attachments: [],
@@ -2773,7 +2773,7 @@ struct ChatViewModelTests {
             sessionKey: personalSessionKey
         )
         let typedText = markdownText(viewModel.presentation(for: typed, metrics: metrics))
-        #expect(typedText.contains("[from user:mike]"))
+        #expect(typedText.contains("[from user:example-user]"))
     }
 
     @Test("R3 regression: a placement-carrying create reaches the service verbatim — no silent drop")
@@ -2807,7 +2807,7 @@ struct ChatViewModelTests {
             displayName: "Placed",
             harness: "claude",
             model: "sonnet",
-            host: "eezo",
+            host: "dev-host",
             archetype: "default"
         )
         if case .failed(let message) = outcome {
@@ -2816,7 +2816,7 @@ struct ChatViewModelTests {
         let placement = try #require(chatService.lastCreatePlacement)
         #expect(placement.harness == "claude")
         #expect(placement.model == "sonnet")
-        #expect(placement.host == "eezo")
+        #expect(placement.host == "dev-host")
         #expect(placement.archetype == "default")
     }
 
@@ -2853,7 +2853,7 @@ struct ChatViewModelTests {
         }
         #expect(viewModel.isTightbeamServer)
 
-        let rawSubstrateMessage = "cannot route claude-sonnet-5 on Gibson: the claude catalog on Gibson is STALE and must be re-onboarded"
+        let rawSubstrateMessage = "cannot route claude-sonnet-5 on host-a: the claude catalog on host-a is STALE and must be re-onboarded"
         chatService.createStreamError = ProviderChatService.Error.serverError(
             code: "route_refusal",
             message: rawSubstrateMessage
@@ -2863,7 +2863,7 @@ struct ChatViewModelTests {
             displayName: "Placed",
             harness: "claude",
             model: "sonnet",
-            host: "eezo",
+            host: "dev-host",
             archetype: "default"
         )
         guard case .failed(let message) = outcome else {
@@ -2872,7 +2872,7 @@ struct ChatViewModelTests {
         }
         let humaneMessage = try #require(message)
         #expect(!humaneMessage.contains(rawSubstrateMessage), "raw substrate text must never reach the sheet")
-        #expect(!humaneMessage.localizedCaseInsensitiveContains("gibson"), "raw substrate text must never reach the sheet")
+        #expect(!humaneMessage.localizedCaseInsensitiveContains("host-a"), "raw substrate text must never reach the sheet")
         #expect(humaneMessage.localizedCaseInsensitiveContains("refresh"))
     }
 
@@ -2906,19 +2906,19 @@ struct ChatViewModelTests {
         let stamped = Message(
             id: "m_gate_flip",
             role: .user,
-            content: "[from user:mike]\nbody after the stamp",
+            content: "[from user:example-user]\nbody after the stamp",
             timestamp: Date(timeIntervalSince1970: 1_700_000_000),
             streaming: false,
             attachments: [],
             deviceId: nil,
             sessionKey: personalSessionKey,
-            sender: "user:mike"
+            sender: "user:example-user"
         )
 
         // Cold-launch order: cached history renders BEFORE auth completes, so
         // the first presentation is built with the gate off (stamp visible).
         let beforeGate = markdownText(viewModel.presentation(for: stamped, metrics: metrics))
-        #expect(beforeGate.contains("[from user:mike]"))
+        #expect(beforeGate.contains("[from user:example-user]"))
 
         chatService.serverFeatures = ["tightbeam"]
         chatService.emitServiceEvent(.serverFeatures(["tightbeam"]))
@@ -2931,7 +2931,7 @@ struct ChatViewModelTests {
         // The already-rendered message must re-present stripped; a stale
         // cached presentation here is the live cold-launch defect.
         let afterGate = markdownText(viewModel.presentation(for: stamped, metrics: metrics))
-        #expect(afterGate.contains("[from user:mike]") == false)
+        #expect(afterGate.contains("[from user:example-user]") == false)
         #expect(afterGate.contains("body after the stamp"))
     }
 
@@ -4289,7 +4289,7 @@ struct ChatViewModelTests {
             Message(
                 id: "s_callback_1",
                 role: .user,
-                content: #"[Interactive: "Quick Survey"] action=submit - {"name":"Flynn"}"#,
+                content: #"[Interactive: "Quick Survey"] action=submit - {"name":"Example"}"#,
                 timestamp: Date(),
                 streaming: false,
                 attachments: [],

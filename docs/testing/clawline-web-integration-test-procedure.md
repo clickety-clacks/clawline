@@ -1,3 +1,4 @@
+> Host, account, device, and session values in historical evidence are generalized. Set PROVIDER_HOST and DEPLOY_USER for your environment; paths use your own $HOME. The example_test_user account and listed device UUIDs are placeholders; use a dedicated test account and its approved devices for live runs.
 # Clawline Web Integration Test Procedure
 
 Date: 2026-05-07
@@ -5,7 +6,7 @@ Status: executable test procedure and coverage matrix
 
 ## Purpose
 
-Validate Clawline Web as a parity client for the current Clawline iOS behavior and provider protocol. This procedure covers automated Playwright regression, manual browser/device checks where automation is weak, and evidence required before a web build is ready for Flynn verification.
+Validate Clawline Web as a parity client for the current Clawline iOS behavior and provider protocol. This procedure covers automated Playwright regression, manual browser/device checks where automation is weak, and evidence required before a web build is ready for operator verification.
 
 This document is source material only. It does not authorize product-code changes.
 
@@ -13,27 +14,27 @@ This document is source material only. It does not authorize product-code change
 
 Use these sources when updating the suite:
 
-- `/Users/mike/shared-workspace/clawline/architecture.md`
-- `/Users/mike/shared-workspace/clawline/ios-architecture.md`
-- `/Users/mike/shared-workspace/clawline/specs/web-port-recon.md`
-- `/Users/mike/shared-workspace/clawline/specs/web-port-phasing.md`
-- `/Users/mike/shared-workspace/clawline/specs/clawline-replay-and-memory-pressure-invariants.md`
-- `/Users/mike/shared-workspace/clawline/specs/clawline-session-status-control-api.md`
-- `/Users/mike/shared-workspace/clawline/implementation_details/clawline-invariants.md`
-- `/Users/mike/shared-workspace/clawline/implementation_details/chat-information-architecture.md`
-- `/Users/mike/shared-workspace/clawline/implementation_details/multi-stream.md`
-- `/Users/mike/shared-workspace/clawline/implementation_details/connection-lifecycle.md`
-- `/Users/mike/shared-workspace/clawline/implementation_details/connection-state-ui.md`
-- `/Users/mike/shared-workspace/clawline/implementation_details/unread-indicators.md`
-- `/Users/mike/shared-workspace/clawline/implementation_details/scroll-to-bottom-invariants.md`
-- `/Users/mike/shared-workspace/clawline/implementation_details/interactive-html-bubbles.md`
-- `/Users/mike/shared-workspace/clawline/implementation_details/terminal-bubbles.md`
-- `/Users/mike/shared-workspace/clawline/implementation_details/unified-markdown.md`
-- `/Users/mike/src/clawline/ios/Clawline/Clawline/`
-- `/Users/mike/src/clawline/ios/Clawline/ClawlineTests/`
-- `/Users/mike/src/clawline/playwright/tests/`
+- `$HOME/shared-workspace/clawline/architecture.md`
+- `$HOME/shared-workspace/clawline/ios-architecture.md`
+- `$HOME/shared-workspace/clawline/specs/web-port-recon.md`
+- `$HOME/shared-workspace/clawline/specs/web-port-phasing.md`
+- `$HOME/shared-workspace/clawline/specs/clawline-replay-and-memory-pressure-invariants.md`
+- `$HOME/shared-workspace/clawline/specs/clawline-session-status-control-api.md`
+- `$HOME/shared-workspace/clawline/implementation_details/clawline-invariants.md`
+- `$HOME/shared-workspace/clawline/implementation_details/chat-information-architecture.md`
+- `$HOME/shared-workspace/clawline/implementation_details/multi-stream.md`
+- `$HOME/shared-workspace/clawline/implementation_details/connection-lifecycle.md`
+- `$HOME/shared-workspace/clawline/implementation_details/connection-state-ui.md`
+- `$HOME/shared-workspace/clawline/implementation_details/unread-indicators.md`
+- `$HOME/shared-workspace/clawline/implementation_details/scroll-to-bottom-invariants.md`
+- `$HOME/shared-workspace/clawline/implementation_details/interactive-html-bubbles.md`
+- `$HOME/shared-workspace/clawline/implementation_details/terminal-bubbles.md`
+- `$HOME/shared-workspace/clawline/implementation_details/unified-markdown.md`
+- `$HOME/src/clawline/ios/Clawline/Clawline/`
+- `$HOME/src/clawline/ios/Clawline/ClawlineTests/`
+- `$HOME/src/clawline/playwright/tests/`
 
-Current web commands from `/Users/mike/src/clawline/package.json`:
+Current web commands from `$HOME/src/clawline/package.json`:
 
 ```bash
 npm run build
@@ -43,7 +44,7 @@ npm run test:e2e
 
 ## Test Environment
 
-Run from `/Users/mike/src/clawline`.
+Run from `$HOME/src/clawline`.
 
 Required local tools:
 
@@ -279,7 +280,7 @@ Pass gate:
 
 ## Manual Device Procedure
 
-Run these after automated pass and before reporting a deployment as ready for Flynn verification.
+Run these after automated pass and before reporting a deployment as ready for operator verification.
 
 ### iPad Safari
 
@@ -421,11 +422,11 @@ Correction note added 2026-05-07: this run stopped too conservatively. Unrelated
 
 Baseline:
 
-- [x] Canonical repo: `/Users/mike/src/clawline`
+- [x] Canonical repo: `$HOME/src/clawline`
 - [x] Branch: `main`
 - [x] Starting commit: `cd119413781d8d76dc76ddbdc94fdc916845675c`
 - [x] Procedure source read before gates.
-- [x] Clawline invariants read from `/Users/mike/shared-workspace/clawline/implementation_details/clawline-invariants.md`.
+- [x] Clawline invariants read from `$HOME/shared-workspace/clawline/implementation_details/clawline-invariants.md`.
 
 Automated gates:
 
@@ -445,7 +446,7 @@ cd119413781d8d76dc76ddbdc94fdc916845675c
 - [ ] `npm run build` - not executed; stopped after failed sync preflight.
 - [ ] `npm run test` - not executed; stopped after failed sync preflight.
 - [ ] `npm run test:e2e` - not executed; stopped after failed sync preflight.
-- [ ] Deployed TARS smoke/hash check for `http://100.85.66.60:4173/`, `/chat/test`, and `/pair` - not executed; stopped after failed sync preflight.
+- [ ] Deployed provider host smoke/hash check for `http://${PROVIDER_HOST}:4173/`, `/chat/test`, and `/pair` - not executed; stopped after failed sync preflight.
 
 Manual/device gates:
 
@@ -467,7 +468,7 @@ Gaps and notes:
 
 Baseline and scoped sync check:
 
-- [x] Canonical repo: `/Users/mike/src/clawline`
+- [x] Canonical repo: `$HOME/src/clawline`
 - [x] Branch: `main`
 - [x] Commit under test: `bbeecc3171d9afa5ae273cacb3acf42cbdfc6258`
 - [x] Fetch/sync check passed.
@@ -533,8 +534,8 @@ Running 29 tests using 8 workers
 29 passed (15.9s)
 ```
 
-- [x] Deployed TARS smoke/hash check passed for `http://100.85.66.60:4173/`.
-  - Command: `curl -sS -D /tmp/clawline-web-root.headers http://100.85.66.60:4173/ -o /tmp/clawline-web-root.html; rg -o "assets/[A-Za-z0-9._/-]+" /tmp/clawline-web-root.html; shasum -a 256 /tmp/clawline-web-root.html`
+- [x] Deployed provider host smoke/hash check passed for `http://${PROVIDER_HOST}:4173/`.
+  - Command: `curl -sS -D /tmp/clawline-web-root.headers http://${PROVIDER_HOST}:4173/ -o /tmp/clawline-web-root.html; rg -o "assets/[A-Za-z0-9._/-]+" /tmp/clawline-web-root.html; shasum -a 256 /tmp/clawline-web-root.html`
   - Evidence:
 
 ```text
@@ -550,8 +551,8 @@ assets/index-DR6FtkEm.css
 075f20212b2ad0e5ef49c8911cd37dbd120ff11f76d9682d8fba8b4391452763  /tmp/clawline-web-root.html
 ```
 
-- [x] Deployed TARS smoke/hash check passed for `http://100.85.66.60:4173/chat/test`.
-  - Command: `curl -sS -D /tmp/clawline-web-chat-test.headers http://100.85.66.60:4173/chat/test -o /tmp/clawline-web-chat-test.html; rg -o "assets/[A-Za-z0-9._/-]+" /tmp/clawline-web-chat-test.html; shasum -a 256 /tmp/clawline-web-chat-test.html`
+- [x] Deployed provider host smoke/hash check passed for `http://${PROVIDER_HOST}:4173/chat/test`.
+  - Command: `curl -sS -D /tmp/clawline-web-chat-test.headers http://${PROVIDER_HOST}:4173/chat/test -o /tmp/clawline-web-chat-test.html; rg -o "assets/[A-Za-z0-9._/-]+" /tmp/clawline-web-chat-test.html; shasum -a 256 /tmp/clawline-web-chat-test.html`
   - Evidence:
 
 ```text
@@ -567,8 +568,8 @@ assets/index-DR6FtkEm.css
 075f20212b2ad0e5ef49c8911cd37dbd120ff11f76d9682d8fba8b4391452763  /tmp/clawline-web-chat-test.html
 ```
 
-- [x] Deployed TARS smoke/hash check passed for `http://100.85.66.60:4173/pair`.
-  - Command: `curl -sS -D /tmp/clawline-web-pair.headers http://100.85.66.60:4173/pair -o /tmp/clawline-web-pair.html; rg -o "assets/[A-Za-z0-9._/-]+" /tmp/clawline-web-pair.html; shasum -a 256 /tmp/clawline-web-pair.html`
+- [x] Deployed provider host smoke/hash check passed for `http://${PROVIDER_HOST}:4173/pair`.
+  - Command: `curl -sS -D /tmp/clawline-web-pair.headers http://${PROVIDER_HOST}:4173/pair -o /tmp/clawline-web-pair.html; rg -o "assets/[A-Za-z0-9._/-]+" /tmp/clawline-web-pair.html; shasum -a 256 /tmp/clawline-web-pair.html`
   - Evidence:
 
 ```text
@@ -619,14 +620,14 @@ Gaps and notes:
 
 Scope:
 
-- Canonical repo: `/Users/mike/src/clawline`
+- Canonical repo: `$HOME/src/clawline`
 - Branch: `main`
 - Commit under test: `d679721a9fd79444e784fd22a94351061b41954d`
-- Deployment URL: `http://100.85.66.60:4173`
-- Live provider URL used for desktop pairing attempt: `ws://100.85.66.60:18800/ws`
-- Topology source used: `/Users/mike/shared-workspace/environment/environments.md`
-  - TARS tailnet: `100.85.66.60`
-  - TARS Clawline provider/WS port: `18800`
+- Deployment URL: `http://${PROVIDER_HOST}:4173`
+- Live provider URL used for desktop pairing attempt: `ws://${PROVIDER_HOST}:18800/ws`
+- Topology source used: `$HOME/shared-workspace/environment/environments.md`
+  - provider host tailnet: `${PROVIDER_HOST}`
+  - provider host Clawline provider/WS port: `18800`
   - Web preview port: `4173`
 
 Preflight:
@@ -647,7 +648,7 @@ d679721a9fd79444e784fd22a94351061b41954d
   - Evidence: no output.
 - NOT RUN - Repository-wide cleanup.
   - Reason: not part of web integration scope and would touch unrelated agent state.
-  - Observed unrelated state: `?? .build/DerivedData_ansible_t217_d679721a9f/`
+  - Observed unrelated state: `?? .build/DerivedData_iOS-test-device_t217_d679721a9f/`
 
 Automated baseline gates:
 
@@ -790,9 +791,9 @@ Live/deployed desktop checks:
 
 - PASS - HTTP deployment smoke for `/`, `/chat/test`, and `/pair`.
   - Commands:
-    - `curl -sS -D /tmp/clawline-web-root.headers http://100.85.66.60:4173/ -o /tmp/clawline-web-root.html`
-    - `curl -sS -D /tmp/clawline-web-chat-test.headers http://100.85.66.60:4173/chat/test -o /tmp/clawline-web-chat-test.html`
-    - `curl -sS -D /tmp/clawline-web-pair.headers http://100.85.66.60:4173/pair -o /tmp/clawline-web-pair.html`
+    - `curl -sS -D /tmp/clawline-web-root.headers http://${PROVIDER_HOST}:4173/ -o /tmp/clawline-web-root.html`
+    - `curl -sS -D /tmp/clawline-web-chat-test.headers http://${PROVIDER_HOST}:4173/chat/test -o /tmp/clawline-web-chat-test.html`
+    - `curl -sS -D /tmp/clawline-web-pair.headers http://${PROVIDER_HOST}:4173/pair -o /tmp/clawline-web-pair.html`
   - Evidence:
 
 ```text
@@ -818,7 +819,7 @@ c6a4ebc77e85504995c1bba4e3533a90bc8ed815c3f440ac197f2217cb3d5cdc  /tmp/clawline-
 ```
 
 - PASS - Provider version endpoint reachable.
-  - Command: `curl -sS -D /tmp/clawline-provider-version.headers http://100.85.66.60:18800/version -o /tmp/clawline-provider-version.json`
+  - Command: `curl -sS -D /tmp/clawline-provider-version.headers http://${PROVIDER_HOST}:18800/version -o /tmp/clawline-provider-version.json`
   - Evidence:
 
 ```text
@@ -840,9 +841,9 @@ HTTP/1.1 200 OK
 {
   "browser": "Playwright Chromium",
   "routes": {
-    "/": { "status": 200, "title": "Clawline Web", "url": "http://100.85.66.60:4173/pair" },
-    "/chat/test": { "status": 200, "title": "Clawline Web", "url": "http://100.85.66.60:4173/pair" },
-    "/pair": { "status": 200, "title": "Clawline Web", "url": "http://100.85.66.60:4173/pair" }
+    "/": { "status": 200, "title": "Clawline Web", "url": "http://${PROVIDER_HOST}:4173/pair" },
+    "/chat/test": { "status": 200, "title": "Clawline Web", "url": "http://${PROVIDER_HOST}:4173/pair" },
+    "/pair": { "status": 200, "title": "Clawline Web", "url": "http://${PROVIDER_HOST}:4173/pair" }
   },
   "pairing": {
     "attempted": true,
@@ -903,11 +904,11 @@ Gaps and notes:
 
 Scope:
 
-- Continued from canonical repo: `/Users/mike/src/clawline`
+- Continued from canonical repo: `$HOME/src/clawline`
 - Commit under test: `d85081cdaa495fd472afc4d567b7b951497f4892`
-- Deployed URL: `http://100.85.66.60:4173`
-- Provider URL used by the web client: `ws://100.85.66.60:18800/ws`
-- Approved device ID supplied by Flynn: `9be5a139-4a76-40fc-a9d4-537c28c6e56b`
+- Deployed URL: `http://${PROVIDER_HOST}:4173`
+- Provider URL used by the web client: `ws://${PROVIDER_HOST}:18800/ws`
+- Approved device ID supplied by the operator: `00000000-0000-4000-8000-000000000001`
 - Product code edited: none
 
 Follow-up results:
@@ -921,9 +922,9 @@ Follow-up results:
 
 ```json
 {
-  "approvedDeviceId": "9be5a139-4a76-40fc-a9d4-537c28c6e56b",
-  "baseUrl": "http://100.85.66.60:4173",
-  "providerUrl": "ws://100.85.66.60:18800/ws",
+  "approvedDeviceId": "00000000-0000-4000-8000-000000000001",
+  "baseUrl": "http://${PROVIDER_HOST}:4173",
+  "providerUrl": "ws://${PROVIDER_HOST}:18800/ws",
   "timestamp": "2026-05-08T00-19-49-237Z",
   "pairAuth": {
     "status": "fail",
@@ -948,28 +949,28 @@ Follow-up results:
 
 Diagnosis:
 
-- Approval was not the remaining blocker. It took effect once. The first continuation run reached the authenticated chat screen, and TARS allowlist state showed `tokenDelivered=true` for device `9be5a139-4a76-40fc-a9d4-537c28c6e56b`.
+- Approval was not the remaining blocker. It took effect once. The first continuation run reached the authenticated chat screen, and provider host allowlist state showed `tokenDelivered=true` for device `00000000-0000-4000-8000-000000000001`.
 - The first run failed due an automation issue: the session popover backdrop intercepted the send button click, so no Main send evidence was produced before the ephemeral Playwright context was lost.
 - Retrying with the same approved device ID but no persisted auth token did not redeliver auth. The gateway classified the request as an account switch and returned to pending approval.
-- TARS allowlist evidence:
+- provider host allowlist evidence:
 
 ```json
 {
-  "deviceId": "9be5a139-4a76-40fc-a9d4-537c28c6e56b",
-  "userId": "flynn",
+  "deviceId": "00000000-0000-4000-8000-000000000001",
+  "userId": "example-user",
   "isAdmin": true,
   "tokenDelivered": true,
   "lastSeenAt": 1778199525713
 }
 ```
 
-- TARS pending evidence after retry:
+- provider host pending evidence after retry:
 
 ```json
 {
   "entries": [
     {
-      "deviceId": "9be5a139-4a76-40fc-a9d4-537c28c6e56b",
+      "deviceId": "00000000-0000-4000-8000-000000000001",
       "claimedName": "web comprehensive",
       "deviceInfo": { "platform": "Web", "model": "MacIntel" },
       "requestedAt": 1778199620680
@@ -982,17 +983,17 @@ Diagnosis:
 - Gateway log excerpt:
 
 ```text
-2026-05-07T17:18:45.681-07:00 [plugins] [clawline:http] pair_request_allowlist_entry web comprehensive 2026-05-08t00-05-50-457z (Web/MacIntel) [deviceId: 9be5a139-4a76-40fc-a9d4-537c28c6e56b] userId=flynn isAdmin=true tokenDelivered=undefined lastSeenAt=1778199393855
-2026-05-07T17:20:20.678-07:00 [plugins] [clawline:http] pair_request_allowlist_entry web comprehensive 2026-05-08t00-05-50-457z (Web/MacIntel) [deviceId: 9be5a139-4a76-40fc-a9d4-537c28c6e56b] userId=flynn isAdmin=true tokenDelivered=true lastSeenAt=1778199525713
+2026-05-07T17:18:45.681-07:00 [plugins] [clawline:http] pair_request_allowlist_entry web comprehensive 2026-05-08t00-05-50-457z (Web/MacIntel) [deviceId: 00000000-0000-4000-8000-000000000001] userId=example-user isAdmin=true tokenDelivered=undefined lastSeenAt=1778199393855
+2026-05-07T17:20:20.678-07:00 [plugins] [clawline:http] pair_request_allowlist_entry web comprehensive 2026-05-08t00-05-50-457z (Web/MacIntel) [deviceId: 00000000-0000-4000-8000-000000000001] userId=example-user isAdmin=true tokenDelivered=true lastSeenAt=1778199525713
 2026-05-07T17:20:20.680-07:00 [plugins] [clawline:http] pair_request_account_switch
 ```
 
 - Provider health also degraded during continuation:
-  - Command from eezo: `curl --max-time 3 -sS -D - http://100.85.66.60:18800/version -o -`
+  - Command from development host: `curl --max-time 3 -sS -D - http://${PROVIDER_HOST}:18800/version -o -`
   - Result: timed out after 3002 ms.
-  - Command on TARS: `curl --max-time 3 -sS -D - http://127.0.0.1:18800/version -o -`
+  - Command on provider host: `curl --max-time 3 -sS -D - http://127.0.0.1:18800/version -o -`
   - Result: timed out after 3002 ms.
-  - TARS process evidence: `node` PID `54460` was still listening on `*:18800`, but the `/version` endpoint was not servicing requests.
+  - provider host process evidence: `node` PID `54460` was still listening on `*:18800`, but the `/version` endpoint was not servicing requests.
 
 Notes:
 
@@ -1003,25 +1004,25 @@ Notes:
 
 Scope:
 
-- Continued from canonical repo: `/Users/mike/src/clawline`
+- Continued from canonical repo: `$HOME/src/clawline`
 - Commit under test: `7fbef63f02b1f0c70c4d3e39a1b8a7a4b44828da`
-- Deployed URL: `http://100.85.66.60:4173`
+- Deployed URL: `http://${PROVIDER_HOST}:4173`
 - Deployed assets observed: `assets/index-Q4EOroHn.js`, `assets/index-DR6FtkEm.css`
-- Provider URL used by the web client: `ws://100.85.66.60:18800/ws`
-- Approved device ID: `9be5a139-4a76-40fc-a9d4-537c28c6e56b`
+- Provider URL used by the web client: `ws://${PROVIDER_HOST}:18800/ws`
+- Approved device ID: `00000000-0000-4000-8000-000000000001`
 - Product code edited: none
 - Test automation updated only under `scratch/` to dismiss popovers before send, write Playwright storage state immediately after auth, and reuse that state for authenticated follow-up steps.
 
 Provider health:
 
 - PASS - Deployed web app root responded.
-  - Command: `curl --max-time 5 -sS -D - http://100.85.66.60:4173/ -o /tmp/clawline-web-root.retry.html`
+  - Command: `curl --max-time 5 -sS -D - http://${PROVIDER_HOST}:4173/ -o /tmp/clawline-web-root.retry.html`
   - Evidence: `HTTP/1.1 200 OK`
-- PASS - Provider `/version` responded from eezo.
-  - Command: `curl --max-time 5 -sS -D - http://100.85.66.60:18800/version -o -`
+- PASS - Provider `/version` responded from development host.
+  - Command: `curl --max-time 5 -sS -D - http://${PROVIDER_HOST}:18800/version -o -`
   - Evidence: `HTTP/1.1 200 OK`, body `{"protocolVersion":1}`
-- PASS - Provider `/version` responded locally on TARS.
-  - Command: `ssh mike@tars 'curl --max-time 5 -sS -D - http://127.0.0.1:18800/version -o -'`
+- PASS - Provider `/version` responded locally on provider host.
+  - Command: `ssh ${DEPLOY_USER}@${PROVIDER_HOST} 'curl --max-time 5 -sS -D - http://127.0.0.1:18800/version -o -'`
   - Evidence: `HTTP/1.1 200 OK`, body `{"protocolVersion":1}`
 
 Live browser results:
@@ -1039,9 +1040,9 @@ Live browser results:
   "pairAuth": {
     "status": "pass",
     "details": [
-      "url=http://100.85.66.60:4173/chat/agent:main:clawline:flynn:s_41b510d1",
+      "url=http://${PROVIDER_HOST}:4173/chat/agent:main:clawline:example-user:s_00000001",
       "reusedStorageState=scratch/clawline-web-live-provider-2026-05-08T00-29-24-592Z-storage-state.json",
-      "session={\"claimedName\":\"Web Comprehensive\",\"deviceId\":\"9be5a139-4a76-40fc-a9d4-537c28c6e56b\",\"isAdmin\":true,\"serverUrl\":\"ws://100.85.66.60:18800/ws\",\"userId\":\"flynn\",\"tokenPresent\":true}"
+      "session={\"claimedName\":\"Web Comprehensive\",\"deviceId\":\"00000000-0000-4000-8000-000000000001\",\"isAdmin\":true,\"serverUrl\":\"ws://${PROVIDER_HOST}:18800/ws\",\"userId\":\"example-user\",\"tokenPresent\":true}"
     ]
   }
 }
@@ -1050,8 +1051,8 @@ Live browser results:
 - PASS - Send to Main.
   - Message: `web live main 2026-05-08T00-30-56-012Z`
   - Screenshot: `scratch/clawline-web-live-provider-2026-05-08T00-30-56-012Z-main-send.png`
-  - Browser evidence: `visibleCount=1`, URL `http://100.85.66.60:4173/chat/agent:main:clawline:flynn:s_41b510d1`
-  - TARS gateway log evidence:
+  - Browser evidence: `visibleCount=1`, URL `http://${PROVIDER_HOST}:4173/chat/agent:main:clawline:example-user:s_00000001`
+  - provider host gateway log evidence:
 
 ```text
 2026-05-07T17:31:17.580-07:00 [plugins] [clawline:http] ws_message_received
@@ -1071,8 +1072,8 @@ Live browser results:
   "sideSend": {
     "status": "not-run",
     "details": [
-      "selected={\"sessionKey\":\"agent:main:clawline:flynn:s_905e4dd1\",\"text\":\"created stream\"}",
-      "attempted=[{\"text\":\"Harness\",\"sessionKey\":\"agent:main:clawline:flynn:s_4a2b448d\",\"sendEnabled\":false},{\"text\":\"Rebase\",\"sessionKey\":\"agent:main:clawline:flynn:s_105e446e\",\"sendEnabled\":false},{\"text\":\"Clawline Web\",\"sessionKey\":\"agent:main:clawline:flynn:s_fb998034\",\"sendEnabled\":false},{\"text\":\"Personal\",\"sessionKey\":\"agent:main:clawline:flynn:main\",\"sendEnabled\":false},{\"text\":\"Global DM1\",\"sessionKey\":\"agent:main:main\",\"sendEnabled\":false}]",
+      "selected={\"sessionKey\":\"agent:main:clawline:example-user:s_00000003\",\"text\":\"created stream\"}",
+      "attempted=[{\"text\":\"Harness\",\"sessionKey\":\"agent:main:clawline:example-user:s_00000004\",\"sendEnabled\":false},{\"text\":\"Rebase\",\"sessionKey\":\"agent:main:clawline:example-user:s_00000005\",\"sendEnabled\":false},{\"text\":\"Clawline Web\",\"sessionKey\":\"agent:main:clawline:example-user:s_00000006\",\"sendEnabled\":false},{\"text\":\"Personal\",\"sessionKey\":\"agent:main:clawline:example-user:main\",\"sendEnabled\":false},{\"text\":\"Global DM1\",\"sessionKey\":\"agent:main:main\",\"sendEnabled\":false}]",
       "Send disabled for selected stream"
     ]
   }
@@ -1083,7 +1084,7 @@ Live browser results:
   - Expected: reloading the Main URL should replay or restore `web live main 2026-05-08T00-30-56-012Z`.
   - Actual: message disappeared after reload.
   - Screenshot: `scratch/clawline-web-live-provider-2026-05-08T00-30-56-012Z-after-reload.png`
-  - Browser evidence: `mainCount=0`, URL `http://100.85.66.60:4173/chat/agent:main:clawline:flynn:s_41b510d1`
+  - Browser evidence: `mainCount=0`, URL `http://${PROVIDER_HOST}:4173/chat/agent:main:clawline:example-user:s_00000001`
   - Gateway replay evidence:
 
 ```text
@@ -1096,7 +1097,7 @@ Live browser results:
 
 - PASS - Second tab independent session/socket.
   - Screenshot: `scratch/clawline-web-live-provider-2026-05-08T00-30-56-012Z-second-tab.png`
-  - Evidence: URL `http://100.85.66.60:4173/chat/agent:main:clawline:flynn:s_41b510d1`, `sessionDevice=9be5a139-4a76-40fc-a9d4-537c28c6e56b`
+  - Evidence: URL `http://${PROVIDER_HOST}:4173/chat/agent:main:clawline:example-user:s_00000001`, `sessionDevice=00000000-0000-4000-8000-000000000001`
 
 - FAIL - Offline/online reconnect and no duplicate after reconnect.
   - Expected: after offline/online, the Main message count should remain stable with no duplicate or disappearance.
@@ -1106,14 +1107,14 @@ Live browser results:
 Additional diagnostics:
 
 - The direct re-pair after the first successful auth still returned `AWAITING APPROVAL` because the provider had already marked the token as delivered for this device. This did not block the continuation because the saved Playwright storage state was reused.
-- TARS allowlist after the retry showed the approved device with `userId=flynn`, `isAdmin=true`, `tokenDelivered=true`, and updated `lastSeenAt`.
-- TARS pending state was repopulated by the direct re-pair attempt for the same device ID:
+- provider host allowlist after the retry showed the approved device with `userId=example-user`, `isAdmin=true`, `tokenDelivered=true`, and updated `lastSeenAt`.
+- provider host pending state was repopulated by the direct re-pair attempt for the same device ID:
 
 ```json
 {
   "entries": [
     {
-      "deviceId": "9be5a139-4a76-40fc-a9d4-537c28c6e56b",
+      "deviceId": "00000000-0000-4000-8000-000000000001",
       "claimedName": "web comprehensive",
       "deviceInfo": { "platform": "Web", "model": "MacIntel" },
       "requestedAt": 1778200126961
@@ -1152,24 +1153,24 @@ Notes:
 
 Scope:
 
-- Flynn primary account/browser-token traffic is stopped for Clawline Web live integration validation.
-- Existing scratch storage-state files produced under `userId=flynn` are treated as contaminated and will not be reused.
+- The operator's primary account/browser-token traffic is stopped for Clawline Web live integration validation.
+- Existing scratch storage-state files produced under `userId=example-user` are treated as contaminated and will not be reused.
 - Live validation is moved to a fresh non-primary device under the dedicated test account path.
 - No launchd/systemd/cron/LaunchAgent/persistence changes were made.
 
 Code/test/deploy evidence before fresh live approval:
 
-- Repo: `/Users/mike/src/clawline`
+- Repo: `$HOME/src/clawline`
 - Commit pushed to `origin/main`: `c92577f429` (`Provision confirmed stream mutations for web sends`)
 - Product change: provider-confirmed stream upserts now add the stream key to `provisionedSessionKeys`, so created/adopted stream rows are immediately send-capable instead of remaining composer-disabled.
-- Local account isolation cleanup: `playwright/tests/phase3-stream-management.spec.ts` now uses `clawline_web_test` session/user identifiers, not Flynn identifiers.
+- Local account isolation cleanup: `playwright/tests/phase3-stream-management.spec.ts` now uses `example_test_user` session/user identifiers, not the operator's account identifiers.
 - Gates:
   - `npm run build` PASS; deployed bundle asset `assets/index-DXwkBTdM.js`.
   - `npm run test` PASS; 23 files, 171 tests.
   - `npm run test:e2e` PASS; 30 tests.
-- TARS deploy command: `rsync -a --delete dist/ mike@tars:'/Users/mike/Library/Application\\ Support/ClawlineWeb/dist/'`
+- provider host deploy command: `rsync -a --delete dist/ ${DEPLOY_USER}@${PROVIDER_HOST}:'$HOME/Library/Application\\ Support/ClawlineWeb/dist/'`
 - Deployed root/hash check:
-  - Command: `curl --max-time 5 -sS -D - http://100.85.66.60:4173/ -o /tmp/clawline-web-root.c92577f.html && rg -o 'assets/[A-Za-z0-9._/-]+' /tmp/clawline-web-root.c92577f.html && shasum -a 256 /tmp/clawline-web-root.c92577f.html dist/index.html dist/assets/index-DXwkBTdM.js dist/assets/index-DR6FtkEm.css`
+  - Command: `curl --max-time 5 -sS -D - http://${PROVIDER_HOST}:4173/ -o /tmp/clawline-web-root.c92577f.html && rg -o 'assets/[A-Za-z0-9._/-]+' /tmp/clawline-web-root.c92577f.html && shasum -a 256 /tmp/clawline-web-root.c92577f.html dist/index.html dist/assets/index-DXwkBTdM.js dist/assets/index-DR6FtkEm.css`
   - Evidence: HTTP 200; assets `assets/index-DXwkBTdM.js`, `assets/index-DR6FtkEm.css`
   - `index.html` SHA-256: `eca0d190936280c29fe4238cab282c8c1aa743b2db373b19408638524dda1f0b`
   - JS SHA-256: `d1c0ed781767d74b29196692bc329a3cf18d66c471b81f4bd8161c9ffaf9c680`
@@ -1178,14 +1179,14 @@ Code/test/deploy evidence before fresh live approval:
 Fresh dedicated live-device attempt:
 
 - Command: `DEVICE_ID=$(uuidgen | tr '[:upper:]' '[:lower:]'); echo "$DEVICE_ID" > scratch/clawline-web-test-device-current.txt; CLAWLINE_DEVICE_ID=$DEVICE_ID CLAWLINE_CLAIMED_NAME='Clawline Web Test Fresh' node scratch/clawline-web-live-provider-continuation.mjs`
-- Fresh device ID: `da49d87f-60a5-4a72-b543-4f1da80200db`
+- Fresh device ID: `00000000-0000-4000-8000-000000000002`
 - Claimed name: `clawline web test fresh`
 - Result: NOT RUN past auth; provider accepted pair request but requires approval.
 - Browser evidence:
 
 ```json
 {
-  "approvedDeviceId": "da49d87f-60a5-4a72-b543-4f1da80200db",
+  "approvedDeviceId": "00000000-0000-4000-8000-000000000002",
   "pairAuth": {
     "status": "fail",
     "details": [
@@ -1196,11 +1197,11 @@ Fresh dedicated live-device attempt:
 }
 ```
 
-- TARS pending evidence:
+- provider host pending evidence:
 
 ```json
 {
-  "deviceId": "da49d87f-60a5-4a72-b543-4f1da80200db",
+  "deviceId": "00000000-0000-4000-8000-000000000002",
   "claimedName": "clawline web test fresh",
   "deviceInfo": { "platform": "Web", "model": "MacIntel" },
   "requestedAt": 1778217578078
@@ -1215,26 +1216,26 @@ Artifacts:
 
 Next supported step:
 
-- Approve fresh device `da49d87f-60a5-4a72-b543-4f1da80200db` for `userId=clawline_web_test` / admin test account, then rerun live pair/auth, Main send, reload persistence, second tab, offline/online reconnect, and side/custom only if the dedicated account receives or can create a provisioned non-primary stream.
+- Approve fresh device `00000000-0000-4000-8000-000000000002` for `userId=example_test_user` / admin test account, then rerun live pair/auth, Main send, reload persistence, second tab, offline/online reconnect, and side/custom only if the dedicated account receives or can create a provisioned non-primary stream.
 
 ## Fresh Dedicated Account Live Validation - 2026-05-07 22:26 PDT
 
 Scope:
 
 - Live validation used only the fresh non-primary Clawline Web test device/account:
-  - `deviceId=da49d87f-60a5-4a72-b543-4f1da80200db`
-  - `userId=clawline_web_test`
+  - `deviceId=00000000-0000-4000-8000-000000000002`
+  - `userId=example_test_user`
   - claimed name `Clawline Web Test Fresh`
-- No Flynn browser token, Flynn storage state, or Flynn account was used for this run.
-- Existing Flynn-derived scratch storage-state files remain treated as contaminated and were not reused.
+- No operator browser token, storage state, or account was used for this run.
+- Existing operator-derived scratch storage-state files remain treated as contaminated and were not reused.
 - No launchd/systemd/cron/LaunchAgent/persistence changes were made.
 
 Commit/deploy under test:
 
-- Repo: `/Users/mike/src/clawline`
+- Repo: `$HOME/src/clawline`
 - Commit: `c92577f42935ab50b39cef43a1e5eee362ad07cc`
 - `origin/main...HEAD`: `0 0`
-- Deployed URL: `http://100.85.66.60:4173`
+- Deployed URL: `http://${PROVIDER_HOST}:4173`
 - Deployed assets:
   - `assets/index-DXwkBTdM.js`
   - `assets/index-DR6FtkEm.css`
@@ -1260,9 +1261,9 @@ Fresh live run command:
 
 ```bash
 CLAWLINE_STORAGE_STATE=scratch/clawline-web-live-provider-2026-05-08T05-21-47-988Z-storage-state.json \
-CLAWLINE_DEVICE_ID=da49d87f-60a5-4a72-b543-4f1da80200db \
+CLAWLINE_DEVICE_ID=00000000-0000-4000-8000-000000000002 \
 CLAWLINE_CLAIMED_NAME='Clawline Web Test Fresh' \
-CLAWLINE_EXPECTED_USER_ID=clawline_web_test \
+CLAWLINE_EXPECTED_USER_ID=example_test_user \
 node scratch/clawline-web-live-provider-continuation.mjs
 ```
 
@@ -1280,24 +1281,24 @@ Fresh live result artifact:
 Fresh live results:
 
 - PASS - Pair/auth.
-  - URL: `http://100.85.66.60:4173/chat/agent:main:clawline:clawline_web_test:main`
+  - URL: `http://${PROVIDER_HOST}:4173/chat/agent:main:clawline:example_test_user:main`
   - Session evidence:
 
 ```json
 {
   "claimedName": "Clawline Web Test Fresh",
-  "deviceId": "da49d87f-60a5-4a72-b543-4f1da80200db",
+  "deviceId": "00000000-0000-4000-8000-000000000002",
   "isAdmin": true,
-  "serverUrl": "ws://100.85.66.60:18800/ws",
-  "userId": "clawline_web_test",
+  "serverUrl": "ws://${PROVIDER_HOST}:18800/ws",
+  "userId": "example_test_user",
   "tokenPresent": true
 }
 ```
 
 - PASS - Main send.
   - Message: `web live main 2026-05-08T05-25-39-920Z`
-  - Browser evidence: `visibleCount=1`, URL `http://100.85.66.60:4173/chat/agent:main:clawline:clawline_web_test:main`
-  - TARS log evidence around the fresh run included:
+  - Browser evidence: `visibleCount=1`, URL `http://${PROVIDER_HOST}:4173/chat/agent:main:clawline:example_test_user:main`
+  - provider host log evidence around the fresh run included:
 
 ```text
 2026-05-07T22:26:16.981-07:00 [plugins] [clawline] processClientMessage_stage: persist_user_message
@@ -1307,14 +1308,14 @@ Fresh live results:
 ```
 
 - PASS - Reload persistence.
-  - Evidence: `mainCount=1`, `sideCount=0`, URL stayed `http://100.85.66.60:4173/chat/agent:main:clawline:clawline_web_test:main`.
+  - Evidence: `mainCount=1`, `sideCount=0`, URL stayed `http://${PROVIDER_HOST}:4173/chat/agent:main:clawline:example_test_user:main`.
 - PASS - Second tab independent session/socket.
-  - Evidence: second tab URL `http://100.85.66.60:4173/chat/agent:main:clawline:clawline_web_test:main`, `sessionDevice=da49d87f-60a5-4a72-b543-4f1da80200db`.
+  - Evidence: second tab URL `http://${PROVIDER_HOST}:4173/chat/agent:main:clawline:example_test_user:main`, `sessionDevice=00000000-0000-4000-8000-000000000002`.
 - PASS - Offline/online reconnect and no duplicate/disappearance.
   - Evidence: `mainMessageCountBefore=1`, `mainMessageCountAfter=1`.
   - The live runner now waits for the specific message to reappear after reconnect instead of taking a fixed early sample.
 - NOT RUN - Side/custom live send.
-  - Reason: under the dedicated `clawline_web_test` account, the live provider exposed only `Personal` and `Global DM`.
+  - Reason: under the dedicated `example_test_user` account, the live provider exposed only `Personal` and `Global DM`.
   - Evidence:
 
 ```json
@@ -1335,7 +1336,7 @@ Fresh live results:
 
 Notes:
 
-- The scratch live runner was guarded so side/custom sends only target session keys containing `:clawline_web_test:` and does not create provider streams during live validation by default.
+- The scratch live runner was guarded so side/custom sends only target session keys containing `:example_test_user:` and does not create provider streams during live validation by default.
 - A diagnostic non-primary run confirmed the provider replay eventually returns the dedicated account messages; an earlier offline failure was a fixed-short-wait sampling issue, not a remaining disappearance once reconnect/replay settled.
 - Comprehensive procedure status is green for supported automated/local/deployed/live desktop checks. Side/custom live send remains explicitly unproven for the dedicated account because the provider did not expose a dedicated side/custom stream without risking primary-account leakage.
 
@@ -1344,19 +1345,19 @@ Notes:
 Scope:
 
 - Continued the side/custom gap under the fresh non-primary test account only:
-  - `deviceId=da49d87f-60a5-4a72-b543-4f1da80200db`
-  - `userId=clawline_web_test`
-- No Flynn account, Flynn storage state, Flynn token, or Flynn/non-test stream was used.
+  - `deviceId=00000000-0000-4000-8000-000000000002`
+  - `userId=example_test_user`
+- No operator account, storage state, token, or non-test stream was used.
 - No launchd/systemd/cron/LaunchAgent/persistence changes were made.
 
 Provider/API findings:
 
 - Direct stream API calls with the dedicated token return `auth_failed: No connected sessions` when no fresh browser WebSocket session is connected.
-- With the fresh `clawline_web_test` browser session connected, `POST /api/streams` safely created test-owned custom streams under the dedicated account namespace.
+- With the fresh `example_test_user` browser session connected, `POST /api/streams` safely created test-owned custom streams under the dedicated account namespace.
 - Created stream used for proof:
-  - `agent:main:clawline:clawline_web_test:s_41b3bdb1`
+  - `agent:main:clawline:example_test_user:s_00000002`
   - Display name: `Web live side 2026-05-08T07-04-18-970Z`
-- Safety guard: the live runner aborted/declined targeting unless the route key contained `:clawline_web_test:`.
+- Safety guard: the live runner aborted/declined targeting unless the route key contained `:example_test_user:`.
 
 Product fix shipped for side reload persistence:
 
@@ -1382,10 +1383,10 @@ Local gates after fix:
   - 30 tests passed.
 - Note: the first full e2e run had one unrelated 25-pixel responsive screenshot mismatch; immediate focused rerun of that test passed, and the subsequent full e2e run passed.
 
-TARS deploy/hash evidence:
+provider host deploy/hash evidence:
 
-- Deploy command: `rsync -a --delete dist/ mike@tars:'/Users/mike/Library/Application\\ Support/ClawlineWeb/dist/'`
-- Root check: `curl --max-time 5 -sS -D - http://100.85.66.60:4173/ -o /tmp/clawline-web-root.86aa173b.html`
+- Deploy command: `rsync -a --delete dist/ ${DEPLOY_USER}@${PROVIDER_HOST}:'$HOME/Library/Application\\ Support/ClawlineWeb/dist/'`
+- Root check: `curl --max-time 5 -sS -D - http://${PROVIDER_HOST}:4173/ -o /tmp/clawline-web-root.86aa173b.html`
 - HTTP evidence: `HTTP/1.1 200 OK`, `Server: Caddy`
 - Deployed assets:
   - `assets/index-C4oNo-t-.js`
@@ -1401,9 +1402,9 @@ Live side/custom proof:
 
 ```bash
 CLAWLINE_STORAGE_STATE=scratch/clawline-web-live-provider-2026-05-08T07-03-25-837Z-storage-state.json \
-CLAWLINE_DEVICE_ID=da49d87f-60a5-4a72-b543-4f1da80200db \
+CLAWLINE_DEVICE_ID=00000000-0000-4000-8000-000000000002 \
 CLAWLINE_CLAIMED_NAME='Clawline Web Test Fresh' \
-CLAWLINE_EXPECTED_USER_ID=clawline_web_test \
+CLAWLINE_EXPECTED_USER_ID=example_test_user \
 CLAWLINE_ALLOW_TEST_STREAM_CREATE=1 \
 node scratch/clawline-web-live-provider-continuation.mjs
 ```
@@ -1415,9 +1416,9 @@ node scratch/clawline-web-live-provider-continuation.mjs
   "sideSend": {
     "status": "pass",
     "details": [
-      "selected={\"sessionKey\":\"agent:main:clawline:clawline_web_test:s_41b3bdb1\",\"text\":\"Web live side 2026-05-08T07-04-18-970Z\",\"createdViaApi\":true}",
+      "selected={\"sessionKey\":\"agent:main:clawline:example_test_user:s_00000002\",\"text\":\"Web live side 2026-05-08T07-04-18-970Z\",\"createdViaApi\":true}",
       "visibleCount=1",
-      "url=http://100.85.66.60:4173/chat/agent:main:clawline:clawline_web_test:s_41b3bdb1"
+      "url=http://${PROVIDER_HOST}:4173/chat/agent:main:clawline:example_test_user:s_00000002"
     ]
   }
 }
@@ -1425,7 +1426,7 @@ node scratch/clawline-web-live-provider-continuation.mjs
 
 - Focused deployed side reload/reconnect proof after `86aa173b016f6ba088417426ac5111ac529aef42`:
   - Storage state: `scratch/clawline-web-live-provider-2026-05-08T07-04-18-970Z-storage-state.json`
-  - URL: `http://100.85.66.60:4173/chat/agent:main:clawline:clawline_web_test:s_41b3bdb1`
+  - URL: `http://${PROVIDER_HOST}:4173/chat/agent:main:clawline:example_test_user:s_00000002`
   - Message: `web live side 2026-05-08T07-04-18-970Z`
   - Result:
 
@@ -1433,11 +1434,11 @@ node scratch/clawline-web-live-provider-continuation.mjs
 {
   "status": "pass",
   "commit": "86aa173b01",
-  "sideKey": "agent:main:clawline:clawline_web_test:s_41b3bdb1",
+  "sideKey": "agent:main:clawline:example_test_user:s_00000002",
   "sideMessage": "web live side 2026-05-08T07-04-18-970Z",
   "session": {
-    "deviceId": "da49d87f-60a5-4a72-b543-4f1da80200db",
-    "userId": "clawline_web_test",
+    "deviceId": "00000000-0000-4000-8000-000000000002",
+    "userId": "example_test_user",
     "isAdmin": true,
     "tokenPresent": true
   },
@@ -1452,7 +1453,7 @@ node scratch/clawline-web-live-provider-continuation.mjs
   - `scratch/clawline-web-side-focused-2026-05-08T07-14-86aa173b-initial.png`
   - `scratch/clawline-web-side-focused-2026-05-08T07-14-86aa173b-after-reload.png`
   - `scratch/clawline-web-side-focused-2026-05-08T07-14-86aa173b-after-reconnect.png`
-- TARS log evidence around the side run included:
+- provider host log evidence around the side run included:
 
 ```text
 2026-05-08T00:04:25.948-07:00 [plugins] [clawline] processClientMessage_stage: persist_user_message
@@ -1465,7 +1466,7 @@ node scratch/clawline-web-live-provider-continuation.mjs
 Status:
 
 - PASS - Dedicated test-account side/custom stream can be provisioned safely via provider API while the test browser session is connected.
-- PASS - Dedicated side/custom send under `clawline_web_test`.
+- PASS - Dedicated side/custom send under `example_test_user`.
 - PASS - Dedicated side/custom reload persistence after deployed web fix.
 - PASS - Dedicated side/custom offline/online reconnect persistence after deployed web fix.
 - Remaining manual gap: real iPhone/iPad Safari checks are still not executed in this automated pass.
@@ -1476,23 +1477,23 @@ Purpose: make the remaining real-device Safari gap executable without reopening 
 
 Current deployed target:
 
-- URL: `http://100.85.66.60:4173/`
-- TARS route checks to use on device: `/`, `/pair`, `/chat/agent:main:clawline:clawline_web_test:main`
+- URL: `http://${PROVIDER_HOST}:4173/`
+- provider host route checks to use on device: `/`, `/pair`, `/chat/agent:main:clawline:example_test_user:main`
 - Deployed assets observed: `assets/index-C4oNo-t-.js`, `assets/index-DR6FtkEm.css`
-- Source checkout observed on eezo: `/Users/mike/src/clawline` at `8d92da26432531a0119cbb0c3b4af29ae518c448` (`origin/main...HEAD = 0 0`)
-- Prior automated/live proof already green under `clawline_web_test`: build, unit, e2e, Main send/reload/reconnect, and dedicated side/custom send/reload/reconnect.
+- Source checkout observed on development host: `$HOME/src/clawline` at `8d92da26432531a0119cbb0c3b4af29ae518c448` (`origin/main...HEAD = 0 0`)
+- Prior automated/live proof already green under `example_test_user`: build, unit, e2e, Main send/reload/reconnect, and dedicated side/custom send/reload/reconnect.
 
 Account/device rule:
 
-- Do not use Flynn primary account/token/storage for these checks.
-- Pair as a dedicated test device/account, preferably `userId=clawline_web_test`.
-- If a new device appears in `pending.json`, approve only that exact test device ID as `clawline_web_test` and record it here.
+- Do not use the operator's primary account/token/storage for these checks.
+- Pair as a dedicated test device/account, preferably `userId=example_test_user`.
+- If a new device appears in `pending.json`, approve only that exact test device ID as `example_test_user` and record it here.
 
 ### iPhone Safari manual checklist
 
-- [ ] Open `http://100.85.66.60:4173/` in Safari on iPhone.
+- [ ] Open `http://${PROVIDER_HOST}:4173/` in Safari on iPhone.
 - [ ] Pair as a fresh non-primary test device.
-- [ ] Confirm the app lands in `clawline_web_test` chat, not Flynn.
+- [ ] Confirm the app lands in `example_test_user` chat, not the operator's account.
 - [ ] Send a Main message with text `iphone safari web smoke <timestamp>`.
 - [ ] Reload Safari page; confirm the message remains visible.
 - [ ] Toggle airplane mode or disconnect/reconnect network; confirm the message remains visible with no duplicate.
@@ -1503,9 +1504,9 @@ Account/device rule:
 
 ### iPad Safari manual checklist
 
-- [ ] Open `http://100.85.66.60:4173/` in Safari on iPad.
+- [ ] Open `http://${PROVIDER_HOST}:4173/` in Safari on iPad.
 - [ ] Pair as a fresh non-primary test device.
-- [ ] Confirm the app lands in `clawline_web_test` chat, not Flynn.
+- [ ] Confirm the app lands in `example_test_user` chat, not the operator's account.
 - [ ] Send a Main message with text `ipad safari web smoke <timestamp>`.
 - [ ] Reload Safari page; confirm the message remains visible.
 - [ ] Rotate iPad; confirm bubbles/composer do not overflow.
@@ -1516,31 +1517,31 @@ Account/device rule:
 
 Pass rule:
 
-- Real-device Safari proof passes only when both iPhone and iPad checklists are completed with screenshots and no Flynn-account traffic.
+- Real-device Safari proof passes only when both iPhone and iPad checklists are completed with screenshots and no traffic from the operator's account.
 - Until then, comprehensive Clawline Web status is: automated/local/deployed/live desktop PASS; real iPhone/iPad Safari manual proof PENDING.
 
 ## 02:00 Readiness Snapshot - 2026-05-08
 
 Purpose: preserve the hourly post-fix state before manual Safari execution.
 
-- Eezo source checkout: `/Users/mike/src/clawline`
+- development host source checkout: `$HOME/src/clawline`
 - Observed HEAD: `2e1db64698398a29b87d368d220c9d7e40b38270`
 - `origin/main...HEAD`: `0 0`
 - Working tree note: no tracked changes; unrelated untracked `.build/DerivedData_*` and docs artifacts were present and not touched.
-- Deployed URL: `http://100.85.66.60:4173/`
+- Deployed URL: `http://${PROVIDER_HOST}:4173/`
 - HTTP status: `200 OK` from Caddy.
 - Deployed assets still serving the verified Clawline Web bundle from the integration fix:
   - `assets/index-C4oNo-t-.js`
   - `assets/index-DR6FtkEm.css`
 - `index.html` SHA-256: `23abd8a1183f46ea81c8bb6a7edb9be7a4c2c1b13ba9993d42a743143c59f15a`
 - Pending Clawline devices: none.
-- Dedicated test devices remain in allowlist under `userId=clawline_web_test`.
+- Dedicated test devices remain in allowlist under `userId=example_test_user`.
 
 Status: automated/local/deployed/live desktop checks remain ready for manual Safari follow-up. Real iPhone/iPad Safari proof is still pending physical/manual execution.
 
 ## 03:00 Physical Safari Capability Check - 2026-05-08
 
-Purpose: determine whether CLU can execute the remaining real iPhone/iPad Safari proof without Flynn physically driving devices.
+Purpose: determine whether CLU can execute the remaining real iPhone/iPad Safari proof without the operator physically driving devices.
 
 Result:
 
@@ -1559,12 +1560,12 @@ Purpose: make the remaining physical-device verification easy to run from iPhone
 
 Published checklist URL:
 
-- `http://100.85.66.60:18800/www/clawline-web-safari-checklist.html`
+- `http://${PROVIDER_HOST}:18800/www/clawline-web-safari-checklist.html`
 
 Contents:
 
 - Current deployed Clawline Web URL.
-- Dedicated-account rule: use `clawline_web_test`, not Flynn primary.
+- Dedicated-account rule: use `example_test_user`, not the operator's primary account.
 - iPhone Safari checklist.
 - iPad Safari checklist.
 - Screenshot requirements.
@@ -1580,26 +1581,26 @@ Status: automated/local/deployed/live desktop checks are green. Real iPhone/iPad
 
 Purpose: keep the remaining physical-device Safari verification ready and verify no new test-device approval is waiting.
 
-- Safari checklist URL rechecked: `http://100.85.66.60:18800/www/clawline-web-safari-checklist.html`
-- Clawline Web URL rechecked: `http://100.85.66.60:4173/`
+- Safari checklist URL rechecked: `http://${PROVIDER_HOST}:18800/www/clawline-web-safari-checklist.html`
+- Clawline Web URL rechecked: `http://${PROVIDER_HOST}:4173/`
 - Both URLs returned HTTP 200 during the 06:00 check.
 - Deployed web assets still observed: `assets/index-C4oNo-t-.js`, `assets/index-DR6FtkEm.css`.
 - Pending Clawline devices: none at recheck time.
-- Dedicated `clawline_web_test` devices remain allowlisted.
+- Dedicated `example_test_user` devices remain allowlisted.
 
 Status: device-side Safari execution is ready; no pending approval currently needs CLU action.
 
 ## 07:00 Safari QR Launch Page Published - 2026-05-08
 
-Purpose: make physical iPhone/iPad execution easier by giving Flynn a scannable launch page.
+Purpose: make physical iPhone/iPad execution easier by giving the operator a scannable launch page.
 
 Published QR page:
 
-- `http://100.85.66.60:18800/www/clawline-web-safari-qr.html`
+- `http://${PROVIDER_HOST}:18800/www/clawline-web-safari-qr.html`
 
 It links to the manual Safari checklist:
 
-- `http://100.85.66.60:18800/www/clawline-web-safari-checklist.html`
+- `http://${PROVIDER_HOST}:18800/www/clawline-web-safari-checklist.html`
 
 Verification:
 
@@ -1630,7 +1631,7 @@ Fix summary:
 Shipped/deployed state:
 
 - Commit: `324d6fc27f0d1fa6aef9940fb059ce319e34e15c` (`Fix Safari transcript scroll restoration`).
-- TARS web target: `http://100.85.66.60:4173/`.
+- provider host web target: `http://${PROVIDER_HOST}:4173/`.
 - Deployed JS asset: `assets/index-ZvAdaZQK.js`.
 - CSS asset: `assets/index-DR6FtkEm.css`.
 
@@ -1640,12 +1641,12 @@ Evidence:
 - `npm run test`: PASS (`23 files / 172 tests`).
 - `npm run test:e2e`: PASS (`30 tests`).
 - Targeted WebKit scroll checks: PASS (`phase5-responsive-keyboard`, `phase5-scroll-unread`, `phase7-live-bug-regressions`).
-- Deployed dedicated-account WebKit check used `userId=clawline_web_test` / `deviceId=da49d87f-60a5-4a72-b543-4f1da80200db`: scroll moved from `1715` to `1315` and stayed at `1315`.
+- Deployed dedicated-account WebKit check used `userId=example_test_user` / `deviceId=00000000-0000-4000-8000-000000000002`: scroll moved from `1715` to `1315` and stayed at `1315`.
 
 Status:
 
 - Automated/deployed WebKit evidence is green.
-- Final experiential check remains Flynn/physical Safari: open `http://100.85.66.60:4173/`, scroll down in a long chat, then scroll back up and confirm it no longer snaps down.
+- Final experiential check remains an operator-run physical Safari check: open `http://${PROVIDER_HOST}:4173/`, scroll down in a long chat, then scroll back up and confirm it no longer snaps down.
 
 ## Web Shortcut Parity Deployment - 2026-05-09 04:10 PDT
 
@@ -1673,7 +1674,7 @@ Shipped/deployed state:
 - Final `origin/main`: `7185e868267afbcf5ada609db2da726acfb7d7e8`.
 - Implementation commit: `c6ec701b12 Add web chat shortcut parity subset`.
 - Evidence commits: `1729e6b977`, `3fb7c2542b`, `7185e86826`.
-- TARS web target: `http://100.85.66.60:4173/`.
+- provider host web target: `http://${PROVIDER_HOST}:4173/`.
 - Deployed JS asset: `assets/index-B1UqqFPy.js`.
 - CSS asset: `assets/index-DR6FtkEm.css`.
 
@@ -1683,29 +1684,29 @@ Evidence:
 - `npm run build`: PASS.
 - `npm run test`: PASS (`174` tests).
 - `npx playwright test playwright/tests/phase5-responsive-keyboard.spec.ts`: PASS (`10` tests).
-- TARS smoke: `/`, `/chat/test`, `/pair` all `200 OK`.
+- provider host smoke: `/`, `/chat/test`, `/pair` all `200 OK`.
 - Final artifact evidence directory: `/tmp/clawline-t270-final-main-verify-20260509-041002`.
 - Served index/JS/CSS hashes matched local build.
 
 05:00 readiness recheck:
 
-- TARS root returned `HTTP/1.1 200 OK`.
+- provider host root returned `HTTP/1.1 200 OK`.
 - Root still references `assets/index-B1UqqFPy.js` and `assets/index-DR6FtkEm.css`.
 
 Status:
 
 - Tracker `T270` is `Verifiable`.
-- Flynn verification target: open `http://100.85.66.60:4173/` and test the shortcut behavior listed above.
+- Operator verification target: open `http://${PROVIDER_HOST}:4173/` and test the shortcut behavior listed above.
 
 ## 06:00 Deployed Shortcut Smoke - 2026-05-09
 
-Purpose: reduce Flynn-only verification by testing the deployed T270 shortcut behavior against the live TARS web client with the dedicated test account.
+Purpose: reduce operator-only verification by testing the deployed T270 shortcut behavior against the live provider host web client with the dedicated test account.
 
 Environment:
 
-- URL: `http://100.85.66.60:4173/chat/agent:main:clawline:clawline_web_test:main`
-- Account: `clawline_web_test`
-- Device/storage state: `da49d87f-60a5-4a72-b543-4f1da80200db`
+- URL: `http://${PROVIDER_HOST}:4173/chat/agent:main:clawline:example_test_user:main`
+- Account: `example_test_user`
+- Device/storage state: `00000000-0000-4000-8000-000000000002`
 - Browser engine: Playwright WebKit
 
 Result: PASS.
@@ -1720,23 +1721,23 @@ Checks:
 
 Status:
 
-- T270 remains `Verifiable`: deployed automated WebKit smoke is green; Flynn can do final experiential confirmation in Safari if desired.
+- T270 remains `Verifiable`: deployed automated WebKit smoke is green; the operator can do final experiential confirmation in Safari if desired.
 
-### Flynn physical Safari verification - 2026-05-09
+### operator physical Safari verification - 2026-05-09
 
-- Flynn verified the Safari/WebKit transcript scroll fix experientially: he can now scroll up and down.
+- The operator verified the Safari/WebKit transcript scroll fix experientially: he can now scroll up and down.
 - This closes the previously reported plain Safari regression where the transcript could scroll down but snapped/prevented scrolling back up.
 
 ### Midnight deployed parity readiness check - 2026-05-10 00:00 PDT
 
-- Rechecked TARS Clawline Web routes after the Web parity/layout deploy.
-- `http://100.85.66.60:4173/`, `/chat/test`, and `/pair` all returned HTTP 200.
+- Rechecked provider host Clawline Web routes after the Web parity/layout deploy.
+- `http://${PROVIDER_HOST}:4173/`, `/chat/test`, and `/pair` all returned HTTP 200.
 - Served assets remain the deployed parity bundle: `assets/index-CCACm0zW.js` and `assets/index-B0esVyXO.css`.
-- This preserves readiness for Flynn live verification of T286/T287/T288 plus bubble-width/flow-layout behavior.
+- This preserves readiness for the operator's live verification of T286/T287/T288 plus bubble-width/flow-layout behavior.
 
 ### Final live Safari acceptance targets - 2026-05-10 02:00 PDT
 
-These are the remaining human/device acceptance targets for the deployed Web parity/layout bundle. They are criteria, not a replacement for Flynn's live verification:
+These are the remaining human/device acceptance targets for the deployed Web parity/layout bundle. They are criteria, not a replacement for the operator's live verification:
 
 1. During an in-flight assistant response, a typing indicator bubble appears at the transcript bottom.
 2. Tapping the typing indicator, or pressing Cmd-. on a keyboard, opens a compact cancel confirmation anchored to that typing bubble.
@@ -1747,18 +1748,18 @@ These are the remaining human/device acceptance targets for the deployed Web par
 
 ### Test identity hygiene rule - 2026-05-10 04:00 PDT
 
-For Clawline Web validation, use the dedicated `clawline_web_test` identity unless Flynn explicitly requests a different account. Do not use Flynn's primary account, browser token, or captured Flynn storage-state for automated harness traffic. If a live-provider scenario cannot run under `clawline_web_test`, mark the scenario BLOCKED/NOT RUN with the exact account/provisioning reason rather than silently falling back to Flynn's account.
+For Clawline Web validation, use the dedicated `example_test_user` identity unless the operator explicitly requests a different account. Do not use the operator's primary account, browser token, or captured operator storage-state for automated harness traffic. If a live-provider scenario cannot run under `example_test_user`, mark the scenario BLOCKED/NOT RUN with the exact account/provisioning reason rather than silently falling back to the operator's account.
 
 ### Physical device availability recheck - 2026-05-10 06:00 PDT
 
 - Rechecked local physical-device control path with `xcrun devicectl list devices`.
 - Result: `No devices found.`
-- This confirms the remaining iPhone/iPad Safari proof still requires Flynn's physical device/session or another supported device-control path; no simulator or desktop proof is being substituted.
+- This confirms the remaining iPhone/iPad Safari proof still requires the operator's physical device/session or another supported device-control path; no simulator or desktop proof is being substituted.
 
 ### Deployed parity readiness recheck - 2026-05-11 00:00 PDT
 
-- Rechecked TARS Clawline Web routes after the deployed Web parity/layout bundle.
-- `http://100.85.66.60:4173/`, `/chat/test`, and `/pair` all returned HTTP 200.
+- Rechecked provider host Clawline Web routes after the deployed Web parity/layout bundle.
+- `http://${PROVIDER_HOST}:4173/`, `/chat/test`, and `/pair` all returned HTTP 200.
 - Served assets remain the parity bundle: `assets/index-CCACm0zW.js` and `assets/index-B0esVyXO.css`.
 - This preserves readiness for final live Safari/user verification of T286/T287/T288 plus bubble-width/flow-layout behavior.
 
@@ -1766,14 +1767,14 @@ For Clawline Web validation, use the dedicated `clawline_web_test` identity unle
 
 - Rechecked Clawline device approval files for Web verification readiness.
 - `pending.json` contains no pending device entries.
-- `allowlist.json` still includes dedicated `clawline_web_test` devices.
-- This keeps live-provider/Web verification ready without using Flynn's primary account or storage-state.
+- `allowlist.json` still includes dedicated `example_test_user` devices.
+- This keeps live-provider/Web verification ready without using the operator's primary account or storage-state.
 
 ### Dedicated test-device count recheck - 2026-05-11 02:07 PDT
 
 - Corrected/expanded the 02:00 device-state check with exact counts.
 - `pending.json` has `0` pending entries.
-- `allowlist.json` has `3` `clawline_web_test` Web devices: `9be5a139-4a76-40fc-a9d4-537c28c6e56b`, `a32b2591-7a38-4a34-a44c-bc12a4e92935`, and `da49d87f-60a5-4a72-b543-4f1da80200db`.
+- `allowlist.json` has `3` `example_test_user` Web devices: `00000000-0000-4000-8000-000000000001`, `00000000-0000-4000-8000-000000000003`, and `00000000-0000-4000-8000-000000000002`.
 
 ### Manual Safari packet currency note - 2026-05-11 03:00 PDT
 
@@ -1785,23 +1786,23 @@ For Clawline Web validation, use the dedicated `clawline_web_test` identity unle
 
 - Rechecked local physical-device control path with `xcrun devicectl list devices`.
 - Result: `No devices found.`
-- Final iPhone/iPad Safari proof still requires Flynn's physical device/session or another supported device-control path; no simulator or desktop substitute is being counted.
+- Final iPhone/iPad Safari proof still requires the operator's physical device/session or another supported device-control path; no simulator or desktop substitute is being counted.
 
 ### Deployed parity readiness recheck - 2026-05-11 06:00 PDT
 
-- Rechecked TARS Clawline Web routes after the deployed Web parity/layout bundle.
-- `http://100.85.66.60:4173/`, `/chat/test`, and `/pair` all returned HTTP 200.
+- Rechecked provider host Clawline Web routes after the deployed Web parity/layout bundle.
+- `http://${PROVIDER_HOST}:4173/`, `/chat/test`, and `/pair` all returned HTTP 200.
 - Served assets remain the parity bundle: `assets/index-CCACm0zW.js` and `assets/index-B0esVyXO.css`.
 - This preserves readiness for final live Safari/user verification of T286/T287/T288 plus bubble-width/flow-layout behavior.
 
 ### Current-main deploy reconciliation - 2026-05-12 01:00 PDT
 
-- Clean deployer worktree `/Users/mike/src/worktrees/clawline-web-parity-layout-batch` was fast-forwarded to `origin/main` `03c1762e5fe8e54681477bd10bc946243824dfc6`; canonical `/Users/mike/src/clawline` dirty state was left untouched.
+- Clean deployer worktree `$HOME/src/worktrees/clawline-web-parity-layout-batch` was fast-forwarded to `origin/main` `03c1762e5fe8e54681477bd10bc946243824dfc6`; canonical `$HOME/src/clawline` dirty state was left untouched.
 - `npm run build`: PASS on current `origin/main`.
 - `npm run test`: PASS on current `origin/main`.
 - `npm run test:e2e`: NOT GREEN — 29 passed, 3 visual snapshot assertions failed because current bubble width is about `601px` while checked-in dark snapshots expect `780px`. This appears to be snapshot drift against the intended bubble-width fix rather than a deploy/runtime regression, but it prevents claiming full e2e green.
-- Re-rsynced `dist/` to TARS anyway because current `origin/main` produced the same parity bundle filenames already served.
-- TARS smoke after reconciliation: `/`, `/chat/test`, and `/pair` returned HTTP 200 and serve `assets/index-CCACm0zW.js` plus `assets/index-B0esVyXO.css`.
+- Re-rsynced `dist/` to provider host anyway because current `origin/main` produced the same parity bundle filenames already served.
+- provider host smoke after reconciliation: `/`, `/chat/test`, and `/pair` returned HTTP 200 and serve `assets/index-CCACm0zW.js` plus `assets/index-B0esVyXO.css`.
 
 ### Flow-layout focused e2e after current-main reconciliation - 2026-05-12 02:00 PDT
 
@@ -1817,12 +1818,12 @@ For Clawline Web validation, use the dedicated `clawline_web_test` identity unle
 - Review found one real test-harness issue: link-card golden snapshots had embedded a random localhost port. The harness now uses deterministic `https://clawline.test` route fulfillment.
 - Branch/commit: `clawline-web-visual-snapshot-drift` / `123b3f6d652375398ac78e86dc70bbd8689dc031`, pushed to `origin/main`.
 - Evidence before merge: `npm run build && npm run test && npm run test:e2e` PASS; full Playwright suite `32/32` passed; unit suite `184` tests passed; `git diff --check` clean.
-- TARS served runtime bundle remains `assets/index-CCACm0zW.js` / `assets/index-B0esVyXO.css`; this was test/snapshot maintenance and did not require a runtime bundle change.
+- provider host served runtime bundle remains `assets/index-CCACm0zW.js` / `assets/index-B0esVyXO.css`; this was test/snapshot maintenance and did not require a runtime bundle change.
 
 ### Final readiness sweep - 2026-05-12 06:00 PDT
 
 - Coalesced the 05:00 and 06:00 continuation checks into one final readiness sweep.
-- TARS route smoke: `/`, `/chat/test`, and `/pair` returned HTTP 200.
+- provider host route smoke: `/`, `/chat/test`, and `/pair` returned HTTP 200.
 - Served assets remain `assets/index-CCACm0zW.js` and `assets/index-B0esVyXO.css`.
 - Physical device control recheck with `xcrun devicectl list devices`: `No devices found.`
-- Current state: Web parity/shortcut implementation and full Playwright evidence are green; final iPhone/iPad Safari proof still requires Flynn's physical device/session or another supported physical control path.
+- Current state: Web parity/shortcut implementation and full Playwright evidence are green; final iPhone/iPad Safari proof still requires the operator's physical device/session or another supported physical control path.

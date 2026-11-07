@@ -3045,7 +3045,7 @@ final class ChatViewModel {
     /// verbatim by design — see the doc comment above. A catalog-staleness /
     /// routing refusal is a substrate-internal condition, not a user-actionable
     /// rule, and must never leak its raw text (e.g. "cannot route
-    /// claude-sonnet-5 on Gibson: the claude catalog on Gibson is STALE...").
+    /// claude-sonnet-5 on provider-host: the claude catalog on provider-host is STALE...").
     /// The wire carries no structured staleness signal today (the Lane-B
     /// freshness field is planned, not built), so this degrades on the only
     /// observable signal available now — the refusal text — and should be

@@ -16,8 +16,8 @@ This review is grounded in the following architecture principles:
 
 The source under review is the web-port feasibility spec currently mirrored in:
 
-- `/Users/mike/shared-workspace/clawline/specs/web-port-recon.md`
-- `/Users/mike/src/clawline/docs/specs/web-port-recon.md`
+- `~/shared-workspace/clawline/specs/web-port-recon.md`
+- `~/src/clawline/docs/specs/web-port-recon.md`
 
 This review uses two lenses:
 

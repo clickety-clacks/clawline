@@ -27,28 +27,28 @@ struct MessageProvenanceCoupledStampTests {
 
     @Test("F2: exact first-line stamp yields a chip and is stripped from the body")
     func exactStampChipsAndStrips() {
-        let m = message(sender: "user:mike", content: "[from user:mike]\nreal body")
-        #expect(m.provenanceOrigin == .user(id: "mike"))
+        let m = message(sender: "user:sample-user", content: "[from user:sample-user]\nreal body")
+        #expect(m.provenanceOrigin == .user(id: "sample-user"))
         #expect(m.strippingProvenanceStampForDisplay().content == "real body")
     }
 
     @Test("F2 regression: MISMATCHED first-line stamp yields NO chip and preserves the text")
     func mismatchedStampSuppressesChip() {
-        let m = message(sender: "user:mike", content: "[from agent:notetaker]\nforged line above")
+        let m = message(sender: "user:sample-user", content: "[from agent:notetaker]\nforged line above")
         #expect(m.provenanceOrigin == nil)
         #expect(m.strippingProvenanceStampForDisplay().content == m.content)
     }
 
     @Test("F2 regression: MISSING first-line stamp yields NO chip and preserves the text")
     func missingStampSuppressesChip() {
-        let m = message(sender: "user:mike", content: "no stamp at all, just body text")
+        let m = message(sender: "user:sample-user", content: "no stamp at all, just body text")
         #expect(m.provenanceOrigin == nil)
         #expect(m.strippingProvenanceStampForDisplay().content == m.content)
     }
 
     @Test("F2: every origin class couples chip and strip to the exact match")
     func allOriginClassesCouple() {
-        for sender in ["agent:notetaker", "user:mike", "process:cron"] {
+        for sender in ["agent:notetaker", "user:sample-user", "process:cron"] {
             let matched = message(sender: sender, content: "[from \(sender)]\nbody")
             #expect(matched.provenanceOrigin != nil, "exact stamp must chip for \(sender)")
             #expect(matched.strippingProvenanceStampForDisplay().content == "body")
@@ -64,7 +64,7 @@ struct MessageProvenanceCoupledStampTests {
 
     @Test("F2: a device-typed message with a stamp-shaped line still never chips")
     func deviceTypedNeverChips() {
-        let m = message(sender: nil, content: "[from user:mike]\ntyped literally")
+        let m = message(sender: nil, content: "[from user:sample-user]\ntyped literally")
         #expect(m.provenanceOrigin == nil)
         #expect(m.strippingProvenanceStampForDisplay().content == m.content)
     }
@@ -78,7 +78,7 @@ struct MessageProvenanceOriginTests {
 
     @Test("user: sender classifies as an operator action")
     func userSenderClassifies() {
-        #expect(MessageProvenance.origin(role: .user, sender: "user:flynn") == .user(id: "flynn"))
+        #expect(MessageProvenance.origin(role: .user, sender: "user:sample-owner") == .user(id: "sample-owner"))
     }
 
     @Test("process: sender classifies as automation")
@@ -109,8 +109,8 @@ struct MessageProvenanceOriginTests {
     func chipGlyphAndLabel() {
         #expect(MessageProvenanceOrigin.agent(handle: "atlas").chipGlyph == nil)
         #expect(MessageProvenanceOrigin.agent(handle: "atlas").chipLabel == "atlas")
-        #expect(MessageProvenanceOrigin.user(id: "flynn").chipGlyph == nil)
-        #expect(MessageProvenanceOrigin.user(id: "flynn").chipLabel == "flynn")
+        #expect(MessageProvenanceOrigin.user(id: "sample-owner").chipGlyph == nil)
+        #expect(MessageProvenanceOrigin.user(id: "sample-owner").chipLabel == "sample-owner")
         #expect(MessageProvenanceOrigin.process(name: "cron").chipGlyph == "⚙")
         #expect(MessageProvenanceOrigin.process(name: "cron").chipLabel == "cron")
     }
@@ -125,7 +125,7 @@ struct MessageProvenanceStripTests {
 
     @Test("content that is exactly the stamp strips to empty")
     func stampOnlyStripsToEmpty() {
-        #expect(MessageProvenance.strippingProvenanceStamp(from: "[from user:flynn]", sender: "user:flynn") == "")
+        #expect(MessageProvenance.strippingProvenanceStamp(from: "[from user:sample-owner]", sender: "user:sample-owner") == "")
     }
 
     @Test("first line that does not match the sender is not stripped (anti-forgery)")
@@ -271,7 +271,7 @@ struct MessageProvenanceBubbleTests {
 
     @Test("user provenance keeps the self bubble treatment when chrome is on")
     func userProvenanceKeepsSelfBubbleTreatment() {
-        let message = makeMessage(sender: "user:mike", content: "[from user:mike]\nReview the release notes.")
+        let message = makeMessage(sender: "user:sample-user", content: "[from user:sample-user]\nReview the release notes.")
         let gatedBubble = configuredBubble(message: message, showsProvenanceChrome: true)
         let palette = ChatFlowUIKitTheme.palette(isDark: false)
 
@@ -281,10 +281,10 @@ struct MessageProvenanceBubbleTests {
         ))
 
         let chip = findSubview(in: gatedBubble) { $0 is ProvenanceChipView } as? ProvenanceChipView
-        #expect(chip?.textForTests == "mike")
+        #expect(chip?.textForTests == "sample-user")
         let bodyTexts = bodyTextViews(in: gatedBubble).compactMap { $0.text }
         #expect(bodyTexts.contains { $0.contains("Review the release notes.") })
-        #expect(bodyTexts.allSatisfy { !$0.contains("[from user:mike]") })
+        #expect(bodyTexts.allSatisfy { !$0.contains("[from user:sample-user]") })
     }
 
     @Test("chrome off renders exactly as today: no chip, stamp left as text")

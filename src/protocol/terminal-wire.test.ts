@@ -15,9 +15,9 @@ describe("terminal-wire", () => {
         JSON.stringify({
           version: 2,
           terminalSessionId: "term_123",
-          title: "eezo",
+          title: "development-host",
           destination: {
-            address: "mike@eezo"
+            address: "user-a@development-host"
           },
           capabilities: {
             interactive: true,
@@ -32,12 +32,12 @@ describe("terminal-wire", () => {
     expect(descriptor).toMatchObject({
       version: 2,
       terminalSessionId: "term_123",
-      title: "eezo",
+      title: "development-host",
       destination: {
-        address: "mike@eezo"
+        address: "user-a@development-host"
       }
     });
-    expect(descriptor && terminalDestinationLabel(descriptor)).toBe("mike@eezo");
+    expect(descriptor && terminalDestinationLabel(descriptor)).toBe("user-a@development-host");
   });
 
   it("treats version 1 descriptors as destination-unknown", () => {
@@ -67,7 +67,7 @@ describe("terminal-wire", () => {
           terminalSessionId: "term_utf8",
           title: "Résumé 🌊",
           destination: {
-            address: "mike@東京"
+            address: "user-a@東京"
           }
         }),
         "utf8"
@@ -75,7 +75,7 @@ describe("terminal-wire", () => {
     });
 
     expect(descriptor?.title).toBe("Résumé 🌊");
-    expect(descriptor && terminalDestinationLabel(descriptor)).toBe("mike@東京");
+    expect(descriptor && terminalDestinationLabel(descriptor)).toBe("user-a@東京");
   });
 
   it("accepts parameterized and case-varied terminal MIME types", () => {

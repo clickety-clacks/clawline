@@ -17,7 +17,7 @@ Phase 1 is reliability-scoped. The goal is to make normal Clawline prompts relia
 
 Clawline normal inbound user messages currently run through a custom provider path in `extensions/clawline/src/runtime/server.ts`.
 
-Evidence from current TARS OpenClaw `f1ac4138ba9`:
+Evidence from current Provider-host OpenClaw `f1ac4138ba9`:
 
 - Normal WS message path starts at `processClientMessage` in `extensions/clawline/src/runtime/server.ts:8971`.
 - It manually builds context with `finalizeInboundContext` at `server.ts:9191-9218`.
@@ -554,7 +554,7 @@ Non-goals:
 - Do not remove Clawline local DB, ACK, replay, or socket delivery semantics.
 - Do not rewrite Clawline asset storage as part of the kernel migration.
 - Do not change product-visible reply/reference behavior unless an acceptance test proves equivalence.
-- Do not add new OpenClaw core hooks unless the upstream public SDK lacks a required seam and Flynn approves that divergence.
+- Do not add new OpenClaw core hooks unless the upstream public SDK lacks a required seam and the product owner approves that divergence.
 
 Open questions:
 

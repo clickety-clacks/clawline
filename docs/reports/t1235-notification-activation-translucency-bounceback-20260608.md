@@ -1,7 +1,7 @@
 # T1235 Notification Activation / Spatial Translucency Bounceback
 
 Date: 2026-06-08
-Worktree: `/Users/mike/src/worktrees/clawline-notification-click-regression`
+Worktree: `~/src/worktrees/clawline-notification-click-regression`
 Branch: `clawline-notification-click-regression`
 
 ## Active Status Note: 2026-06-09
@@ -11,7 +11,7 @@ Sections before `Continuation Update: 2026-06-09 Proof Cleanup / Review Narrowin
 ## Tracker / State
 
 - Source ticket: T1235.
-- Live source read: TARS `GET http://127.0.0.1:18803/tracker/item?id=T1235`.
+- Live source read: Provider-host `GET http://127.0.0.1:18803/tracker/item?id=T1235`.
 - State update status: moved `Filed -> In Progress` through supported live `POST /tracker.update` with actor `agent:clawline-notification-click-regression`; accepted response `ok:true`, `state:"In Progress"`, `workflow_lane:"In Progress"`.
 - Ticket history update status: live `next_step` updated through supported live `POST /tracker.update` with this report path, current patch shape, proof summary, and remaining blockers.
 - Review status: required Claude Opus implementation-owned review was attempted with the project-documented command, but failed with `Your organization does not have access to Claude. Please login again or contact your administrator.` No alternate reviewer was used because no supported alternate was authorized.
@@ -19,7 +19,7 @@ Sections before `Continuation Update: 2026-06-09 Proof Cleanup / Review Narrowin
 ## Continuation Update: 2026-06-08 02:40 PDT
 
 Additional observed symptom:
-- Flynn-visible T1235 update reported that the visible notification Reply and Close controls cannot be tapped.
+- the T1235 update visible to the product owner reported that the visible notification Reply and Close controls cannot be tapped.
 - Expected behavior: Reply opens the notification reply flow; Close reply closes that flow; Dismiss closes the notification; these controls must remain single-tap targets while whole-card navigation and drag/peek/dock continue to work.
 
 Reply / Close / Dismiss hit-testing analysis:
@@ -53,7 +53,7 @@ Current review/deploy status:
 ## Continuation Update: 2026-06-08 09:10 PDT
 
 Additional observed symptom:
-- Flynn expanded the product truth: while visible, the notification surface itself must own interaction.
+- the product owner expanded the product truth: while visible, the notification surface itself must own interaction.
 - Buttons must work, tapping/activation must work, and scroll gestures over notification content must not pass through to the chat underneath.
 - Background chat scroll-through under notification content is non-compliant.
 
@@ -90,18 +90,18 @@ What now works:
 
 What remains unproven/failing:
 - Full notification UI suite is not green because same-chat transcript materialization still fails after active-chat notification dismissal.
-- Live Cyberbrain/Spatial click/readability proof remains unrun because deploy/install/launch is not authorized.
+- Live Spatial-test-device/Spatial click/readability proof remains unrun because deploy/install/launch is not authorized.
 - Implementation-owned Claude Opus review remains blocked by org access: `Your organization does not have access to Claude.`
 
 Exact next owner/action:
-- Implementation owner: either resolve the same-chat transcript materialization proof gap or explicitly split it out if Flynn accepts it as adjacent proof-harness work.
-- Review owner/path: restore Claude Opus access or get Flynn authorization for an alternate implementation-owned review path.
-- Deployment owner: no deployment until review passes and Flynn authorizes deploy.
+- Implementation owner: either resolve the same-chat transcript materialization proof gap or explicitly split it out if the product owner accepts it as adjacent proof-harness work.
+- Review owner/path: restore Claude Opus access or get the product owner authorization for an alternate implementation-owned review path.
+- Deployment owner: no deployment until review passes and the product owner authorizes deploy.
 
 ## Continuation Update: 2026-06-08 Keyboard-Up First Tap
 
 Additional observed symptom:
-- Flynn reported live iOS behavior where the keyboard/reply composer is active: the first tap on a notification dismisses the keyboard but does not navigate; only the second tap navigates.
+- the product owner reported live iOS behavior where the keyboard/reply composer is active: the first tap on a notification dismisses the keyboard but does not navigate; only the second tap navigates.
 - Product truth: notification tap activation must immediately navigate to the represented chat even while the keyboard or composer is active.
 
 Expected behavior:
@@ -117,7 +117,7 @@ Proven root cause:
 
 Miss cause:
 - Prior "tap passes" proof covered normal and peeking notification tap activation but did not explicitly focus the composer before the notification tap.
-- The first-tap keyboard path was therefore not part of the regression gate, so a test could pass while missing Flynn's live iOS failure.
+- The first-tap keyboard path was therefore not part of the regression gate, so a test could pass while missing the product owner's live iOS failure.
 
 Architecture fit:
 - The patch still keeps selectable/link-capable rendering in full transcript/content surfaces.
@@ -131,8 +131,8 @@ Proof run:
 
 Unproven gap:
 - Full notification UI suite is still not green because of the same-chat transcript materialization proof gap. Current evidence classifies that as a DEBUG proof fixture/rendering gap rather than T1235 notification activation: it occurs without tapping a notification, and the active Alpha notification is hidden as expected.
-- Live iOS device/Cyberbrain proof is unrun because this lane forbids deploy/install/launch without authorization.
-- Required implementation-owned Claude Opus review remains blocked until org access is restored or Flynn authorizes an alternate review path.
+- Live iOS device/Spatial-test-device proof is unrun because this lane forbids deploy/install/launch without authorization.
+- Required implementation-owned Claude Opus review remains blocked until org access is restored or the product owner authorizes an alternate review path.
 
 T1250 serialization note:
 - T1250 is separate and remains `In Progress`. Its product truth is text-selection mode suppressing notification left/right swipes while preserving normal swipes when no text selection is active.
@@ -141,8 +141,8 @@ T1250 serialization note:
 ## Issue 1: Notification Click/Tap Activation Regression
 
 Observed symptom:
-- Flynn reported that on Clawline Spatial/Cyberbrain, notifications can still be dragged, but click/tap no longer activates/opens them.
-- Flynn also reported that in the normal Clawline app, notification tap activation sometimes needs two taps before it registers.
+- the product owner reported that on Clawline Spatial/Spatial-test-device, notifications can still be dragged, but click/tap no longer activates/opens them.
+- the product owner also reported that in the normal Clawline app, notification tap activation sometimes needs two taps before it registers.
 
 Expected behavior:
 - Notification drag/peek/dock behavior remains intact.
@@ -177,13 +177,13 @@ Proof run:
 
 Unproven gap:
 - Full `T1150NotificationDockUITests` is not green: the same-chat active-notification visibility part was root-caused to DEBUG fixture ordering and repaired, but the test still fails its transcript materialization assertion after Alpha has been dismissed. This remaining assertion is a relevant proof gap before the lane can be called source-ready/deployable.
-- No live Cyberbrain manual click proof was run because the lane explicitly forbids deploy/install/launch/runtime mutation.
+- No live Spatial-test-device manual click proof was run because the lane explicitly forbids deploy/install/launch/runtime mutation.
 - The required external implementation-owned review proof is blocked by Claude account access.
 
 ## Issue 2: Spatial Notification Translucency / Readability Regression
 
 Observed symptom:
-- Flynn reported that on Cyberbrain Spatial, live notification cards are still too translucent.
+- the product owner reported that on Spatial-test-device Spatial, live notification cards are still too translucent.
 - The issue is visual/readability and target confidence on the Spatial notification surface, distinct from tap activation.
 
 Expected behavior:
@@ -194,17 +194,17 @@ Expected behavior:
 Proven root cause:
 - Commit `fc84bd05d7` (`Add Spatial notification glass material`) introduced the Spatial-specific notification material path in `CrossChatNotificationBubbleView`.
 - That path renders a rounded shape with `spatialNotificationTintColor`, then layers `.background(.regularMaterial, in: shape)`, then applies `CrossChatNotificationMaterialStyle.backgroundOpacity`.
-- The live Cyberbrain report maps directly to these Spatial-only constants:
+- The live Spatial-test-device report maps directly to these Spatial-only constants:
   - `backgroundOpacity = 0.85`
   - `spatialTintOpacity(.dark) = 0.34`
   - `spatialTintOpacity(.light) = 0.46`
   - `spatialBorderOpacity(.dark) = 0.20`
   - `spatialBorderOpacity(.light) = 0.34`
-- The values preserve material depth but leave too much underlying scene bleed-through for Flynn's live Spatial readability expectation.
+- The values preserve material depth but leave too much underlying scene bleed-through for the product owner's live Spatial readability expectation.
 
 Miss cause:
 - Existing T373 coverage asserted that Spatial tint/border were adaptive and stronger than non-Spatial accent treatment, but did not assert a readability floor.
-- The prior implementation relied on simulator/unit constants rather than live Cyberbrain readability feedback.
+- The prior implementation relied on simulator/unit constants rather than live Spatial-test-device readability feedback.
 
 Architecture fit:
 - The fix stays inside `CrossChatNotificationMaterialStyle`.
@@ -225,8 +225,8 @@ Proof run:
 - Passed: visionOS simulator compile-only build for Apple Vision Pro OS 26.4.1.
 
 Unproven gap:
-- No live Cyberbrain visual confirmation was run because the lane explicitly forbids deploy/install/launch/runtime mutation.
-- The exact perceptual sufficiency of the new opacity values remains pending Flynn/Cyberbrain verification after an authorized deployment path.
+- No live Spatial-test-device visual confirmation was run because the lane explicitly forbids deploy/install/launch/runtime mutation.
+- The exact perceptual sufficiency of the new opacity values remains pending the product owner/Spatial-test-device verification after an authorized deployment path.
 - The required external implementation-owned review proof is blocked by Claude account access.
 
 ## Engram / Provenance Notes
@@ -240,7 +240,7 @@ Unproven gap:
 ## Continuation Update: 2026-06-08 Review Correction
 
 Review gate correction:
-- Flynn clarified that Clawline implementation-owned review does not require Claude/Opus.
+- The product owner clarified that Clawline implementation-owned review does not require Claude/Opus.
 - The stale Claude-blocker language above is historical only and is no longer the active gate.
 - Current review path is Codex implementation-owned review against live T1235/T1250 ticket context, this report, and the candidate diff.
 
@@ -266,13 +266,13 @@ Current proof status:
 - Passed: visionOS simulator compile-only build for Apple Vision Pro OS 26.4.1.
 
 Current remaining gaps:
-- No live iOS device/Cyberbrain verification was run; this lane forbids deploy/install/launch.
+- No live iOS device/Spatial-test-device verification was run; this lane forbids deploy/install/launch.
 - T1250 text-selection swipe suppression remains unimplemented by design and must be proven separately.
 
 ## Continuation Update: 2026-06-09 Proof Cleanup / Review Narrowing
 
 Runner cleanup result:
-- The prior xctrunner Busy/Application preflight condition was cleared by using the supported iPhone 17 simulator `9218DDEB-E024-4114-8022-C56E36642533`.
+- The prior xctrunner Busy/Application preflight condition was cleared by using the supported iPhone 17 simulator `test-simulator-id`.
 - Full `T1150NotificationDockUITests` now executes instead of failing preflight.
 
 Review-required correction:
@@ -293,7 +293,7 @@ Current proof after narrowing:
 
 Review status:
 - Codex implementation-owned review round 1 found the over-broad transcript scroll lock blocker. The blocker was fixed.
-- An advisory Claude review was attempted but hung without usable output and was terminated; Claude is not the required Clawline review gate per Flynn's correction.
+- An advisory Claude review was attempted but hung without usable output and was terminated; Claude is not the required Clawline review gate per the product owner's correction.
 - Codex implementation-owned review round 3 passed against the narrowed T1235 diff/report with no blocking issues. Review proof is recorded at `scratch/reviews/t1235-review-r3-20260609.md`.
 
 Current ticket/update status:

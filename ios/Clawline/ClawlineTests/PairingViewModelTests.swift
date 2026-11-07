@@ -25,13 +25,13 @@ struct PairingViewModelTests {
             storage: defaults
         )
 
-        viewModel.nameInput = "Mike"
+        viewModel.nameInput = "Sample User"
         viewModel.submitName()
-        viewModel.addressInput = "tars.tail4105e8.ts.net"
+        viewModel.addressInput = "provider-host.example.test"
         viewModel.submitAddress()
 
         try await waitFor { connection.requestedURL != nil }
-        #expect(connection.requestedURL?.absoluteString == "ws://tars.tail4105e8.ts.net:18800/ws")
+        #expect(connection.requestedURL?.absoluteString == "ws://provider-host.example.test:18800/ws")
     }
 
     @Test("Non-network pairing errors surface as error state, not stalled")
@@ -50,7 +50,7 @@ struct PairingViewModelTests {
             storage: defaults
         )
 
-        viewModel.nameInput = "Mike"
+        viewModel.nameInput = "Sample User"
         viewModel.submitName()
         viewModel.addressInput = "ws://example.com:18800"
         viewModel.submitAddress()
@@ -84,7 +84,7 @@ struct PairingViewModelTests {
             storage: defaults
         )
 
-        viewModel.nameInput = "Mike"
+        viewModel.nameInput = "Sample User"
         viewModel.submitName()
         viewModel.addressInput = "ws://example.com:18800"
         viewModel.submitAddress()

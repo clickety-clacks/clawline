@@ -12,16 +12,16 @@ Where specs live, how to find them, how to name them.
 Specs are a dedicated step before implementation.
 
 - **Spec agent session:** `tmux` session named `{project}-{feature}-spec`
-- **Spec output path:** `/Users/mike/shared-workspace/{project}/specs/{specname}.md`
+- **Spec output path:** `~/shared-workspace/{project}/specs/{specname}.md`
 - **Implementation agents:** separate sessions/agents that consume the spec
 - **SME continuity:** spec agent stays alive after handoff for clarification
 
 ## Canonical Location
 
-All specs live on the NFS shared workspace, visible from both TARS and eezo:
+All specs live on the NFS shared workspace, visible from both Provider-host and development-host:
 
 ```
-/Users/mike/shared-workspace/{project}/specs/{specname}.md
+~/shared-workspace/{project}/specs/{specname}.md
 ```
 
 **Projects:**
@@ -39,8 +39,8 @@ All specs live on the NFS shared workspace, visible from both TARS and eezo:
 
 To find a spec by topic:
 ```bash
-ls /Users/mike/shared-workspace/*/specs/
-grep -rl "search term" /Users/mike/shared-workspace/*/specs/
+ls ~/shared-workspace/*/specs/
+grep -rl "search term" ~/shared-workspace/*/specs/
 ```
 
 Archived/superseded specs go in `specs/archive/` within each project.
@@ -59,7 +59,7 @@ Archived/superseded specs go in `specs/archive/` within each project.
 
 ## Handoff Contract (Spec Agent -> Impl Agent)
 
-1. Spec agent publishes canonical path under `/Users/mike/shared-workspace/{project}/specs/`
+1. Spec agent publishes canonical path under `~/shared-workspace/{project}/specs/`
 2. Impl agent reads that spec before coding
 3. Impl questions route back to the still-running spec agent SME session
 4. Spec changes happen in the canonical spec file, not in scratch notes

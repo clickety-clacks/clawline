@@ -8,16 +8,16 @@
 
 ## Code Trace
 `ChatViewModel` only clears provisioning state on terminal connection states:
-- [`ChatViewModel.swift:1630`]( /Users/mike/src/worktrees/per-stream-state/ios/Clawline/Clawline/ViewModels/ChatViewModel.swift:1630 ) `transitionConnectionState(...)`
-- [`ChatViewModel.swift:1644`]( /Users/mike/src/worktrees/per-stream-state/ios/Clawline/Clawline/ViewModels/ChatViewModel.swift:1644 ) `case .disconnected, .failed:`
-- [`ChatViewModel.swift:1647`]( /Users/mike/src/worktrees/per-stream-state/ios/Clawline/Clawline/ViewModels/ChatViewModel.swift:1647 ) `resetSessionProvisioningState(clearPendingSend: true)`
+- [`ChatViewModel.swift:1630`]( ~/src/worktrees/per-stream-state/ios/Clawline/Clawline/ViewModels/ChatViewModel.swift:1630 ) `transitionConnectionState(...)`
+- [`ChatViewModel.swift:1644`]( ~/src/worktrees/per-stream-state/ios/Clawline/Clawline/ViewModels/ChatViewModel.swift:1644 ) `case .disconnected, .failed:`
+- [`ChatViewModel.swift:1647`]( ~/src/worktrees/per-stream-state/ios/Clawline/Clawline/ViewModels/ChatViewModel.swift:1647 ) `resetSessionProvisioningState(clearPendingSend: true)`
 
 Intermediate states do **not** call reset:
-- [`ChatViewModel.swift:1641`]( /Users/mike/src/worktrees/per-stream-state/ios/Clawline/Clawline/ViewModels/ChatViewModel.swift:1641 ) `case .connecting, .reconnecting:` only clears typing flags.
+- [`ChatViewModel.swift:1641`]( ~/src/worktrees/per-stream-state/ios/Clawline/Clawline/ViewModels/ChatViewModel.swift:1641 ) `case .connecting, .reconnecting:` only clears typing flags.
 
 All reset call sites in file:
-- [`ChatViewModel.swift:788`]( /Users/mike/src/worktrees/per-stream-state/ios/Clawline/Clawline/ViewModels/ChatViewModel.swift:788 ) logout path
-- [`ChatViewModel.swift:1647`]( /Users/mike/src/worktrees/per-stream-state/ios/Clawline/Clawline/ViewModels/ChatViewModel.swift:1647 ) terminal connection path
+- [`ChatViewModel.swift:788`]( ~/src/worktrees/per-stream-state/ios/Clawline/Clawline/ViewModels/ChatViewModel.swift:788 ) logout path
+- [`ChatViewModel.swift:1647`]( ~/src/worktrees/per-stream-state/ios/Clawline/Clawline/ViewModels/ChatViewModel.swift:1647 ) terminal connection path
 
 ## Simulator Cold-Launch Trace (Kill + Reopen)
 I ran cold-launch traces in simulator by launching, stopping, and relaunching. Runtime sequence:

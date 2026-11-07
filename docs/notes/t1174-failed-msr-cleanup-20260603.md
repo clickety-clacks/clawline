@@ -2,8 +2,8 @@
 
 Date: 2026-06-03
 
-Canonical checkout: /Users/mike/src/clawline
-Feature worktree: /Users/mike/src/worktrees/clawline-t1174-notification-gestures
+Canonical checkout: ~/src/clawline
+Feature worktree: ~/src/worktrees/clawline-t1174-notification-gestures
 
 The reviewed T1174 notification gesture/navigation patch was ported into canonical main for MSR, but canonical focused simulator proof failed before commit or deploy.
 

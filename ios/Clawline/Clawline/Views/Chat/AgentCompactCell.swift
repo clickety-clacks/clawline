@@ -226,7 +226,7 @@ final class AgentCompactCell: UICollectionViewCell {
     }
 
     /// - Parameters:
-    ///   - senderLine: attribution only, e.g. "coder \u{00B7} gibson" -- built
+    ///   - senderLine: attribution only, e.g. "coder \u{00B7} test-host-a" -- built
     ///     from the message's provenance handle (`AgentCompactCell.displaySenderLine`),
     ///     never inferred from content.
     ///   - previewText: full stamp-stripped content. The label wraps it
@@ -405,7 +405,7 @@ final class AgentCompactCell: UICollectionViewCell {
         onTap?()
     }
 
-    /// "coder:gibson" -> "coder \u{00B7} gibson". Pure reformatting of the
+    /// "coder:test-host-a" -> "coder \u{00B7} test-host-a". Pure reformatting of the
     /// wire-provided handle (MessageProvenanceOrigin.agent(handle:)) -- never
     /// invents or infers a name.
     static func displaySenderLine(forHandle handle: String) -> String {

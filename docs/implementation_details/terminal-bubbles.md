@@ -13,7 +13,7 @@ When the bubble view changes size (rotation, keyboard, split view), the new cols
 Terminal session WebSocket connects to a separate terminal WebSocket endpoint on the provider, authenticated via the same token. The terminal service must include the correct auth token in its handshake. Using the wrong auth endpoint (chat WebSocket vs terminal WebSocket) produces an auth failure that's non-obvious because the chat connection is healthy.
 
 ## Remote tmux path: provider SSHes to terminal host — the provider, not the client, manages the SSH connection
-For remote tmux (e.g., provider on TARS, tmux on eezo), the provider SSHes to the terminal host and proxies PTY output to the client over the terminal WebSocket. The client never SSHes directly. Any code that tries to initiate SSH from the iOS client is wrong for this deployment shape.
+For remote tmux (e.g., provider on Provider-host, tmux on development-host), the provider SSHes to the terminal host and proxies PTY output to the client over the terminal WebSocket. The client never SSHes directly. Any code that tries to initiate SSH from the iOS client is wrong for this deployment shape.
 
 ## TerminalBubbleView participates in normal cell reuse — SwiftTerm view is created/torn down on reuse
 `TerminalBubbleView` participates in normal `UICollectionView` cell reuse. SwiftTerm `TerminalView` is created on cell bind and torn down on `prepareForReuse`. No persistent terminal state in reuse pool. Large terminal history for an off-screen bubble is not preserved across scroll-away.

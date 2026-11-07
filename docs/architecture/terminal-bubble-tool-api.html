@@ -160,12 +160,12 @@
   "action": "sendAttachment",
   "contentType": "application/vnd.clawline.terminal-session+json",
   "destination": {
-    "address": "clu@racter"
+    "address": "user-a@test-host"
   },
   "terminalSession": {
     "name": "clawline-font-check"
   },
-  "title": "racter · clawline-font-check"
+  "title": "test-host · clawline-font-check"
 }</code></pre>
 
     <table>
@@ -173,7 +173,7 @@
       <tbody>
         <tr><td class="id">API-01</td><td><code>action</code></td><td>Must be <code>sendAttachment</code> for terminal bubble creation.</td></tr>
         <tr><td class="id">API-02</td><td><code>contentType</code></td><td>Must be <code>application/vnd.clawline.terminal-session+json</code>. This MIME type is how clients identify terminal bubbles.</td></tr>
-        <tr><td class="id">API-03</td><td><code>destination.address</code></td><td>Required for new terminal bubbles. It names the concrete provider-reachable target, such as <code>clu@racter</code>, <code>mike@eezo</code>, or another authorized SSH/tmux endpoint.</td></tr>
+        <tr><td class="id">API-03</td><td><code>destination.address</code></td><td>Required for new terminal bubbles. It names the concrete provider-reachable target, such as <code>user-a@test-host</code>, <code>user-a@development-host</code>, or another authorized SSH/tmux endpoint.</td></tr>
         <tr><td class="id">API-04</td><td><code>terminalSession.name</code></td><td>Optional. When supplied, it is the caller-requested terminal/tmux session identity and must be preserved. When absent, no tmux session is implied; the terminal opens at the destination login shell.</td></tr>
         <tr><td class="id">API-05</td><td><code>title</code></td><td>Optional presentation text. It may default from destination/session, but it must never be used as routing truth.</td></tr>
       </tbody>
@@ -198,9 +198,9 @@
     <pre><code>{
   "version": 3,
   "terminalSessionId": "termmsg_9a0f6b",
-  "title": "racter · clawline-font-check",
+  "title": "test-host · clawline-font-check",
   "destination": {
-    "address": "clu@racter"
+    "address": "user-a@test-host"
   },
   "terminalSession": {
     "name": "clawline-font-check",
@@ -241,10 +241,10 @@
       <tbody>
         <tr><td class="id">PROV-01</td><td>On structured request, validate <code>destination.address</code> and optional <code>terminalSession.name</code>.</td><td>Invalid, unauthorized, or internally conflicting target fields fail before a misleading bubble is emitted. The structured error includes the supplied <code>destination.address</code> and, when supplied, <code>terminalSession.name</code>.</td></tr>
         <tr><td class="id">PROV-02</td><td>Persist a session record containing owner, chat session, descriptor id, destination address, requested terminal session name, title, timestamps, and lifecycle state.</td><td>Provider restart or terminal reconnect can restore the exact target.</td></tr>
-        <tr><td class="id">PROV-03</td><td>Attach/provision against the requested destination and terminal session name.</td><td>A request for <code>clu@racter</code> + <code>clawline-font-check</code> uses <code>attach_or_create</code> by default: attach to that named session if it exists, otherwise create that named session on the requested destination. If either path fails, fail visibly for that exact target.</td></tr>
+        <tr><td class="id">PROV-03</td><td>Attach/provision against the requested destination and terminal session name.</td><td>A request for <code>user-a@test-host</code> + <code>clawline-font-check</code> uses <code>attach_or_create</code> by default: attach to that named session if it exists, otherwise create that named session on the requested destination. If either path fails, fail visibly for that exact target.</td></tr>
         <tr><td class="id">PROV-04</td><td>Do not create a tmux session when <code>terminalSession.name</code> is absent.</td><td>Unnamed requests connect to the destination login shell. Random/generated tmux session names are not a fallback.</td></tr>
         <tr><td class="id">PROV-05</td><td>Do not use provider-global fallback to satisfy explicit destination/session requests.</td><td>Fallback can support legacy v1/v2 descriptors only when the descriptor lacks required target truth and the UI labels that limitation honestly.</td></tr>
-        <tr><td class="id">PROV-06</td><td>Return terminal errors with the requested destination/session in structured diagnostic context.</td><td>Every structured failure includes <code>destination.address</code> and, when supplied, <code>terminalSession.name</code>. Flynn and agents can tell whether the exact requested target failed instead of guessing from title/text.</td></tr>
+        <tr><td class="id">PROV-06</td><td>Return terminal errors with the requested destination/session in structured diagnostic context.</td><td>Every structured failure includes <code>destination.address</code> and, when supplied, <code>terminalSession.name</code>. The product owner and agents can tell whether the exact requested target failed instead of guessing from title/text.</td></tr>
         <tr><td class="id">PROV-07</td><td>Reserve stricter provisioning modes for future explicit API expansion.</td><td><code>attach_existing</code> and <code>create</code> are not v3 defaults. They may be added later only if callers need stricter semantics than <code>attach_or_create</code>.</td></tr>
       </tbody>
     </table>
@@ -295,14 +295,14 @@
       <thead><tr><th>ID</th><th>Resolution</th><th>Status</th></tr></thead>
       <tbody>
         <tr><td class="id">RQ-01</td><td><code>terminalSession.name</code> is the stable product-facing field. <code>terminalSessionId</code> remains the opaque protocol/auth/record lookup id. <code>tmuxSessionName</code> is implementation-specific and may only be a compatibility alias.</td><td>Resolved</td></tr>
-        <tr><td class="id">RQ-02</td><td><code>attach_or_create</code> is the T001 default only when <code>terminalSession.name</code> is supplied. Without a session name, the terminal opens in the destination login shell and does not create a tmux session.</td><td>Resolved by Flynn correction</td></tr>
+        <tr><td class="id">RQ-02</td><td><code>attach_or_create</code> is the T001 default only when <code>terminalSession.name</code> is supplied. Without a session name, the terminal opens in the destination login shell and does not create a tmux session.</td><td>Resolved by the product owner's correction</td></tr>
         <tr><td class="id">RQ-03</td><td><code>version: 3</code> cleanly marks destination-and-session-aware descriptors. Legacy v1/v2 fallback must be visibly legacy/unknown and cannot prove new structured T001 behavior.</td><td>Resolved</td></tr>
       </tbody>
     </table>
   </section>
 
   <footer class="small">
-    Source material: T001 tracker API notes, terminal-bubble-routing spec, terminal-bubbles implementation details, and Flynn's 2026-05-17 correction that caller-specified terminal/tmux session identity is the core requirement, not an optional enhancement.
+    Source material: T001 tracker API notes, terminal-bubble-routing spec, terminal-bubbles implementation details, and the product owner's 2026-05-17 correction that caller-specified terminal/tmux session identity is the core requirement, not an optional enhancement.
   </footer>
 </main>
 </body>

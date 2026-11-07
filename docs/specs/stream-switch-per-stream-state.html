@@ -137,7 +137,7 @@
 <body>
 <main>
   <h1>T103 Stream Switch and Per-Stream State</h1>
-  <p class="meta">Clawline iOS shared spec. Prepared 2026-05-27. Canonical artifact: <code>/Users/mike/shared-workspace/clawline/specs/stream-switch-per-stream-state.html</code>.</p>
+  <p class="meta">Clawline iOS shared spec. Prepared 2026-05-27. Canonical artifact: <code>~/shared-workspace/clawline/specs/stream-switch-per-stream-state.html</code>.</p>
 
   <section class="callout">
     <p class="decision">Decision: stream switching must be governed by a per-stream runtime state contract, not by controller-global reset behavior.</p>
@@ -147,9 +147,9 @@
   <h2>Source Basis</h2>
   <ul>
     <li>Tracker T103 goal: stream switch should land at the persisted scroll position or bottom, not mid-conversation.</li>
-    <li>Preserved source material: <code>/Users/mike/shared-workspace/clawline/implementation_details/per-stream-state-encapsulation.md</code>.</li>
-    <li>Context source: <code>/Users/mike/shared-workspace/clawline/papers/corral-protocol-2026-02-21.md</code> records the unified T095/T103/T104 direction: per-session map ownership, not controller-level reset hacks.</li>
-    <li>Related dependency note: <code>/Users/mike/shared-workspace/clawline/implementation_details/t113-architecture-plan.md</code> says per-stream state depends on T105 message-stream seam coherence and must not conflate UI state with transport replay cursors.</li>
+    <li>Preserved source material: <code>~/shared-workspace/clawline/implementation_details/per-stream-state-encapsulation.md</code>.</li>
+    <li>Context source: <code>~/shared-workspace/clawline/papers/corral-protocol-2026-02-21.md</code> records the unified T095/T103/T104 direction: per-session map ownership, not controller-level reset hacks.</li>
+    <li>Related dependency note: <code>~/shared-workspace/clawline/implementation_details/t113-architecture-plan.md</code> says per-stream state depends on T105 message-stream seam coherence and must not conflate UI state with transport replay cursors.</li>
   </ul>
 
   <h2>Goal</h2>

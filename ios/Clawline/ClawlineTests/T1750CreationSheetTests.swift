@@ -28,8 +28,8 @@ struct T1750CreationSheetTests {
     @Test("T1750 no archetype offers the full assimilated host set")
     func hostsUnconstrainedWithoutArchetype() {
         #expect(
-            StreamCreationHostConstraint.allowedHosts(hosts: ["eezo", "tars"], archetype: nil)
-                == ["eezo", "tars"]
+            StreamCreationHostConstraint.allowedHosts(hosts: ["development-host", "provider-host"], archetype: nil)
+                == ["development-host", "provider-host"]
         )
     }
 
@@ -37,17 +37,17 @@ struct T1750CreationSheetTests {
     func hostsWildcard() throws {
         let archetype = try makeArchetype(name: "default", where: ["*"])
         #expect(
-            StreamCreationHostConstraint.allowedHosts(hosts: ["eezo", "tars"], archetype: archetype)
-                == ["eezo", "tars"]
+            StreamCreationHostConstraint.allowedHosts(hosts: ["development-host", "provider-host"], archetype: archetype)
+                == ["development-host", "provider-host"]
         )
     }
 
     @Test("T1750 an explicit where constrains to the named hosts in assimilated order")
     func hostsConstrained() throws {
-        let archetype = try makeArchetype(name: "eezo-only", where: ["eezo"])
+        let archetype = try makeArchetype(name: "development-host-only", where: ["development-host"])
         #expect(
-            StreamCreationHostConstraint.allowedHosts(hosts: ["eezo", "tars"], archetype: archetype)
-                == ["eezo"]
+            StreamCreationHostConstraint.allowedHosts(hosts: ["development-host", "provider-host"], archetype: archetype)
+                == ["development-host"]
         )
     }
 
@@ -55,7 +55,7 @@ struct T1750CreationSheetTests {
     func hostsWhereOutsideAssimilatedSet() throws {
         let archetype = try makeArchetype(name: "off-grid", where: ["mars"])
         #expect(
-            StreamCreationHostConstraint.allowedHosts(hosts: ["eezo", "tars"], archetype: archetype)
+            StreamCreationHostConstraint.allowedHosts(hosts: ["development-host", "provider-host"], archetype: archetype)
                 == []
         )
     }
@@ -64,7 +64,7 @@ struct T1750CreationSheetTests {
 
     @Test("T1750 a refusal message surfaces verbatim through StreamAPIError")
     func refusalVerbatimThroughStreamAPIError() {
-        let rule = "host tars is not allowed by archetype default (where: eezo)"
+        let rule = "host provider-host is not allowed by archetype default (where: development-host)"
         let error = StreamAPIError(code: "host_not_allowed", message: rule, statusCode: 422)
         #expect(error.errorDescription == rule)
         #expect(error.localizedDescription == rule)
@@ -114,7 +114,7 @@ struct T1750CreationSheetTests {
             idempotencyKey: "req_placement",
             harness: "codex",
             model: "gpt-5.6-sol",
-            host: "tars",
+            host: "provider-host",
             archetype: "default",
             token: "jwt"
         )
@@ -124,7 +124,7 @@ struct T1750CreationSheetTests {
         #expect(payload["idempotencyKey"] as? String == "req_placement")
         #expect(payload["harness"] as? String == "codex")
         #expect(payload["model"] as? String == "gpt-5.6-sol")
-        #expect(payload["host"] as? String == "tars")
+        #expect(payload["host"] as? String == "provider-host")
         #expect(payload["archetype"] as? String == "default")
     }
 

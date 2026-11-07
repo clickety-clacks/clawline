@@ -2,7 +2,7 @@
 
 Source requirements:
 - T1268 live ticket context retrieved from Janus on 2026-06-09.
-- T1263 source spec: `/Users/mike/.openclaw/workspace/www/specs/document-diff-viewer-widget.html`.
+- T1263 source spec: `~/.openclaw/workspace/www/specs/document-diff-viewer-widget.html`.
 
 ## Event-driven document updates
 

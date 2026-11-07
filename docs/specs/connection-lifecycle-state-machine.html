@@ -137,7 +137,7 @@
 <body>
 <main>
   <h1>T100 Connection Lifecycle State Machine Redesign</h1>
-  <p class="meta">Clawline iOS shared spec. Prepared 2026-05-27. Canonical artifact: <code>/Users/mike/shared-workspace/clawline/specs/connection-lifecycle-state-machine.html</code>.</p>
+  <p class="meta">Clawline iOS shared spec. Prepared 2026-05-27. Canonical artifact: <code>~/shared-workspace/clawline/specs/connection-lifecycle-state-machine.html</code>.</p>
 
   <section class="callout">
     <p class="decision">Decision: Clawline iOS must replace distributed connection lifecycle decisions with one explicit lifecycle state machine authority.</p>
@@ -147,7 +147,7 @@
   <h2>Source Basis</h2>
   <ul>
     <li>Tracker T100 goal: replace the distributed, implicit connection lifecycle across <code>ChatViewModel</code>, <code>ProviderChatService</code>, and <code>URLSessionWebSocketConnector</code> with a single explicit state machine covering <code>idle</code>, <code>connecting</code>, <code>authenticating</code>, <code>replaying</code>, <code>live</code>, <code>recovering</code>, and <code>failed</code>, with a single authority and explicit replay-complete barrier.</li>
-    <li>Preserved source material: <code>/Users/mike/shared-workspace/clawline/implementation_details/connection-lifecycle.md</code>. This spec carries forward only the details that define product-visible lifecycle behavior or prevent the known reconnect/replay failure modes.</li>
+    <li>Preserved source material: <code>~/shared-workspace/clawline/implementation_details/connection-lifecycle.md</code>. This spec carries forward only the details that define product-visible lifecycle behavior or prevent the known reconnect/replay failure modes.</li>
   </ul>
 
   <h2>Goal</h2>

@@ -108,7 +108,7 @@
   <h2>Source Notes</h2>
   <ul>
     <li>The T1136 product prompt is the source of truth. Current source was inspected only to identify affected surfaces and constraints.</li>
-    <li>Tracker context command <code>scripts/janus-ticket-context --ssh-host tars --ticket T1136 --related-links-only</code> was attempted from <code>/Users/mike/src/clawline</code>, but that helper is not present in this checkout. No Tracker state transition is part of this spec task.</li>
+    <li>Tracker context command <code>scripts/janus-ticket-context --ssh-host provider-host --ticket T1136 --related-links-only</code> was attempted from <code>~/src/clawline</code>, but that helper is not present in this checkout. No Tracker state transition is part of this spec task.</li>
     <li>Engram source <code>082a2586-6323-4d87-98ce-905f21738371</code> was queried with <code>engram peek</code>; it returned no readable content in this environment and did not affect requirements.</li>
     <li>The relevant Swift path is shared by iOS/iPadOS and Catalyst-adjacent build surfaces, but the required behavior is scoped to iOS/iPadOS software-keyboard state. Web was not found to share this native focus path.</li>
   </ul>
@@ -123,15 +123,15 @@
     </thead>
     <tbody>
       <tr>
-        <td><code>/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/ChatView.swift</code></td>
+        <td><code>~/src/clawline/ios/Clawline/Clawline/Views/Chat/ChatView.swift</code></td>
         <td>Owns stable composer focus state <code>isInputFocused</code>, software keyboard visibility, prompt focus trigger <code>focusRequestID</code>, stream popup route state, popup open/close bindings, and the dot/keyboard shortcut entry paths.</td>
       </tr>
       <tr>
-        <td><code>/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/StreamManagerSheet.swift</code></td>
+        <td><code>~/src/clawline/ios/Clawline/Clawline/Views/Chat/StreamManagerSheet.swift</code></td>
         <td>Owns the popup filter <code>TextField</code>, <code>isSearchFieldFocused</code>, search focus request handling, filtering, selection, arrow-key movement, Return activation, and popup teardown cleanup.</td>
       </tr>
       <tr>
-        <td><code>/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/KeyboardCommandRouter.swift</code></td>
+        <td><code>~/src/clawline/ios/Clawline/Clawline/Views/Chat/KeyboardCommandRouter.swift</code></td>
         <td>Defines composer-focused keyboard ownership records. T1136 must not change hardware keyboard routing unless implementation discovers a necessary focus-hint update for the existing popup/search path.</td>
       </tr>
     </tbody>

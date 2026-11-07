@@ -831,7 +831,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     }
 
     private func bubbleGradientColors(for role: Message.Role, palette: ChatFlowUIKitTheme.Palette) -> [UIColor] {
-        // A wake-delivered operator action (`sender=user:*`) is still Mike's own
+        // A wake-delivered operator action (`sender=user:*`) is still the operator's own
         // request. Keep the provenance cue, but do not borrow the inbound palette.
         // Other provenance-bearing user-role messages that reach this ordinary
         // bubble keep the existing inbound treatment.
@@ -1575,7 +1575,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         let shouldShowInlineReloadButton = isSingleLinkPreview && linkPreviewURL != nil
         applyCollapsedUserOnlyInteractionMode()
 
-        // Flynn: URLs should render as tappable cards per the design-system, independent of embedded preview success.
+        // URLs should render as tappable cards per the design-system, independent of embedded preview success.
         // For multi-URL messages, cards render for each unique URL; for single-URL messages, card renders above preview.
         var cardURLs = presentation.detectedURLs
         if let previewURL = presentation.parts.compactMap({ part -> URL? in
@@ -1773,7 +1773,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         for (index, descriptor) in terminalSessions.enumerated() {
             let terminalBubble = TerminalBubbleUIKitView(connectionPool: terminalConnectionPool)
             terminalBubble.onRequestExpand = { [weak self] in self?.onRequestExpand?() }
-            // Flynn: sizing matches HTML previews (wide content uses truncation cap, internal scroll).
+            // Sizing matches HTML previews (wide content uses truncation cap, internal scroll).
             let heightCap = effectiveTruncationHeight
             terminalBubble.configure(
                 descriptor: descriptor,
@@ -1899,7 +1899,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             stripAttachmentSummaryIfNeeded()
         }
 
-        // Flynn: terminal sessions render without sender header.
+        // Terminal sessions render without sender header.
         if hasTerminalSessions {
             headerStack.isHidden = true
         }

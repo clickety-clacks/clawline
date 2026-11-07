@@ -182,9 +182,9 @@ function sampleDescriptor() {
   return {
     version: 2,
     terminalSessionId: "term_123",
-    title: "eezo",
+    title: "development-host",
     destination: {
-      address: "mike@eezo"
+      address: "user-a@development-host"
     },
     capabilities: {
       interactive: true,

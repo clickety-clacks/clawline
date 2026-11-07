@@ -29,7 +29,7 @@ struct T1753ProvenanceFingerprintTests {
     func fingerprintReflectsSenderChange() {
         let controller = MessageFlowCollectionViewController()
         let base = message(id: "m1", content: "same body", sender: nil, role: .user)
-        let corrected = message(id: "m1", content: "same body", sender: "user:mike", role: .user)
+        let corrected = message(id: "m1", content: "same body", sender: "user:sample-user", role: .user)
         #expect(controller.fingerprint(for: base) != controller.fingerprint(for: corrected))
     }
 

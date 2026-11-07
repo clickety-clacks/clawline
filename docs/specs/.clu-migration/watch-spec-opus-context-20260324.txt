@@ -65,7 +65,7 @@
 
 ⏺ All six new sections are present. Now let me send the notification.
 
-⏺ Bash(~/.local/libexec/clu/hosts/eezo/notify --session agent:main:main -- 'watch-spec: revised watch-app.md with 6 new/updated sections: (1) watchOS safe-area layout…)
+⏺ Bash(~/.local/libexec/agent-tools/hosts/development-host/notify --session agent:main:main -- 'watch-spec: revised watch-app.md with 6 new/updated sections: (1) watchOS safe-area layout…)
   ⎿  ✅ Alert delivered
 
 ⏺ Revision complete. Here's a summary of what changed in watch-app.md:
@@ -83,20 +83,20 @@
   5. No Hardcoded Channel Fallbacks (line ~1089) — Forbids phantom names like "general". Loading state when streams pending, empty state when no streams, displayName only when loaded.
   6. Device Size Targets (line ~889) — 40/41mm, 45/46mm, 49mm Ultra as explicit test targets with layout differences noted.
 
-  3 pushback items flagged for Flynn (P1-P3):
-  - P1: Ring size vs. 40mm content budget — tight but workable, need Flynn's call on tradeoff
+  3 pushback items flagged for the product owner (P1-P3):
+  - P1: Ring size vs. 40mm content budget — tight but workable, need the product owner's call on tradeoff
   - P2: Page dots + channel name redundancy on 40mm — could drop channel name on smallest devices
   - P3: Swipe gesture conflict surface on 40mm where ring fills more of the screen
 
 ✻ Sautéed for 6m 37s
 
-❯ Flynn decision on 40mm pushback: ring scales down on 40mm — keep all elements (route chip, ring, status text, page dots, channel label). Do not drop any element. The GeometryReader-driven ring
+❯ the product owner decision on 40mm pushback: ring scales down on 40mm — keep all elements (route chip, ring, status text, page dots, channel label). Do not drop any element. The GeometryReader-driven ring
   sizing handles the constraint. Update the spec to resolve the open question with this decision: ring adapts to available space, all elements present on all device sizes. No further open questions
    needed on this point.
 
   When done, run ONE of these exactly (do not remove spaces):
-  1) ~/.local/libexec/clu/hosts/eezo/notify --session agent:main:main -- 'watch-spec: 40mm decision applied'
-  2) ~/.local/libexec/clu/hosts/eezo/notify --session agent:main:main --b64
+  1) ~/.local/libexec/agent-tools/hosts/development-host/notify --session agent:main:main -- 'watch-spec: 40mm decision applied'
+  2) ~/.local/libexec/agent-tools/hosts/development-host/notify --session agent:main:main --b64
 
 ⏺ Searched for 2 patterns, read 1 file (ctrl+o to expand)
 
@@ -107,11 +107,11 @@
       884
       885  **Mic button:** The mic/stop icon within the ring should be ~40% of ring diameter, with a minimum of 44×44 pt tap target per Apple HIG.
       886
-      887 -> **PUSHBACK — Open Question for Flynn:** The 40mm display has ~330 pt of usable vertical content height after safe area insets. With route chip + status text + page dots + channel nam
+      887 -> **PUSHBACK — Open Question for the product owner:** The 40mm display has ~330 pt of usable vertical content height after safe area insets. With route chip + status text + page dots + channel nam
           -e consuming ~120 pt, only ~210 pt remain. A ring at ~105 pt leaves ~105 pt of breathing room — tight but workable. However, if we need to show longer status text (multi-line transcript
           - preview) or add any additional elements, 40mm will not fit. **Should we consider dropping the channel name label on 40mm and showing it only in the page dots tooltip, or is 40mm a "fi
           -ts but tight" acceptable tradeoff?**
-      887 +**40mm policy (Flynn-resolved, 2026-03-05):** All UI elements (route chip, ring, status text, page dots, channel name) are present on ALL device sizes including 40mm. The GeometryReade
+      887 +**40mm policy (the product owner-resolved, 2026-03-05):** All UI elements (route chip, ring, status text, page dots, channel name) are present on ALL device sizes including 40mm. The GeometryReade
           +r-driven ring sizing adapts to the available space — no elements are dropped or hidden on smaller screens. The ring scales down to fit; this is the intended behavior.
       888
       889  #### Device Size Targets
@@ -120,20 +120,20 @@
 ⏺ Update(watch-app.md)
   ⎿  Added 2 lines, removed 2 lines
       1520
-      1521  These items flag potential incompatibilities between Flynn's UI design and good watchOS UX on certain device sizes. They are not blockers — they are decision points that need Flynn's
+      1521  These items flag potential incompatibilities between the product owner's UI design and good watchOS UX on certain device sizes. They are not blockers — they are decision points that need the product owner's
             call.
       1522
       1523 -**P1. Ring size vs. 40mm content budget.** The 40mm display has ~330 pt usable vertical height after safe area insets. Route chip + status text + page dots + channel name + spacing co
            -nsume ~120 pt, leaving ~210 pt for the ring and breathing room. An adaptive ring at ~105 pt works, but it's tight. If we ever need multi-line status text (e.g., scrolling transcript p
            -review) or additional UI elements, 40mm will not fit without removing something. **Options:** (a) Accept "tight but works" on 40mm, (b) drop channel name label on 40mm (show only in p
            -age dots), (c) designate 40mm as "supported but degraded" and optimize for 45mm+.
-      1523 +~~**P1. Ring size vs. 40mm content budget.**~~ **RESOLVED (Flynn, 2026-03-05):** Ring scales down on 40mm via GeometryReader. All elements present on all device sizes. No elements dro
+      1523 +~~**P1. Ring size vs. 40mm content budget.**~~ **RESOLVED (the product owner, 2026-03-05):** Ring scales down on 40mm via GeometryReader. All elements present on all device sizes. No elements dro
            +pped.
       1524
       1525 -**P2. Page dots + channel name redundancy on small screens.** The current design shows both page dots AND a channel name label. On 40mm, these together consume ~34 pt of scarce vertic
            -al space. The page dots alone communicate position; the channel name adds context but costs space. **Option:** On 40mm, show only page dots. On 45mm+, show both. This is a device-size
            --adaptive layout choice.
-      1525 +~~**P2. Page dots + channel name redundancy on small screens.**~~ **RESOLVED (Flynn, 2026-03-05):** Keep both page dots and channel name on all sizes including 40mm. GeometryReader-dr
+      1525 +~~**P2. Page dots + channel name redundancy on small screens.**~~ **RESOLVED (the product owner, 2026-03-05):** Keep both page dots and channel name on all sizes including 40mm. GeometryReader-dr
            +iven ring sizing absorbs the constraint.
       1526
       1527  **P3. Swipe gesture conflict surface.** The full-screen horizontal swipe for channel switching conflicts with the hold gesture on the waveform ring. The spec now defines explicit arbi
@@ -146,16 +146,16 @@
   ⎿  Added 1 line, removed 1 line
       1  # Clawline Watch App — Voice Terminal
       2
-      3 -**Status:** Revised — Pending Flynn review of pushback items (P1–P3)
+      3 -**Status:** Revised — Pending the product owner review of pushback items (P1–P3)
       3 +**Status:** Revised — P1/P2 resolved, P3 (swipe gesture conflict on 40mm) pending
       4  **Date:** 2026-03-05 (revised from 2026-02-27)
       5  **Owner:** Clawline Apple Watch
       6
 
-⏺ Bash(~/.local/libexec/clu/hosts/eezo/notify --session agent:main:main -- 'watch-spec: 40mm decision applied')
+⏺ Bash(~/.local/libexec/agent-tools/hosts/development-host/notify --session agent:main:main -- 'watch-spec: 40mm decision applied')
   ⎿  ✅ Alert delivered
 
-⏺ Done. Applied Flynn's 40mm decision:
+⏺ Done. Applied the product owner's 40mm decision:
 
   - Removed the inline pushback question from the Adaptive Ring Sizing section, replaced with a resolved-decision note: all elements present on all sizes, ring adapts via GeometryReader.
   - Marked P1 and P2 as resolved in the pushback section.

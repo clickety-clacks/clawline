@@ -216,7 +216,7 @@ struct UnifiedMarkdownRendererMarkTests {
     func assistantMarkdownRenderingTrimsBacktickLinkSpan() {
         let rust = SalientHighlightApplier.highlightColor(isDark: false)
         let rendered = attributedMarkdownForTests(
-            markdown: "http://tars:18800/www/tracker-dashboard.html`",
+            markdown: "http://provider-host:18800/www/tracker-dashboard.html`",
             baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
             inkColor: .black,
             lineSpacing: 4,
@@ -229,7 +229,7 @@ struct UnifiedMarkdownRendererMarkTests {
         }
 
         let text = rendered.string as NSString
-        let urlRange = text.range(of: "http://tars:18800/www/tracker-dashboard.html")
+        let urlRange = text.range(of: "http://provider-host:18800/www/tracker-dashboard.html")
         let backtickRange = text.range(of: "`")
         #expect(urlRange.location != NSNotFound)
         #expect(backtickRange.location != NSNotFound)

@@ -1,9 +1,9 @@
-# T099 Device Auth Path Capture (Ansible)
+# T099 Device Auth Path Capture (Test-device)
 
 ## Capture context
-- Device: `63C9EE36-3EA0-580A-8DE2-9E9C50174CAC` (Ansible)
+- Device: `test-device-1` (Test-device)
 - App process observed before capture: PID `16223`
-- Capture method: `XcodeBuildMCP.start_device_log_cap` session `15e953d8-e3eb-4b28-9a98-dc21e8b9bafc`
+- Capture method: `XcodeBuildMCP.start_device_log_cap` session `test-device-2`
 - Note: this tool relaunches the app; captured logs are from relaunched process `Clawline[16238]`.
 
 ## Did `handleAuthStateChange` reach coordinator start path?

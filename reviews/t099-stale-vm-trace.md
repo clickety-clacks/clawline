@@ -41,14 +41,14 @@ Source file: `/tmp/t099-stalevm-timeline.txt`
 ## Symptom reproduction state
 Post-login UI snapshot (`/tmp/t099-stalevm-pass2-after-login.json`) still shows reconnecting:
 - `AXLabel: "Reconnecting"` (line 195)
-- Active stream key remains `agent:main:clawline:qa_sim:dm` (line 48)
+- Active stream key remains `agent:main:clawline:test-account:dm` (line 48)
 
 ## Raw excerpt
 ```text
 475: ... lifecycle phase-transition from=idle to=connecting epoch=4
 476: ... lifecycle phase-transition from=idle to=connecting epoch=2
 478: ... lifecycle phase-transition from=idle to=connecting epoch=1
-524: ... ChatViewModel onDisappear id=822EC543-D9C8-4E43-991C-1E1D045E6A33
+524: ... ChatViewModel onDisappear id=view-model-1
 525: ... [T099-STALEVM] disconnect trigger=onDisappear id=822EC543... state=reconnecting
 526: ... ProviderChatService disconnect requested
 531: ... lifecycle phase-transition from=recovering to=idle epoch=1

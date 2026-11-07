@@ -3,11 +3,11 @@
 Date: 2026-06-27
 Ticket: T1465
 Branch: clawline-t1465-notification-bubble-padding-regression
-Current HEAD / Ansible build 14503: aefcbd68da8a0b85e22746ebaee75637fe57771f
+Current HEAD / Test-device build 14503: aefcbd68da8a0b85e22746ebaee75637fe57771f
 
 ## Product Boundary
 
-Source of truth: `/Users/mike/shared-workspace/clawline/specs/notification-authority.html`.
+Source of truth: `~/shared-workspace/clawline/specs/notification-authority.html`.
 
 - D5: short notification bubbles shrink to content without excess bottom padding.
 - P1-P8/P7: dock/peek is display state and must preserve notification geometry; keyboard/chat switching must not change peek geometry.
@@ -15,12 +15,12 @@ Source of truth: `/Users/mike/shared-workspace/clawline/specs/notification-autho
 
 T354/T1193 are adjacent ordinary/composer bubble padding work and are not sufficient proof for cross-chat notification D5.
 
-## Current Ansible Evidence Classification
+## Current Test-device Evidence Classification
 
-The referenced Ansible asset was found on TARS and copied locally for inspection:
+The referenced Test-device asset was found on Provider-host and copied locally for inspection:
 
-- Remote: `/Users/mike/.openclaw/clawline-media/assets/a_3690253e-2747-492c-8da2-5dc6a266acc1`
-- Local scratch copy: `scratch/t1465-provenance/ansible-current-a_3690253e.png`
+- Remote: `~/.openclaw/clawline-media/assets/a_3690253e-2747-492c-8da2-5dc6a266acc1`
+- Local scratch copy: `scratch/t1465-provenance/test-device-current-a_3690253e.png`
 - Dimensions: 1260 x 721
 
 Visual classification: this screenshot is not a cross-chat notification bubble. It shows an ordinary green user message bubble:
@@ -35,7 +35,7 @@ Approximate screenshot measurement from the image:
 - Visible text/header content ends around 290 px.
 - Lower blank area inside the bubble is roughly 340 px.
 
-Conclusion: the live Ansible evidence is ordinary chat-bubble height/padding near dock/peek, not notification D5 internal padding. T1465 should not be patched in `CrossChatNotificationBubbleView` from this screenshot alone.
+Conclusion: the live Test-device evidence is ordinary chat-bubble height/padding near dock/peek, not notification D5 internal padding. T1465 should not be patched in `CrossChatNotificationBubbleView` from this screenshot alone.
 
 ## Notification D5 Matrix
 
@@ -45,7 +45,7 @@ This matrix is source-derived from `ios/Clawline/Clawline/Views/Chat/ChatView.sw
 | --- | --- | --- | --- | --- | --- |
 | `79981b2794` | Merge T307 current source | Bad: non-scrolling notification content applies `entriesBottomBreathingRoom = 8` | Content height + 8 pt bottom blank | Same internal +8 pt blank; dock state is not the cause | `ChatView.swift`, `ChatViewModel.swift`, `MessageBubbleUIKitView.swift` |
 | `c834ed86` | Repair Catalyst dictation audio import | Good: `CrossChatNotificationEntrySurfaceGeometry.bottomBreathingRoom(entriesNeedScroll:)` exists and returns 0 for non-scroll | Shrinks to content | Preserved | no notification geometry change |
-| `0e45df44e8^` | Bump T320 Ansible deploy build | Bad: non-scroll path still carries bottom breathing room | Content height + 8 pt bottom blank | Same internal +8 pt blank | prior `ChatView.swift` state |
+| `0e45df44e8^` | Bump T320 Test-device deploy build | Bad: non-scroll path still carries bottom breathing room | Content height + 8 pt bottom blank | Same internal +8 pt blank | prior `ChatView.swift` state |
 | `0e45df44e8` | Remove duplicate notification measurement rendering | Still bad: duplicate measurement removed, but measured content still applies bottom breathing room | Content height + 8 pt bottom blank | Same internal +8 pt blank | `ChatView.swift` |
 | `49a7b93845^` | Fix dismissed notification reappearance | Bad: same pre-repair measured content bottom breathing room | Content height + 8 pt bottom blank | Same internal +8 pt blank | prior `ChatView.swift` state |
 | `49a7b93845` | Fix notification bubble bottom padding | First good: bottom breathing room moved behind `entriesNeedScroll` | Shrinks to content; non-scroll bottom blank 0 pt | Preserved; non-scroll bottom blank 0 pt | `ChatView.swift` |
@@ -66,7 +66,7 @@ Notification D5 provenance conclusion:
 
 ## Ordinary Chat Bubble Provenance Lane
 
-Because the Ansible asset is an ordinary green user message bubble, the relevant changed files are outside the notification matrix:
+Because the Test-device asset is an ordinary green user message bubble, the relevant changed files are outside the notification matrix:
 
 - Primary observed surface: `ios/Clawline/Clawline/Views/Chat/MessageBubbleUIKitView.swift`
 - Secondary sizing path: `ios/Clawline/Clawline/Views/Chat/BubbleSizingV2.swift`
@@ -84,7 +84,7 @@ Relevant commits after the requested notification baselines:
 
 Observed ordinary chat-bubble first-bad/window conclusion:
 
-- The requested notification D5 commit pairs do not contain the first-bad for the photographed Ansible issue.
+- The requested notification D5 commit pairs do not contain the first-bad for the photographed Test-device issue.
 - The best source window for the photographed ordinary chat bubble is `07c1497c7c..c6ef8f7fdf`, with `c6ef8f7fdf` the strongest concrete first-bad candidate because it introduced a same-message dynamic-content reuse fast path for textual bubbles.
 - Files that could introduce the photographed padding/height are `MessageBubbleUIKitView.swift` and `BubbleSizingV2.swift`, not the notification entry bottom-breathing-room code in `ChatView.swift`.
 
@@ -100,4 +100,4 @@ The result returned multiple historical sessions for the dynamic-content wrapper
 
 ## Provenance Decision
 
-Do not patch notification D5 from the current Ansible asset. Current source keeps the known notification D5 repair, and the asset shows an ordinary chat bubble. The next implementation pass should target a minimal ordinary message-bubble sizing fix only if a local reproduction confirms `c6ef8f7fdf`/`BubbleSizingV2` preserves a stale `outerScrollViewportHeight` near dock/peek.
+Do not patch notification D5 from the current Test-device asset. Current source keeps the known notification D5 repair, and the asset shows an ordinary chat bubble. The next implementation pass should target a minimal ordinary message-bubble sizing fix only if a local reproduction confirms `c6ef8f7fdf`/`BubbleSizingV2` preserves a stale `outerScrollViewportHeight` near dock/peek.

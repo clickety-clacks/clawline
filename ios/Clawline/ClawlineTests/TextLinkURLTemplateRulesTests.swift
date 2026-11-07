@@ -414,7 +414,7 @@ struct TextLinkURLTemplateRulesTests {
             attachments: [],
             deviceId: nil,
             sessionKey: "server:personal",
-            sender: "Mike"
+            sender: "Sample User"
         )
         let presentation = MessagePresentation(
             parts: [.text(selectedContent)],

@@ -13,7 +13,7 @@ Session keys:
 The client should send/receive `sessionKey` and route UI streams by that value.
 
 Notes on spec alignment:
-- `docs/architecture.md` uses `USER` in examples (e.g., `flynn`), while `docs/ios-provider-connection.md` uses `{userId}`. Confirm with server whether this is the user-facing handle or the auth `userId` UUID before implementing.
+- `docs/architecture.md` uses `USER` in examples (e.g., `sample-owner`), while `docs/ios-provider-connection.md` uses `{userId}`. Confirm with server whether this is the user-facing handle or the auth `userId` UUID before implementing.
 - The canonical wire protocol uses `role` (not `sender`) for message attribution.
 - Typing events are shaped as `{ "type": "typing", "active": true }` (client) and `{ "type": "typing", "role": "assistant", "active": true }` (provider).
 

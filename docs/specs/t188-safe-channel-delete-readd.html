@@ -55,7 +55,7 @@
   <div class="wrap">
     <section class="card">
       <h1>T188 — Clawline: Implement safe channel delete + re-add flow, then re-enable <code>deleteAccount</code></h1>
-      <p class="meta">Status target: Spec Review candidate · Artifact path: <code>/Users/mike/shared-workspace/clawline/specs/t188-safe-channel-delete-readd.html</code></p>
+      <p class="meta">Status target: Spec Review candidate · Artifact path: <code>~/shared-workspace/clawline/specs/t188-safe-channel-delete-readd.html</code></p>
       <div>
         <span class="pill">Spec ticket: T188</span>
         <span class="pill">Product area: Clawline provider</span>
@@ -194,12 +194,12 @@
       <h2>Source truth inspected</h2>
       <div class="src" id="S1"><h3>S1</h3><p><code>/Volumes/BlipsAndChitz/tracker/tracking/T188.md</code> — primary ticket statement, product goal, and key questions.</p></div>
       <div class="src" id="S2"><h3>S2</h3><p>Tracker DB row for T188 in <code>/Volumes/BlipsAndChitz/tracker/tracking/tracker.db</code> — confirms current live state is <code>Spec Writing</code> owned by Rebase.</p></div>
-      <div class="src" id="S3"><h3>S3</h3><p><code>/Users/mike/openclaw/extensions/clawline/src/channel.setup.ts</code> — confirms <code>deleteAccount: undefined</code> suppression still exists.</p></div>
-      <div class="src" id="S4"><h3>S4</h3><p><code>/Users/mike/openclaw/extensions/clawline/src/onboarding.ts</code> — shows current add/setup only enables/configures Clawline defaults; no proven safe delete/re-add orchestration exists there today.</p></div>
-      <div class="src" id="S5"><h3>S5</h3><p><code>/Users/mike/openclaw/src/commands/channels/remove.ts</code> — shows generic remove flow attempts a gateway stop only for plugins with gateway account lifecycle seams; review must not assume this alone proves Clawline-safe destructive delete.</p></div>
-      <div class="src" id="S6"><h3>S6</h3><p><code>/Users/mike/openclaw/src/commands/channels/add.ts</code> — shows add writes config and optional post-write hooks, but does not itself prove fresh-secret activation for Clawline.</p></div>
-      <div class="src" id="S7"><h3>S7</h3><p><code>/Users/mike/openclaw/extensions/clawline/src/runtime/config.ts</code> and <code>config-schema.ts</code> — confirm <code>server.cluSecret</code> is real persisted Clawline config, defaulting to null.</p></div>
-      <div class="src" id="S8"><h3>S8</h3><p><code>/Users/mike/openclaw/extensions/clawline/src/runtime/service.ts</code> — confirms Clawline has an explicit service start/stop handle, which is relevant to the shutdown/restart design space.</p></div>
+      <div class="src" id="S3"><h3>S3</h3><p><code>~/openclaw/extensions/clawline/src/channel.setup.ts</code> — confirms <code>deleteAccount: undefined</code> suppression still exists.</p></div>
+      <div class="src" id="S4"><h3>S4</h3><p><code>~/openclaw/extensions/clawline/src/onboarding.ts</code> — shows current add/setup only enables/configures Clawline defaults; no proven safe delete/re-add orchestration exists there today.</p></div>
+      <div class="src" id="S5"><h3>S5</h3><p><code>~/openclaw/src/commands/channels/remove.ts</code> — shows generic remove flow attempts a gateway stop only for plugins with gateway account lifecycle seams; review must not assume this alone proves Clawline-safe destructive delete.</p></div>
+      <div class="src" id="S6"><h3>S6</h3><p><code>~/openclaw/src/commands/channels/add.ts</code> — shows add writes config and optional post-write hooks, but does not itself prove fresh-secret activation for Clawline.</p></div>
+      <div class="src" id="S7"><h3>S7</h3><p><code>~/openclaw/extensions/clawline/src/runtime/config.ts</code> and <code>config-schema.ts</code> — confirm <code>server.cluSecret</code> is real persisted Clawline config, defaulting to null.</p></div>
+      <div class="src" id="S8"><h3>S8</h3><p><code>~/openclaw/extensions/clawline/src/runtime/service.ts</code> — confirms Clawline has an explicit service start/stop handle, which is relevant to the shutdown/restart design space.</p></div>
     </section>
 
     <section class="card" id="implementation-shape">

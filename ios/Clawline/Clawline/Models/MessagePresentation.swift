@@ -448,7 +448,7 @@ enum MessagePresentationBuilder {
             parts.append(.linkPreview(detectedURLOccurrences[0]))
         }
 
-        // Flynn #28: "single link" means exactly one detected URL occurrence, not "one unique URL repeated".
+        // Rule #28: "single link" means exactly one detected URL occurrence, not "one unique URL repeated".
         let hasSingleURL = detectedURLOccurrences.count == 1
 
         var hasMedia = false

@@ -25,7 +25,7 @@ Current terminal bubbles are only half-explicit.
 
 Observed consequence:
 
-- one client request may intend "open a bubble on eezo"
+- one client request may intend "open a bubble on development-host"
 - but the actual destination is hidden in provider process config, not in the request or descriptor
 - the UI therefore cannot truthfully tell the user which destination a given bubble is on
 - mixed-destination terminal bubbles are impossible because one provider process only points at one configured remote tmux host at a time
@@ -79,7 +79,7 @@ New bubble flow:
 
 ### Destination address
 
-The concrete remote address the provider should connect to for this bubble. In the initial version of this fix, this is an SSH target string such as `mike@eezo` or `eezo`.
+The concrete remote address the provider should connect to for this bubble. In the initial version of this fix, this is an SSH target string such as `user-a@development-host` or `development-host`.
 
 ### Destination
 
@@ -94,9 +94,9 @@ Required shape:
 ```json
 {
   "destination": {
-    "address": "mike@eezo"
+    "address": "user-a@development-host"
   },
-  "title": "eezo"
+  "title": "development-host"
 }
 ```
 
@@ -124,9 +124,9 @@ New shape:
 {
   "version": 2,
   "terminalSessionId": "term_abc123",
-  "title": "eezo",
+  "title": "development-host",
   "destination": {
-    "address": "mike@eezo"
+    "address": "user-a@development-host"
   },
   "provider": {
     "baseUrl": "https://provider.example",
@@ -217,7 +217,7 @@ For clients that can decode the attachment but do not know `destination`, the de
 
 ### New clients reading old bubbles
 
-Old descriptors have no explicit destination. New clients must treat those bubbles as destination-unknown, not as "on eezo" or "on provider".
+Old descriptors have no explicit destination. New clients must treat those bubbles as destination-unknown, not as "on development-host" or "on provider".
 
 Required UI behavior for old descriptors:
 
@@ -333,11 +333,11 @@ This makes the UI truthful.
 
 1. Two terminal bubbles created in the same user session can target two different destination addresses, and each bubble reconnects to its own destination after client detach/reattach.
 2. Provider restart does not move an existing explicit bubble onto a different destination.
-3. New client UI shows `mike@eezo` or a direct display derived from that same descriptor address for a bubble that explicitly names `mike@eezo`.
-4. New client UI does not claim `eezo`, `tars`, or `provider` for an old descriptor that lacks destination metadata.
+3. New client UI shows `user-a@development-host` or a direct display derived from that same descriptor address for a bubble that explicitly names `user-a@development-host`.
+4. New client UI does not claim `development-host`, `provider-host`, or `provider` for an old descriptor that lacks destination metadata.
 5. A destination connection failure causes only that bubble to fail; the provider does not silently reroute it through some other global host setting.
 6. The provider never requires the client to SSH directly.
-7. Event-tail or DB-based rehydration restores `mike@eezo` for a version 2 bubble that was originally created on `mike@eezo`.
+7. Event-tail or DB-based rehydration restores `user-a@development-host` for a version 2 bubble that was originally created on `user-a@development-host`.
 
 ## Risks
 

@@ -26,7 +26,7 @@ Evidence:
 - `transitionConnectionState(...)` is only called from lifecycle output handling (single callsite):
   - `ios/Clawline/Clawline/ViewModels/ChatViewModel.swift:1273`
 
-Device evidence from the instrumented Ansible capture (`reviews/t099-device-auth-path-capture.md`):
+Device evidence from the instrumented Test-device capture (`reviews/t099-device-auth-path-capture.md`):
 - `[T099-COORD] ... observeLifecycleOutputs output=phaseTransition(... replaying -> live ...)`
 - This means `handleLifecycleOutput(.phaseTransition to: .live)` executed on that VM, and by the code above it maps to `.connected`.
 

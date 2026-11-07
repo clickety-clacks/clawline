@@ -148,8 +148,8 @@
 
   <h2>Source Notes</h2>
   <ul>
-    <li>The tracker path <code>/Users/mike/.openclaw/workspace/tracking/T307.md</code> now exists and is the active T307 tracking file. Earlier drafts predated tracker creation; current product corrections must be reflected in both this source spec and the tracker.</li>
-    <li>The canonical invariants path named in agent instructions, <code>/Users/mike/shared-workspace/clawline/specs/clawline-invariants.md</code>, is absent. The available mirror <code>/Users/mike/shared-workspace/clawline/implementation_details/clawline-invariants.md</code> was consulted.</li>
+    <li>The tracker path <code>~/.openclaw/workspace/tracking/T307.md</code> now exists and is the active T307 tracking file. Earlier drafts predated tracker creation; current product corrections must be reflected in both this source spec and the tracker.</li>
+    <li>The canonical invariants path named in agent instructions, <code>~/shared-workspace/clawline/specs/clawline-invariants.md</code>, is absent. The available mirror <code>~/shared-workspace/clawline/implementation_details/clawline-invariants.md</code> was consulted.</li>
     <li>The requirements in the task prompt are treated as the source of truth for this spec. No implementation code was changed.</li>
   </ul>
 
@@ -355,7 +355,7 @@
     <li><code>Cmd-minus</code> dismisses all notifications, including hidden overflow backlog.</li>
     <li><code>Cmd-\</code> toggles the notification stack between normal visible placement and the right-edge docked/peek state. It uses the same state transition and animation as swiping the stack right to dock and swiping/tapping left-edge peeks to restore.</li>
     <li>When visible notification bubbles exist, <code>Cmd-J</code> and <code>Cmd-K</code> scroll the currently active visible notification bubble's internal scroll area using the same directional convention as the existing on-screen chat-bubble scroll behavior. These shortcuts are global notification shortcuts while notifications are visible: they must work when focus is in the composer, in a notification reply text field, in another non-text UI surface, or nowhere obvious at all.</li>
-    <li><code>Cmd-Shift-J</code> and <code>Cmd-Shift-K</code> follow the same always-available notification-bubble scroll rule when visible notifications exist. A state where these shortcuts sometimes work and later stop working during the same app/runtime session is a regression, not an acceptable fallback. This deployed eezo failure is tracked as V307-36.</li>
+    <li><code>Cmd-Shift-J</code> and <code>Cmd-Shift-K</code> follow the same always-available notification-bubble scroll rule when visible notifications exist. A state where these shortcuts sometimes work and later stop working during the same app/runtime session is a regression, not an acceptable fallback. This deployed development-host failure is tracked as V307-36.</li>
     <li>If no notification bubble has an explicit active/hovered/focused state, <code>Cmd-J</code> and <code>Cmd-K</code> target the top visible notification bubble. If the targeted notification has no overflow scrollable content, the shortcut is a no-op and must not steal or synthesize transcript scroll.</li>
     <li>Hotkeys are reassigned whenever bubbles enter, leave, reorder, overflow, or return from overflow.</li>
     <li>The assigned shortcut number is visible only when the platform reports that hardware-keyboard shortcuts are available. On iOS/iPadOS, treat a connected hardware keyboard as detectable runtime state; without that signal, hide the number indicator. On macOS/Catalyst, hardware-keyboard shortcuts are assumed available unless the platform explicitly reports otherwise.</li>

@@ -14,7 +14,7 @@ Lineage/reference assets:
 - `clawline-v37b-runner-up-visible-rings.png` — runner-up with stronger ring visibility.
 
 Product notes:
-- Flynn selected v37 #3 (`v37c`) as the pick.
+- the product owner selected v37 #3 (`v37c`) as the pick.
 - Preserve platform clipping; do not bake rounded corners.
 - Composite is for iPad/iOS/Mac.
 - Background + transparent foreground are for Spatial bg/fg layers.

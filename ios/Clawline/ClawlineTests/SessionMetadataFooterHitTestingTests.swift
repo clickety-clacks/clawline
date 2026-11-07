@@ -318,10 +318,10 @@ struct SessionMetadataFooterHitTestingTests {
     func footerModelLabelPrefersMatchingCatalogDisplayName() throws {
         let status = try decodedStatus(
             displayModel: "qwen3.6-35b-a3b",
-            catalogName: "Qwen 3.6 35B-A3B Q4_K_M (gibson)"
+            catalogName: "Qwen 3.6 35B-A3B Q4_K_M (test-host-a)"
         )
 
-        #expect(SessionMetadataFooterCell.footerText(for: status) == "Qwen 3.6 35B-A3B Q4_K_M (gibson)  ·  Thinking high  ·  Fast off")
+        #expect(SessionMetadataFooterCell.footerText(for: status) == "Qwen 3.6 35B-A3B Q4_K_M (test-host-a)  ·  Thinking high  ·  Fast off")
     }
 
     @Test("Footer model menu deduplicates catalog refs with one selected item")
@@ -691,8 +691,8 @@ private func decodedStatus(displayModel: String, catalogName: String) throws -> 
         catalogModelsJSON: """
           {
             "id": "\(displayModel)",
-            "provider": "gibson",
-            "ref": "gibson/\(displayModel)",
+            "provider": "test-host-a",
+            "ref": "test-host-a/\(displayModel)",
             "name": "\(catalogName)",
             "alias": "qwen"
           }
@@ -707,7 +707,7 @@ private func decodedStatus(displayModel: String, catalogModelsJSON: String) thro
       "sessionKey": "agent:heimdal:main",
       "display": {
         "model": "\(displayModel)",
-        "provider": "gibson",
+        "provider": "test-host-a",
         "thinkingLevel": "high",
         "fastMode": false
       },

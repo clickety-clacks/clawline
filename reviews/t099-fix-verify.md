@@ -25,7 +25,7 @@ Artifacts:
 - **PASS**: cold relaunch/login lands on prior stream (`DM`), not Personal.
 - UI evidence:
   - `/tmp/t099-fix-cold-final-ui.json` contains:
-    - `AXUniqueId: "agent:main:clawline:qa_sim:dm"`
+    - `AXUniqueId: "agent:main:clawline:test-account:dm"`
     - `AXLabel: "DM"`
 
 ## Cold-launch trace findings
@@ -42,9 +42,9 @@ Artifacts:
 
 ## Raw log excerpt (cold launch through first render)
 ```text
-2026-02-27 13:52:56.672 ... [T099] active marker=handleAuthStateChange_enter ... persisted=agent:main:clawline:qa_sim:dm ... orderedCount=0 ...
-2026-02-27 13:52:56.674 ... [T099] active marker=persistedActiveSessionKey_hit ... stored=agent:main:clawline:qa_sim:dm
-2026-02-27 13:52:56.674 ... [T099] active marker=persistActiveSessionKey ... sessionKey=agent:main:clawline:qa_sim:dm
-2026-02-27 13:52:56.674 ... [T099] active marker=restoreActiveSessionKeyIfNeeded_applied ... ui=agent:main:clawline:qa_sim:dm ...
+2026-02-27 13:52:56.672 ... [T099] active marker=handleAuthStateChange_enter ... persisted=agent:main:clawline:test-account:dm ... orderedCount=0 ...
+2026-02-27 13:52:56.674 ... [T099] active marker=persistedActiveSessionKey_hit ... stored=agent:main:clawline:test-account:dm
+2026-02-27 13:52:56.674 ... [T099] active marker=persistActiveSessionKey ... sessionKey=agent:main:clawline:test-account:dm
+2026-02-27 13:52:56.674 ... [T099] active marker=restoreActiveSessionKeyIfNeeded_applied ... ui=agent:main:clawline:test-account:dm ...
 2026-02-27 13:52:57.842 ... [T099] provisioning marker=transitionConnectionState_enter state=connected ...
 ```

@@ -15,7 +15,7 @@ Use `scratch/` for:
 
 ## NOT for specs
 
-**Technical specs do NOT go in scratch/.** Use the `spec-homing` skill — specs live at `/Users/mike/shared-workspace/{project}/specs/{specname}.md`.
+**Technical specs do NOT go in scratch/.** Use the `spec-homing` skill — specs live at `~/shared-workspace/{project}/specs/{specname}.md`.
 
 In the spec-first workflow:
 - Scratch can hold temporary brainstorming notes only.

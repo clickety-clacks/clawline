@@ -59,13 +59,13 @@ struct MessageKindClassifierTests {
 
     @Test("stamped user:* operator origin is NOT special — classifies as assistant (unchanged)")
     func userOriginIsAssistantDefault() {
-        let m = message(sender: "user:mike", content: "[from user:mike]\nship it")
+        let m = message(sender: "user:sample-user", content: "[from user:sample-user]\nship it")
         #expect(m.messageKind == .assistant)
     }
 
     @Test("marker is unreachable by heuristic — no origin ever yields it")
     func markerNeverFromHeuristic() {
-        for sender in ["process:tightbeam", "agent:coder", "user:mike"] {
+        for sender in ["process:tightbeam", "agent:coder", "user:sample-user"] {
             let m = message(sender: sender, content: "[from \(sender)]\nbody")
             #expect(m.messageKind != .marker)
         }

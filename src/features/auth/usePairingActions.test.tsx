@@ -126,7 +126,7 @@ describe("usePairingActions", () => {
       target: { value: "Clawline Web Test" }
     });
     fireEvent.change(screen.getByLabelText("Provider address"), {
-      target: { value: "ws://eezo.tail4105e8.ts.net:18800" }
+      target: { value: "ws://development-host.example.test:18800" }
     });
     fireEvent.click(screen.getByRole("button", { name: "Pair browser" }));
 
@@ -169,7 +169,7 @@ describe("usePairingActions", () => {
     expect(screen.getByTestId("location")).toHaveTextContent("/chat");
     expect(authStore.getState().session).toMatchObject({
       claimedName: "Clawline Web Test",
-      serverUrl: "ws://eezo.tail4105e8.ts.net:18800/ws",
+      serverUrl: "ws://development-host.example.test:18800/ws",
       token: "live-token",
       userId: "clawline_web_test"
     });
@@ -203,7 +203,7 @@ describe("usePairingActions", () => {
       target: { value: "Clawline Web Test" }
     });
     fireEvent.change(screen.getByLabelText("Provider address"), {
-      target: { value: "ws://eezo.tail4105e8.ts.net:18800" }
+      target: { value: "ws://development-host.example.test:18800" }
     });
     fireEvent.click(screen.getByRole("button", { name: "Pair browser" }));
 

@@ -270,7 +270,7 @@
 
 <h2>9.1 `stream_sessions` additive fields</h2>
 
-<li>`createdBy TEXT NOT NULL DEFAULT &#x27;user&#x27;` (`user | clu`)</li>
+<li>`createdBy TEXT NOT NULL DEFAULT &#x27;user&#x27;` (`user | test-user`)</li>
 <li>`status TEXT NOT NULL DEFAULT &#x27;active&#x27;` (`active | closed`)</li>
 
 <p>Migration note:</p>
@@ -360,7 +360,7 @@ CREATE TABLE IF NOT EXISTS stream_lineage (
 <h2>12. Security and Guardrails</h2>
 
 <li>`X-CLU-Secret` must be configured out-of-band and not exposed to clients.</li>
-<li>Provider logs all server-side lifecycle mutations with `actor=clu`.</li>
+<li>Provider logs all server-side lifecycle mutations with `actor=test-user`.</li>
 <li>Rate limits (keyed by `userId` path parameter):</li>
 <li>create: 20/min/user</li>
 <li>rename: 30/min/user</li>

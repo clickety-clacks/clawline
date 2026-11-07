@@ -112,7 +112,7 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
     /// `layoutSubviews` pass, which can occur after `LinkPreviewView.layoutSubviews`.
     ///
     /// If we update a `layer.mask` for the container too early, the mask can get stuck at a
-    /// smaller height, producing the exact failure mode reported by Flynn: only a top strip
+    /// smaller height, producing the reported failure mode: only a top strip
     /// paints while the rest of the viewport is hit-testable/scrollable but visually blank.
     ///
     /// Fix: make the container responsible for keeping its own mask in sync with its bounds.
@@ -851,7 +851,7 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         statusLabel.isHidden = false
         reloadButton.isHidden = false
 
-        // Always show the failure reason so users (and Flynn) can understand what happened.
+        // Always show the failure reason so users (and support staff) can understand what happened.
         var lines = ["Preview unavailable (\(reason.rawValue))"]
         if let detail, !detail.isEmpty {
             lines.append(detail)

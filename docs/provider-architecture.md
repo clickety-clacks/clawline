@@ -2,7 +2,7 @@
 
 _Last updated: 2026-03-10_
 
-Source of truth: `/Users/mike/src/openclaw/src/clawline/`
+Source of truth: `~/src/openclaw/src/clawline/`
 
 ## Runtime entrypoint
 

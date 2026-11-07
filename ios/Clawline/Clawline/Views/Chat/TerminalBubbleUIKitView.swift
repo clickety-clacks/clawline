@@ -38,7 +38,7 @@ struct TerminalBubbleLifecycleContext: Equatable {
 }
 
 /// Embedded terminal session view intended for use inside chat bubbles and expanded message sheets.
-/// Policy decisions (Flynn / #46):
+/// Policy decisions (#46):
 /// - Auto-connect on render (no tap-to-connect).
 /// - No standard bubble chrome: this view renders the terminal surface directly.
 /// - When offscreen for a while, tear down the WS and show a reconnect affordance.
@@ -200,7 +200,7 @@ final class TerminalBubbleUIKitView: UIView, TerminalViewDelegate {
 
         // Focus is handled by FocusableTerminalView.touchesBegan.
 
-        // No rounded corners (Flynn decision).
+        // No rounded corners (product decision).
         terminalView.layer.cornerRadius = 0
         terminalView.layer.masksToBounds = true
 

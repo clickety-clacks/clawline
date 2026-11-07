@@ -2,7 +2,7 @@
 
 ## Symptom
 
-TARS logs showed two Clawline prompts entering the same stream close together. The first, longer prompt started an agent run at `12:36:21`; a second 5-character prompt started another run at `12:36:57` before the first run ended. The second run produced substantive assistant output first, while the first run ended with only a 6-character assistant delivery.
+Provider-host logs showed two Clawline prompts entering the same stream close together. The first, longer prompt started an agent run at `12:36:21`; a second 5-character prompt started another run at `12:36:57` before the first run ended. The second run produced substantive assistant output first, while the first run ended with only a 6-character assistant delivery.
 
 ## What Was Tangled
 

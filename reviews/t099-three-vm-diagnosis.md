@@ -17,17 +17,17 @@ All runtime `ChatViewModel` creation goes through a single view-hierarchy path:
 ## Instance Timeline (from simulator trace)
 Evidence from captured trace: `/tmp/t099-stalevm-key-lines.txt`.
 
-1. **VM #1** `AF4CD600-C2D2-468F-8876-4F4E622857B8`
+1. **VM #1** `captured-id-1`
 - Init: `19:38:19.337` (`line 3` in trace)
 - Trigger: authenticated start immediately follows (`line 4`)
 - Creation source in code: `RootView.task(id: auth.isAuthenticated)` -> `ensureChatViewModel()` -> `ChatViewModel(...)` (`RootView.swift:53-70`, `:90-101`)
 
-2. **VM #2** `A3665309-654A-4C8E-9F5E-8D2FA44B849E`
+2. **VM #2** `captured-id-2`
 - Init: `19:38:44.073` (`line 213`)
 - Trigger: fresh authenticated transition during logout->login cycle (`line 214`)
 - Same creation seam as VM #1 (`RootView.swift:53-70`, `:90-101`)
 
-3. **VM #3** `822EC543-D9C8-4E43-991C-1E1D045E6A33`
+3. **VM #3** `captured-id-3`
 - Init: `19:39:13.422` (`line 464`)
 - Trigger: next authenticated transition (`line 465`)
 - Same creation seam as above

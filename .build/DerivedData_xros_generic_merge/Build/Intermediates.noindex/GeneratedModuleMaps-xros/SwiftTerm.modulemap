@@ -1,4 +1,0 @@
-module SwiftTerm {
-header "SwiftTerm-Swift.h"
-export *
-}

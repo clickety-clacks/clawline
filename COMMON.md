@@ -11,15 +11,15 @@ Key rules:
 - Create agent workspaces under `~/src/worktrees/` (for example: `git worktree add ~/src/worktrees/clawline-{agent-name} -b {agent-name}`).
 - Tear down agent workspaces with `git worktree remove` (not `rm -rf`).
 - `~/src/clawline/` remains the canonical deployer baseline.
-- YOLO on `main` unless Flynn says otherwise (pushing to `origin/main` from a worktree branch context is allowed when directed).
+- YOLO on `main` unless the product owner says otherwise (pushing to `origin/main` from a worktree branch context is allowed when directed).
 - Push to `origin/main` when work is ready. Pull before starting new work.
-- If `git pull --ff-only` fails: **stop and ask Flynn**. Never merge/rebase/force-push.
-- **Never close GitHub issues.** Only Flynn closes after testing.
-- When done: notify via `~/.local/libexec/clu/hosts/{host}/notify --session <key> -- 'message'`
+- If `git pull --ff-only` fails: **stop and ask the product owner**. Never merge/rebase/force-push.
+- **Never close GitHub issues.** Only the product owner closes after testing.
+- When done: notify via `~/.local/libexec/agent-tools/hosts/{host}/notify --session <key> -- 'message'`
 
 ### Legacy Workspace Note (Before 2026-02-14)
 
-- Legacy agent directories created with `cp -r` may still exist on eezo (for example `~/src/clawline-{name}/`), and they are full repo copies, not worktrees.
+- Legacy agent directories created with `cp -r` may still exist on development-host (for example `~/src/clawline-{name}/`), and they are full repo copies, not worktrees.
 - Do not panic if you land in one of these legacy directories.
 - If unstaged changes are yours, commit and push that work first, then continue.
 - If unstaged changes are inherited from a different agent, do not commit them; flag it so the owning agent can handle it.
@@ -212,5 +212,5 @@ ios/Clawline/Clawline/
 
 ## Deployment Discipline
 
-- **Never modify deployed artifacts directly.** All code changes (providers, plugins, scripts) must land in this repository first, pass tests, and then be redeployed to any remote host (e.g., `tars.local`). Editing files in `~/.clawd` or similar on the target machine is only acceptable for configuration, not source/binaries.
+- **Never modify deployed artifacts directly.** All code changes (providers, plugins, scripts) must land in this repository first, pass tests, and then be redeployed to any remote host (e.g., `provider-host.local`). Editing files in `~/.clawd` or similar on the target machine is only acceptable for configuration, not source/binaries.
 - Treat remote servers as release targets: rebuild locally (or via CI), copy the new build, and restart the service. This avoids “works on prod” drift and keeps the repo as the single source of truth.

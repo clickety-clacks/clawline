@@ -12,7 +12,7 @@ import UIKit
 struct MessagePresentationURLBoundaryTests {
     @Test("Direct image URL content renders as remote image media")
     func directImageURLContentRendersAsRemoteImageMedia() {
-        let imageURL = "http://tars.tail4105e8.ts.net:18800/www/ticker/latest.png"
+        let imageURL = "http://provider-host.example.test:18800/www/ticker/latest.png"
         let presentation = buildPresentation(content: imageURL)
 
         #expect(presentation.parts.contains(where: { part in
@@ -306,7 +306,7 @@ struct MessagePresentationURLBoundaryTests {
     func remoteImageLoaderAcceptsDecodablePNGWithOctetStreamMIME() throws {
         let data = try #require(Data(base64Encoded: Self.onePixelPNGBase64))
         let response = try #require(HTTPURLResponse(
-            url: URL(string: "http://tars.tail4105e8.ts.net:18800/www/ticker/latest.png")!,
+            url: URL(string: "http://provider-host.example.test:18800/www/ticker/latest.png")!,
             statusCode: 200,
             httpVersion: "HTTP/1.1",
             headerFields: ["Content-Type": "application/octet-stream"]
@@ -317,7 +317,7 @@ struct MessagePresentationURLBoundaryTests {
 
     @Test("Remote image loader bypasses URL cache for mutable direct image URLs")
     func remoteImageLoaderBypassesURLCacheForMutableDirectImageURLs() throws {
-        let url = try #require(URL(string: "http://tars.tail4105e8.ts.net:18800/www/ticker/latest.png"))
+        let url = try #require(URL(string: "http://provider-host.example.test:18800/www/ticker/latest.png"))
         let request = RemoteMessageImagePolicy.request(for: url)
 
         #expect(request.cachePolicy == .reloadIgnoringLocalAndRemoteCacheData)

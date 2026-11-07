@@ -6047,7 +6047,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             preferredWidth = effectiveMaxWidth
         }
 
-        // Flynn correction / #28: link previews should not start at LinkPreviewView minHeight (140).
+        // #28 correction: link previews should not start at LinkPreviewView minHeight (140).
         // Default them to the truncation cap until live-cell measurement refines the content height.
         let hasLinkPreview = presentation.parts.contains { part in
             if case .linkPreview = part { return true }

@@ -11,15 +11,15 @@ Investigate whether the single-flight `startObservingIfNeeded()` change causes t
 - `ios/Clawline/Clawline/ViewModels/ConnectionLifecycleCoordinator.swift:142-217,592-623,746-748`
   - Instrumented output subscription, token set path, start gates, `startConnecting`, and every emitted output.
 
-## Ansible deploy/capture status
-- Build: success via `XcodeBuildMCP.build_device` (scheme `Clawline`, device `63C9EE36-3EA0-580A-8DE2-9E9C50174CAC`).
+## Test-device deploy/capture status
+- Build: success via `XcodeBuildMCP.build_device` (scheme `Clawline`, device `test-device-1`).
 - Install: success via `XcodeBuildMCP.install_app_device`.
-- Launch/log capture on Ansible: blocked by device lock.
+- Launch/log capture on Test-device: blocked by device lock.
   - `xcrun devicectl device info lockState` repeatedly reported `passcodeRequired: true` from `12:55` through `12:59` PT.
   - Both `XcodeBuildMCP.launch_app_device` and `start_device_log_cap` failed with locked-device denial.
 
 ## Captured ordering evidence (simulator with same diagnostic build)
-Session: `stop_sim_log_cap(34dd526b-c3c4-44fd-8b9f-f90046b65dce)`
+Session: `stop_sim_log_cap(capture-session-1)`
 
 Observed sequence:
 1. `handleAuthStateChange` starts and enters startup path.
@@ -42,4 +42,4 @@ What is true:
 Therefore, if device shows zero phase transitions, the failure is more likely that the auth-driven start path is not being reached on that run (token not present, auth-change notification not observed, or VM instance/lifecycle mismatch), not the single-flight startup ordering itself.
 
 ## Next capture needed
-When Ansible is unlocked, rerun this exact instrumented build and capture fresh-login logs to verify whether `handleAuthStateChange task after setAuthToken before startIfNeeded` appears on device. That line is the discriminator for coordinator-start path execution.
+When Test-device is unlocked, rerun this exact instrumented build and capture fresh-login logs to verify whether `handleAuthStateChange task after setAuthToken before startIfNeeded` appears on device. That line is the discriminator for coordinator-start path execution.

@@ -149,9 +149,9 @@
   <h2>Source Notes</h2>
   <ul>
     <li>The product request in the T1135 prompt is the source of truth for the required behavior and requirement IDs.</li>
-    <li>The requested invariants path <code>/Users/mike/shared-workspace/clawline/specs/clawline-invariants.md</code> was absent. The available mirror <code>/Users/mike/shared-workspace/clawline/implementation_details/clawline-invariants.md</code> was consulted.</li>
+    <li>The requested invariants path <code>~/shared-workspace/clawline/specs/clawline-invariants.md</code> was absent. The available mirror <code>~/shared-workspace/clawline/implementation_details/clawline-invariants.md</code> was consulted.</li>
     <li>Relevant existing guidance consulted: <code>implementation_details/salient-highlight.md</code>, <code>implementation_details/provider-salient-highlight.md</code>, <code>specs/t314-vim-mode-suggestions.html</code>, <code>specs/t319-t320-message-composer-input.html</code>, <code>specs/t307-cross-chat-notifications.html</code>, <code>specs/visionos-codepath-audit.md</code>, and the current Clawline link activation code paths in <code>UnifiedMarkdownRenderer</code>, <code>MessageBubbleUIKitView</code>, and <code>ExternalWebContentPolicy</code>.</li>
-    <li>Flynn clarified on 2026-05-24 that no text-link rule should be configured by default. The existing tracker wall/widget URL shape may be used when the user adds a Janus/Tracker rule, for example <code>https://tars.tail4105e8.ts.net:19443/tracker.html?id=&lt;TID&gt;</code>.</li>
+    <li>The product owner clarified on 2026-05-24 that no text-link rule should be configured by default. The existing tracker wall/widget URL shape may be used when the user adds a Janus/Tracker rule, for example <code>https://provider-host.example.test:19443/tracker.html?id=&lt;TID&gt;</code>.</li>
     <li>Tracker lookup for <code>T1135</code> through <code>scripts/janus-ticket-context --db tracking/tracker.db --tracking-dir tracking --ticket T1135 --related-links-only</code> returned <code>ticket_not_found</code>. No Tracker state transition is part of this spec file.</li>
     <li>Engram source <code>76ef4530-14c7-4c75-9f44-7146bacaeb68</code> was queried with <code>engram peek</code>; it returned no readable content in this environment and did not affect the spec.</li>
     <li>No implementation, deployment, merge, cleanup, or spindown work is part of this spec task.</li>
@@ -272,7 +272,7 @@
       <tr>
         <td>R1135-10</td>
         <td>A user-created Janus/Tracker rule can use the existing tracker widget URL.</td>
-        <td>After adding regex <code>\bT([0-9]+)\b</code> with template <code>https://tars.tail4105e8.ts.net:19443/tracker.html?id={match}</code>, a rendered <code>T1135</code> token opens the corresponding tracker widget URL inside Clawline's internal browser.</td>
+        <td>After adding regex <code>\bT([0-9]+)\b</code> with template <code>https://provider-host.example.test:19443/tracker.html?id={match}</code>, a rendered <code>T1135</code> token opens the corresponding tracker widget URL inside Clawline's internal browser.</td>
       </tr>
     </tbody>
   </table>
@@ -337,11 +337,11 @@
   "id": "janus-ticket",
   "enabled": true,
   "pattern": "\\bT([0-9]+)\\b",
-  "urlTemplate": "https://tars.tail4105e8.ts.net:19443/tracker.html?id={match}"
+  "urlTemplate": "https://provider-host.example.test:19443/tracker.html?id={match}"
 }</code></pre>
   <ul>
-    <li><code>T123</code> generates <code>https://tars.tail4105e8.ts.net:19443/tracker.html?id=T123</code>.</li>
-    <li><code>T1135</code> generates <code>https://tars.tail4105e8.ts.net:19443/tracker.html?id=T1135</code>.</li>
+    <li><code>T123</code> generates <code>https://provider-host.example.test:19443/tracker.html?id=T123</code>.</li>
+    <li><code>T1135</code> generates <code>https://provider-host.example.test:19443/tracker.html?id=T1135</code>.</li>
     <li>The visible text remains exactly the matched token, for example <code>T1135</code>. The generated URL is not inserted into the transcript text.</li>
     <li>The rule is case-sensitive for T1135: <code>T123</code> matches; <code>t123</code> does not.</li>
     <li>A token embedded in a larger word, such as <code>AT123</code> or <code>T123abc</code>, does not match this example rule because of the word boundary requirement.</li>
@@ -475,7 +475,7 @@
     <li>Place matching at a shared rendered-message text boundary so downstream transcript cells, expanded views, and notification previews consume resolved link ranges instead of rebuilding rule behavior independently.</li>
     <li>Do not add unrelated URL preview behavior, browser policy changes, message mutation, or provider protocol changes.</li>
     <li>Preserve explicit link destinations. Generated-link rules fill otherwise-unlinked rendered text ranges.</li>
-    <li>Use the tracker widget URL as the Janus/Tracker example/template value when adding that rule in settings: <code>https://tars.tail4105e8.ts.net:19443/tracker.html?id={match}</code>.</li>
+    <li>Use the tracker widget URL as the Janus/Tracker example/template value when adding that rule in settings: <code>https://provider-host.example.test:19443/tracker.html?id={match}</code>.</li>
   </ul>
 
   <h2>Open Questions</h2>

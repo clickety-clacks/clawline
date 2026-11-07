@@ -11,7 +11,7 @@ This is the canonical location for Clawline's visual design system and chat UI d
 
 ## Sync
 
-This directory syncs weekly (Sunday 2am PST) to `~/src/clawline/design-system/` on eezo's git repo.
+This directory syncs weekly (Sunday 2am PST) to `~/src/clawline/design-system/` on development-host's git repo.
 
 **Direction:** shared-workspace (canonical) → repo (synced copy)
 

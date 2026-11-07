@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${1:-/Users/mike/shared-workspace/clawline}"
+ROOT="${1:-${HOME}/shared-workspace/clawline}"
 cd "$ROOT"
 
 TARGETS=( *.md specs/*.md )

@@ -231,7 +231,7 @@
     <li><span class="id">G1128-05</span> <span class="gap">Provider ordering edge case is implementation-defined in this report.</span> The client handles ack before echo and echo before ack, but this report did not prove provider ordering guarantees beyond the documented protocol semantics.</li>
   </ul>
 
-  <h2>Answer to Flynn's Question</h2>
+  <h2>Answer to the product owner's Question</h2>
   <p><span class="id">A1128-01</span> It appears when a user send has passed local validation and Clawline has inserted the optimistic <code>c_*</code> user bubble, but the provider has not yet acknowledged that <code>c_*</code> id.</p>
   <p><span class="id">A1128-02</span> It disappears when provider ack marks that client id accepted, when the provider's echoed user message replaces the optimistic bubble, when the send is canceled before transport, or when the pending send becomes a failure/retry state.</p>
   <p><span class="id">A1128-03</span> It does not mean the assistant is still thinking. After ack, assistant activity is represented by the assistant typing indicator, session status/live progress, and eventual assistant message stream, not by the user-bubble spinner.</p>

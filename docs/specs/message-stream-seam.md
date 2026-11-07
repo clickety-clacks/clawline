@@ -2,7 +2,7 @@
 
 Status: Spec Review candidate for T105
 
-Source repair: this spec promotes and expands the preserved source document from `/Users/mike/shared-workspace/clawline/implementation_details/message-stream-seam.md`. That preserved document is retained as provenance, but this file is the canonical shared-workspace spec for T105.
+Source repair: this spec promotes and expands the preserved source document from `~/shared-workspace/clawline/implementation_details/message-stream-seam.md`. That preserved document is retained as provenance, but this file is the canonical shared-workspace spec for T105.
 
 ## Goal
 

@@ -4,9 +4,9 @@ Date: 2026-04-08
 
 ## Goal
 
-This document described a transition plan for moving Clawline toward a standalone-ish extension on top of upstream OpenClaw. That path is now blocked under Flynn's current rule: if any OpenClaw core change is required, we do not do the extension. The document is retained as historical analysis, not as an active execution contract.
+This document described a transition plan for moving Clawline toward a standalone-ish extension on top of upstream OpenClaw. That path is now blocked under the product owner's current rule: if any OpenClaw core change is required, we do not do the extension. The document is retained as historical analysis, not as an active execution contract.
 
-Flynn directive for this plan:
+The product owner's directive for this plan:
 
 - Keep behavior and UX stable during the migration.
 - Drive toward a Clawline extension that can eventually live outside the fork, with the likely final home at `~/clawline/extension`.
@@ -17,7 +17,7 @@ Flynn directive for this plan:
 1. The current fork remains the implementation home base during the transition.
 2. The immediate target is to make Clawline run as an extension against stock upstream. Whether that happens before or after a `v2026.4.8` merge is a sequencing choice, not a hard architectural requirement.
 3. `extensions/clawline/` becomes the only long-term Clawline-owned code area inside the fork. Core `src/clawline/*` is transition debt that must trend toward zero.
-4. shrdlu must run **stock upstream OpenClaw** as the test base. Clawline is proven there as an extension layer, not as forked core behavior.
+4. test-provider must run **stock upstream OpenClaw** as the test base. Clawline is proven there as an extension layer, not as forked core behavior.
 5. No behavioral or UX changes are allowed as part of this migration unless a separate spec explicitly authorizes them.
 
 ## Non-Goals
@@ -34,18 +34,18 @@ Flynn directive for this plan:
 This spec integrates the current source material that already exists in the shared workspace and adjacent Clawline notes:
 
 - Feasibility recon:
-  - `/Users/mike/src/clawline/scratch/docs-drift/docs/specs/clawline-pure-extension-feasibility.md`
+  - `~/src/clawline/scratch/docs-drift/docs/specs/clawline-pure-extension-feasibility.md`
 - Isolation / plugin encapsulation proof:
-  - `/Users/mike/shared-workspace/clawline/implementation_details/clawline-extension-isolation.md`
+  - `~/shared-workspace/clawline/implementation_details/clawline-extension-isolation.md`
 - Clawline invariants:
-  - `/Users/mike/shared-workspace/clawline/implementation_details/clawline-invariants.md`
+  - `~/shared-workspace/clawline/implementation_details/clawline-invariants.md`
 - Upstream core-surface memos:
-  - `/Users/mike/src/clawline/scratch/docs-drift/docs/specs/rebase-2026-03-03/channel-runtime.md`
-  - `/Users/mike/src/clawline/scratch/docs-drift/docs/specs/rebase-2026-03-03/plugin-http-contract.md`
-  - `/Users/mike/src/clawline/scratch/docs-drift/docs/specs/rebase-2026-03-03/plugin-sdk-exports.md`
+  - `~/src/clawline/scratch/docs-drift/docs/specs/rebase-2026-03-03/channel-runtime.md`
+  - `~/src/clawline/scratch/docs-drift/docs/specs/rebase-2026-03-03/plugin-http-contract.md`
+  - `~/src/clawline/scratch/docs-drift/docs/specs/rebase-2026-03-03/plugin-sdk-exports.md`
 - Feature-adoption memos:
-  - `/Users/mike/shared-workspace/clawline/specs/track-adopted-delivery-recon.md`
-  - `/Users/mike/shared-workspace/clawline/specs/track-non-clawline-sessions.md`
+  - `~/shared-workspace/clawline/specs/track-adopted-delivery-recon.md`
+  - `~/shared-workspace/clawline/specs/track-non-clawline-sessions.md`
 
 Note: no file with a literal `v2026.4.8` identifier was present in the shared workspace or adjacent `~/src/clawline` notes on 2026-04-08. For this plan, the existing pure-extension feasibility recon plus the upstream surface memos are treated as the operative recon baseline.
 
@@ -53,7 +53,7 @@ Note: no file with a literal `v2026.4.8` identifier was present in the shared wo
 
 For this spec, `stock upstream OpenClaw` means:
 
-- the latest tagged upstream OpenClaw release at the time the shrdlu proof is executed
+- the latest tagged upstream OpenClaw release at the time the test-provider proof is executed
 - not upstream `main`
 - not an arbitrary upstream commit
 - not a forked runtime carrying Clawline-specific core behavior
@@ -223,7 +223,7 @@ Required end state:
 Constraint:
 
 - This migration does not solve session-ownership/security redesign beyond the current documented policy.
-- For this phase, shrdlu proof only needs to preserve the currently supported adopted-session behavior, not broaden it.
+- For this phase, test-provider proof only needs to preserve the currently supported adopted-session behavior, not broaden it.
 - If a trustworthy generic visibility signal is required later, that becomes a separate generic core/session-store spec.
 
 ### Seam F: iOS/provider `agent:main` assumptions are not part of this encapsulation phase
@@ -235,7 +235,7 @@ Current problem:
 Policy for this spec:
 
 - Treat this as a separate compatibility track, not as part of the encapsulation move.
-- shrdlu extension proof should use the currently supported main-agent behavior unless a later spec explicitly broadens that requirement.
+- test-provider extension proof should use the currently supported main-agent behavior unless a later spec explicitly broadens that requirement.
 
 ## Migration Policy
 
@@ -286,7 +286,7 @@ The likely final standalone home would have been:
 
 That extraction should happen only after:
 
-- stock upstream on shrdlu can run Clawline without Clawline-owned core modules
+- stock upstream on test-provider can run Clawline without Clawline-owned core modules
 - plugin-sdk carveouts are gone
 - outbound bridge ownership is extension-local
 - any retained generic seams are stable enough that extraction does not immediately force another restructure
@@ -295,7 +295,7 @@ That extraction should happen only after:
 
 - Do not create a second long-lived Clawline runtime under a different ad hoc path.
 - Do not split ownership between `src/clawline/*` and `extensions/clawline/src/runtime/*` indefinitely.
-- Do not extract to `~/clawline/extension` before the shrdlu proof is passing.
+- Do not extract to `~/clawline/extension` before the test-provider proof is passing.
 
 ## Execution Principles
 
@@ -305,17 +305,17 @@ Required principles:
 
 1. Sequence however engineering judges best, but preserve the end-state contract in this spec.
 2. Prefer shrinking Clawline-owned core surface over adding new permanent Clawline behavior to core.
-3. Use stock upstream on shrdlu as the proof environment when the extension work is ready for validation.
+3. Use stock upstream on test-provider as the proof environment when the extension work is ready for validation.
 4. If a blocker appears, first look for an existing generic upstream seam; only propose a new seam if the blocker is real and generic.
 5. Do not treat temporary implementation convenience as permission to change user-visible behavior.
 
-## shrdlu Test-Base Plan
+## test-provider Test-Base Plan
 
-shrdlu is the reality check for this migration.
+test-provider is the reality check for this migration.
 
 ### Test-base rule
 
-The shrdlu environment must be:
+The test-provider environment must be:
 
 - stock upstream OpenClaw core
 - plus Clawline as an extension layer under test
@@ -325,7 +325,7 @@ It must **not** be:
 - forked core with Clawline carveouts hidden inside it
 - a pre-merged `v2026.4.8` fork standing in for upstream
 
-### What shrdlu must prove
+### What test-provider must prove
 
 At minimum, the following must work against stock upstream:
 
@@ -342,9 +342,9 @@ At minimum, the following must work against stock upstream:
 11. Track/adopt/untrack flow
 12. Send path for adopted sessions using their original origin metadata, limited to the currently supported adopted-session behavior
 
-### Blocker handling on shrdlu
+### Blocker handling on test-provider
 
-If something fails on shrdlu:
+If something fails on test-provider:
 
 1. identify the exact missing seam
 2. classify it as:
@@ -353,11 +353,11 @@ If something fails on shrdlu:
    - requiring a new generic seam spec
 3. stop there
 
-Do **not** patch stock upstream on shrdlu with Clawline-specific escape hatches.
+Do **not** patch stock upstream on test-provider with Clawline-specific escape hatches.
 
 ## Validation Method
 
-Every shrdlu proof run must produce a validation artifact that records:
+Every test-provider proof run must produce a validation artifact that records:
 
 - the exact upstream release tag used as the proof baseline
 - the exact Clawline extension revision under test
@@ -365,18 +365,18 @@ Every shrdlu proof run must produce a validation artifact that records:
 - pass/fail result
 - notes for any deferred item or explicitly out-of-scope behavior
 
-At minimum, the validation artifact must map each of the shrdlu proof items and each acceptance criterion below to a concrete validation mode. Engineering may choose the specific test harnesses and scripts.
+At minimum, the validation artifact must map each of the test-provider proof items and each acceptance criterion below to a concrete validation mode. Engineering may choose the specific test harnesses and scripts.
 
 ## Acceptance Criteria
 
-This migration is ready for Flynn verification only when all of the following are true:
+This migration is ready for the product owner verification only when all of the following are true:
 
 1. Clawline runtime ownership has moved from `src/clawline/*` to `extensions/clawline/src/runtime/*`.
 2. `extensions/clawline/**` no longer depends on Clawline-specific plugin-sdk exports.
 3. Outbound sender bridge ownership is extension-local, not core-global.
 4. No new Clawline-specific core APIs were added.
 5. Any remaining core touch points are generic and upstream-shaped.
-6. stock upstream on shrdlu can boot and run the Clawline extension through the parity matrix above.
+6. stock upstream on test-provider can boot and run the Clawline extension through the parity matrix above.
 7. Pair/auth/stream/adopt/send/terminal behavior remains materially unchanged from current Clawline UX.
 8. Session-key routing invariants remain intact.
 9. The extension subtree is laid out so it can later move to `~/clawline/extension` without another architecture rewrite.
@@ -394,7 +394,7 @@ Likely near-term work:
 - move Clawline-owned runtime toward `extensions/clawline/src/runtime/*`
 - remove dependence on Clawline-specific plugin-sdk carveouts
 - localize outbound bridge ownership
-- prepare a stock-upstream shrdlu proof when the extension work is ready
+- prepare a stock-upstream test-provider proof when the extension work is ready
 
 Likely later work:
 - extract the extension subtree to `~/clawline/extension`
@@ -403,11 +403,11 @@ Likely later work:
 
 ## Open Questions
 
-1. What exact packaging mechanism should shrdlu use to layer the Clawline extension onto stock upstream during the proof phase: copied subtree, workspace dependency, or symlinked extension checkout?
+1. What exact packaging mechanism should test-provider use to layer the Clawline extension onto stock upstream during the proof phase: copied subtree, workspace dependency, or symlinked extension checkout?
 2. If Phase 4 uncovers a real blocker around service-context runtime access, what is the narrowest generic upstream-shaped seam that solves it without recreating a Clawline carveout?
 
 ## Implementation Handoff
 
 - Implement this as a pure encapsulation program, not as merge cleanup.
-- Treat shrdlu stock upstream as the source of truth for whether the extension boundary is real.
+- Treat test-provider stock upstream as the source of truth for whether the extension boundary is real.
 - If implementation pressure starts pushing new permanent Clawline code back into core, stop and revise the spec instead of improvising.

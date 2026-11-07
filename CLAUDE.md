@@ -29,12 +29,12 @@ Look out for these key phrases which mean to open the file for editing:
 
 See global rules in `~/AGENTS.md`. Summary:
 
-1. **NEVER close an issue.** Only Flynn closes issues after testing.
+1. **NEVER close an issue.** Only the product owner closes issues after testing.
 2. **Mark as in-progress** when starting (`gh issue edit <N> --add-label "in-progress"` or comment).
 3. **Comment progress updates** on the issue as you work.
 4. **Comment final summary** (commit hash, changes, deploy status) when done. Do NOT close.
 
-## iOS Git Workflow (Flynn Rule)
+## iOS Git Workflow (Product Owner Rule)
 
 - Use a dedicated git worktree for each agent workspace, with each worktree on its own branch.
 - `~/src/clawline/` stays the canonical deployer baseline; create agent worktrees under `~/src/worktrees/` (for example: `git worktree add ~/src/worktrees/clawline-{agent-name} -b {agent-name}`).
@@ -43,7 +43,7 @@ See global rules in `~/AGENTS.md`. Summary:
 
 ### Legacy Workspace Note (Before 2026-02-14)
 
-- Legacy `cp -r` workspaces may still exist on eezo (for example `~/src/clawline-{name}/`) and are full repo copies rather than worktrees.
+- Legacy `cp -r` workspaces may still exist on development-host (for example `~/src/clawline-{name}/`) and are full repo copies rather than worktrees.
 - Do not panic if you encounter one.
 - If unstaged changes are yours, commit and push that work first, then proceed.
 - If unstaged changes were inherited from a different agent, do not commit them; flag it so the owning agent can resolve it.
@@ -73,4 +73,4 @@ That document defines the **complete list** of valid platform differences. It is
 
 **Default rule: share the code.**
 
-If your change adds a new platform fork that is not on the list, or removes/modifies an existing one — stop and raise it with Flynn before committing. Do not make a judgment call.
+If your change adds a new platform fork that is not on the list, or removes/modifies an existing one — stop and raise it with the product owner before committing. Do not make a judgment call.

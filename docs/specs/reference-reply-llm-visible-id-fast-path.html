@@ -184,7 +184,7 @@
   <main>
     <header>
       <h1>Clawline Reference/Reply LLM-Visible ID Fast Path</h1>
-      <p class="lede">This document captures the current reference/reply failure and Flynn's product fix. The core change is simple: every rendered message needs to carry the same id the LLM-side transcript can recognize, and replies should pass that id through as lightweight context instead of forcing provider-side transcript resolution.</p>
+      <p class="lede">This document captures the current reference/reply failure and the product owner's product fix. The core change is simple: every rendered message needs to carry the same id the LLM-side transcript can recognize, and replies should pass that id through as lightweight context instead of forcing provider-side transcript resolution.</p>
       <div class="status" aria-label="Document status">
         <div class="metric">
           <b>Decision</b>
@@ -203,7 +203,7 @@
 
     <section>
       <h2>Situation</h2>
-      <p>On May 26, 2026, Flynn sent a Clawline prompt with a reference/reply attached. The prompt appeared to hang before becoming an agent/model turn. Gateway health was fine, OpenClaw had no running or queued tasks, and the latest user message was not persisted in the Clawline database.</p>
+      <p>On May 26, 2026, the product owner sent a Clawline prompt with a reference/reply attached. The prompt appeared to hang before becoming an agent/model turn. Gateway health was fine, OpenClaw had no running or queued tasks, and the latest user message was not persisted in the Clawline database.</p>
       <p>The log path showed the inbound message entering the Clawline preprocessing stage named <code>resolve_references</code> and not reaching the later stages that persist, acknowledge, and dispatch the message.</p>
       <div class="grid">
         <div class="card">
@@ -211,7 +211,7 @@
           <ul>
             <li>Gateway HTTP and version endpoints were live.</li>
             <li>The message reached Clawline inbound processing.</li>
-            <li>The UI knew which bubble Flynn was replying to.</li>
+            <li>The UI knew which bubble the product owner was replying to.</li>
           </ul>
         </div>
         <div class="card">
@@ -233,8 +233,8 @@
 
     <section>
       <h2>Product Truth</h2>
-      <p>For Clawline reply/reference, success means the model sees enough structured context to understand that Flynn is replying to a prior message. It does not require the provider to prove the referenced message exists before accepting the send.</p>
-      <p>If the id is stale, invalid, or not present in the model's active context, the model can say it does not know what Flynn is referring to. That is a better product failure than blocking the send, scanning the transcript, or silently dropping the turn before it reaches the model.</p>
+      <p>For Clawline reply/reference, success means the model sees enough structured context to understand that the product owner is replying to a prior message. It does not require the provider to prove the referenced message exists before accepting the send.</p>
+      <p>If the id is stale, invalid, or not present in the model's active context, the model can say it does not know what the product owner is referring to. That is a better product failure than blocking the send, scanning the transcript, or silently dropping the turn before it reaches the model.</p>
     </section>
 
     <section>
@@ -249,7 +249,7 @@
       </div>
       <div class="req">
         <div class="id">RR-03</div>
-        <div>When Flynn replies to a message, the client sends lightweight structured metadata containing the LLM-visible id, optional role, and a bounded visible preview. The payload should identify the referenced message; it should not paste the whole referenced text into the composer.</div>
+        <div>When the product owner replies to a message, the client sends lightweight structured metadata containing the LLM-visible id, optional role, and a bounded visible preview. The payload should identify the referenced message; it should not paste the whole referenced text into the composer.</div>
       </div>
       <div class="req">
         <div class="id">RR-04</div>

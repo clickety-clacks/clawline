@@ -41,7 +41,7 @@ When the required simulator and product path are available, do not stop after fo
 
 When working on GitHub issues, follow these rules:
 
-1. **NEVER close an issue.** Only Flynn closes issues after testing.
+1. **NEVER close an issue.** Only the product owner closes issues after testing.
 2. **Comment when starting.** When you begin work on an issue, comment on it noting that you're starting.
 3. **Post progress updates.** Comment on the issue as you work — what you found, what you changed, what you committed.
 4. **Comment when done, don't close.** When finished, comment with a final summary (commit hash, what changed, deploy status) but do NOT close the issue.
@@ -55,7 +55,7 @@ When working on GitHub issues, follow these rules:
 - Ship only from `origin/main`. Do not request or expect deploys of pinned commits or branch SHAs.
 - When reporting a fix, always state `pushed to origin/main @ <hash>` or `not on main yet`.
 
-## iOS Git Workflow (Flynn Rule)
+## iOS Git Workflow (Product Owner Rule)
 
 - Use a dedicated git worktree for each agent workspace, with each worktree on its own branch.
 - `~/src/clawline/` stays the canonical deployer baseline; create agent worktrees under `~/src/worktrees/` (for example: `git worktree add ~/src/worktrees/clawline-{agent-name} -b {agent-name}`).
@@ -64,7 +64,7 @@ When working on GitHub issues, follow these rules:
 
 ## Legacy Workspace Note (Before 2026-02-14)
 
-- Legacy `cp -r` workspaces may still exist on eezo (for example `~/src/clawline-{name}/`) and are full repo copies rather than worktrees.
+- Legacy `cp -r` workspaces may still exist on development-host (for example `~/src/clawline-{name}/`) and are full repo copies rather than worktrees.
 - Do not panic if you encounter one.
 - If unstaged changes are yours, commit and push that work first, then proceed.
 - If unstaged changes were inherited from a different agent, do not commit them; flag it so the owning agent can resolve it.
@@ -80,4 +80,4 @@ That document defines the **complete list** of valid platform differences. It is
 
 **Default rule: share the code.**
 
-If your change adds a new platform fork that is not on the list, or removes/modifies an existing one — stop and raise it with Flynn before committing. Do not make a judgment call.
+If your change adds a new platform fork that is not on the list, or removes/modifies an existing one — stop and raise it with the product owner before committing. Do not make a judgment call.

@@ -1,34 +1,34 @@
-# T099: Ansible `lastMessageId` Recovery Analysis
+# T099: Test-device `lastMessageId` Recovery Analysis
 
 ## Evidence Collected
 
 ### 1) Device log pull status
-- Fresh live capture attempt from Ansible failed while device was locked:
+- Fresh live capture attempt from Test-device failed while device was locked:
   - XcodeBuildMCP `stop_device_log_cap` output at `2026-02-28 11:41`:
     - `Unable to launch co.clicketyclacks.Clawline because the device was not, or could not be, unlocked.`
-- I used prior Ansible runtime capture already pulled from this device:
-  - `/private/tmp/ansible-devicectl-console.log`
+- I used prior Test-device runtime capture already pulled from this device:
+  - `/private/tmp/test-device-devicectl-console.log`
 
 ### 2) What the device logs show
 - Repeating loop on connect:
   - `idle -> connecting -> authenticating -> recovering` across epochs
-  - e.g. `/private/tmp/ansible-devicectl-console.log:40`, `:50`, `:199`, `:206`, `:213`, `:282`, `:886`, `:907`, `:1030`
+  - e.g. `/private/tmp/test-device-devicectl-console.log:40`, `:50`, `:199`, `:206`, `:213`, `:282`, `:886`, `:907`, `:1030`
 - Repeated server-side error envelope received by client during auth window:
   - `message-level error without messageId code=invalid_message`
-  - `/private/tmp/ansible-devicectl-console.log:195`, `:274`, `:1018`, `:1105`, `:1223`
+  - `/private/tmp/test-device-devicectl-console.log:195`, `:274`, `:1018`, `:1105`, `:1223`
 
 ### 3) Why this maps to `Invalid lastMessageId`
 - Provider auth code rejects malformed `lastMessageId` with this exact error payload:
-  - `/Users/mike/src/clawdbot/src/clawline/server.ts:6629-6636`
+  - `~/src/clawdbot/src/clawline/server.ts:6629-6636`
   - sends `{ type: "error", code: "invalid_message", message: "Invalid lastMessageId" }`
 - Regex requires strict server event id form (`s_<uuid>`):
-  - `/Users/mike/src/clawdbot/src/clawline/server.ts:191-193`
+  - `~/src/clawdbot/src/clawline/server.ts:191-193`
 
 ## Root Cause: Why stale/invalid `lastMessageId` is sent after branch swaps
 
 ### A) Cursor is persisted across deploy swaps (same app container/user/device)
 - Cursor store key is stable by user+device:
-  - `/Users/mike/src/worktrees/per-stream-state/ios/Clawline/Clawline/Services/ProviderChatService.swift:1195-1199`
+  - `~/src/worktrees/per-stream-state/ios/Clawline/Clawline/Services/ProviderChatService.swift:1195-1199`
 - Snapshot restored at service init:
   - `.../ProviderChatService.swift:244`
   - `.../ProviderChatService.swift:1201-1205`

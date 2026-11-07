@@ -26,7 +26,7 @@ struct T1751HarnessSelectorTests {
             "claude": [{"id": "m1", "ref": "claude-fable-5", "name": "Fable 5", "provider": "anthropic"}],
             "codex": [{"id": "m2", "ref": "gpt-5.6-sol", "name": "Sol", "provider": "openai"}]
           },
-          "hosts": ["eezo", "tars"],
+          "hosts": ["development-host", "provider-host"],
           "archetypes": [{"name": "researcher", "where": ["*"], "defaults": {"harness": "claude"}}]
         }
         """
@@ -34,7 +34,7 @@ struct T1751HarnessSelectorTests {
         #expect(options.harnesses == ["claude", "codex"])
         #expect(options.models["claude"]?.first?.ref == "claude-fable-5")
         #expect(options.models["codex"]?.first?.provider == "openai")
-        #expect(options.hosts == ["eezo", "tars"])
+        #expect(options.hosts == ["development-host", "provider-host"])
         #expect(options.archetypes.first?.name == "researcher")
         #expect(options.archetypes.first?.where == ["*"])
     }
@@ -44,7 +44,7 @@ struct T1751HarnessSelectorTests {
         let fullPayload: [String: Any] = [
             "harnesses": ["claude"],
             "models": ["claude": [["id": "m1", "ref": "claude-fable-5", "name": "Fable 5", "provider": "anthropic"]]],
-            "hosts": ["eezo"],
+            "hosts": ["development-host"],
             "archetypes": [["name": "default", "where": ["*"], "defaults": [:]]]
         ]
         for missingKey in ["harnesses", "models", "hosts", "archetypes"] {
@@ -79,7 +79,7 @@ struct T1751HarnessSelectorTests {
             model.removeValue(forKey: missingModelKey)
             let payload: [String: Any] = [
                 "harnesses": ["claude"], "models": ["claude": [model]],
-                "hosts": ["eezo"],
+                "hosts": ["development-host"],
                 "archetypes": [["name": "default", "where": ["*"], "defaults": [:]]]
             ]
             let data = try JSONSerialization.data(withJSONObject: payload)

@@ -22,7 +22,7 @@ requirement for alert fallback routing.
 - No durable conversation pruning.
 - No OpenClaw core session-store API change.
 - No Clawline chat identity change.
-- No launchd, LaunchAgent, LaunchDaemon, or TARS service plist change.
+- No launchd, LaunchAgent, LaunchDaemon, or Provider-host service plist change.
 - No reuse of `streamReadStates` as replay cursor state.
 
 ## Replay Cursor Contract

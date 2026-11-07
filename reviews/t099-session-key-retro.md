@@ -1,4 +1,4 @@
-# T099 Retro: Ansible "Invalid clawline session key" During per-stream-state Connect
+# T099 Retro: Test-device "Invalid clawline session key" During per-stream-state Connect
 
 ## Scope
 - Question 1: Did `per-stream-state` change how auth tokens/session keys are constructed, sent, or stored vs `main` (especially WebSocket auth message)?
@@ -39,9 +39,9 @@
 
 ### Important server-side evidence
 - The literal error text `Invalid clawline session key` is thrown in provider send-target/session-key parsing, not in WebSocket auth verification:
-  - `/Users/mike/src/clawdbot/src/clawline/server.ts:5722-5742` (`resolveSessionTargetFromSessionKey`, throws exact message)
+  - `~/src/clawdbot/src/clawline/server.ts:5722-5742` (`resolveSessionTargetFromSessionKey`, throws exact message)
 - WebSocket auth failures return `auth_result` reasons like `auth_failed`/`token_revoked`, not `Invalid clawline session key`:
-  - `/Users/mike/src/clawdbot/src/clawline/server.ts:6533-6588`
+  - `~/src/clawdbot/src/clawline/server.ts:6533-6588`
 
 ### Interpretation
 - The reported provider log string strongly indicates a session-target/routing parse failure path, not auth-payload schema/token construction differences introduced by `per-stream-state`.
@@ -50,4 +50,4 @@
 
 ## Conclusion
 - **Q1 answer:** `per-stream-state` did **not** change auth token/session key construction in a way that introduces a new session-key field in auth. Auth payload change is limited to adding `replayCursorsBySessionKey` and sending it as `nil`; token source/storage path remains unchanged.
-- **Q2 answer:** The exact error text points to provider session-key target parsing, not WebSocket auth. If Ansible logs show `Invalid clawline session key` at connect time, the likely issue is a parallel provider routing/session-target path (or stale runtime/session context), not a handshake auth payload construction regression in this branch.
+- **Q2 answer:** The exact error text points to provider session-key target parsing, not WebSocket auth. If Test-device logs show `Invalid clawline session key` at connect time, the likely issue is a parallel provider routing/session-target path (or stale runtime/session context), not a handshake auth payload construction regression in this branch.

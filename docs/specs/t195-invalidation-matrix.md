@@ -1,6 +1,6 @@
 # T195 — MessageFlowCollectionView Invalidation Matrix
 
-**Generated:** 2026-03-28 by clawline-profiler agent (eezo)
+**Generated:** 2026-03-28 by clawline-profiler agent (development-host)
 **Source:** `ios/Clawline/Clawline/Views/Chat/MessageFlowCollectionView.swift`
 
 ## Current vs Recommended Behavior

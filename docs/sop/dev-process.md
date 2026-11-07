@@ -1,6 +1,6 @@
 # Development Process SOP
 
-**Canonical location:** `/Users/mike/shared-workspace/clawline/sop/dev-process.md`  
+**Canonical location:** `~/shared-workspace/clawline/sop/dev-process.md`
 **Applies to:** All Clawline development (iOS client, provider, any repo with coding agents)  
 **Created:** 2026-02-10  
 **Updated:** 2026-02-14 — switched from `cp -r` clones to git worktrees
@@ -10,9 +10,9 @@
 ## Principles
 
 1. **Each agent gets its own worktree.** Clean checkout from HEAD, no dirty state bleed.
-2. **Trunk-based development.** Direct commits to `main` unless Flynn explicitly approves a branch.
+2. **Trunk-based development.** Direct commits to `main` unless the product owner explicitly approves a branch.
 3. **Push is the coordination mechanism.** Agents push to `origin/main`; others pull to sync.
-4. **Verified = done.** The feature lifecycle ends when Flynn verifies on device, not when code is committed.
+4. **Verified = done.** The feature lifecycle ends when the product owner verifies on device, not when code is committed.
 5. **Context is valuable.** Capture impl knowledge before killing sessions.
 6. **Tags mark stability.** Main is always moving; tags mark verified-good commits.
 
@@ -71,7 +71,7 @@ This preserves full conversation context while changing the working directory.
 
 ### Legacy cp-r workspaces
 
-Before 2026-02-14, agent workspaces were created via `cp -r ~/src/clawline ~/src/worktrees/clawline-{agent}/`. These full copies may still exist on eezo with dirty/unstaged changes from prior work. Don't panic if you see them — they're the old system.
+Before 2026-02-14, agent workspaces were created via `cp -r ~/src/clawline ~/src/worktrees/clawline-{agent}/`. These full copies may still exist on development-host with dirty/unstaged changes from prior work. Don't panic if you see them — they're the old system.
 
 If you're in a legacy cp-r workspace:
 - If the unstaged changes are YOUR work, commit and push them to main (or the appropriate branch) before anything else.
@@ -100,14 +100,14 @@ Use this when the branch represents a substantial feature branch that has alread
 1. SETUP      — create worktree, spin up impl agent in its folder
 2. WORK       — impl agent implements per spec, commits, pushes branch/main as directed
 3. DEPLOY     — deployer pulls intended source, builds, installs to device
-4. VERIFY     — Flynn tests on device
+4. VERIFY     — the product owner tests on device
 5. DEBRIEF    — impl agent records impl notes (exit interview)
 6. CLEANUP    — kill impl session, remove worktree (spec agent stays alive)
 ```
 
 ### Small feature / review-only branches — merge, rehome, keep agent
 
-Use this when the branch was merged after compile/tests/review but **before Flynn has done full device verification**. This is common for small Clawline feature slices.
+Use this when the branch was merged after compile/tests/review but **before the product owner has done full device verification**. This is common for small Clawline feature slices.
 
 In this mode, merging is **not** the end of the agent's useful life. The agent still owns the feature's latent verification bugs.
 
@@ -116,12 +116,12 @@ In this mode, merging is **not** the end of the agent's useful life. The agent s
 1. WORK       — implement, test/build, run review cycle
 2. MERGE      — merge to main when accepted for next deploy
 3. REHOME     — remove feature worktree/branch, but resume the same agent on canonical main
-4. VERIFY     — Flynn tests when main is next deployed
+4. VERIFY     — the product owner tests when main is next deployed
 5. FOLLOW-UP  — if bugs surface, reuse the same rehomed agent
-6. FINAL KILL — kill only after Flynn verifies the feature or explicitly says to end that agent
+6. FINAL KILL — kill only after the product owner verifies the feature or explicitly says to end that agent
 ```
 
-If a follow-up bug is small, the original rehomed agent may YOLO/fix directly on main when Flynn directs that. If the follow-up is larger or needs isolation, create a new worktree/branch and **move the original agent into that worktree** using `/exit` + `ccx resume <id>`. Do not spawn a fresh agent just because the original branch was merged/deleted.
+If a follow-up bug is small, the original rehomed agent may YOLO/fix directly on main when the product owner directs that. If the follow-up is larger or needs isolation, create a new worktree/branch and **move the original agent into that worktree** using `/exit` + `ccx resume <id>`. Do not spawn a fresh agent just because the original branch was merged/deleted.
 
 ### Step 0: Spec (CLU-orchestrated)
 
@@ -134,19 +134,19 @@ Before impl agents are created, CLU spins up a dedicated **spec agent** to write
 
 **Workspace:** Spec agents write directly to the shared workspace spec folder:
 ```
-/Users/mike/shared-workspace/{project}/specs/{feature-name}.html
+~/shared-workspace/{project}/specs/{feature-name}.html
 ```
 
-Spec agents don't need their own worktree — they work in the shared spec directory. They should write a self-contained, Clawline-conformant HTML document unless Flynn or existing tooling explicitly requires Markdown.
+Spec agents don't need their own worktree — they work in the shared spec directory. They should write a self-contained, Clawline-conformant HTML document unless the product owner or existing tooling explicitly requires Markdown.
 
 **Role:** The spec agent:
 1. Writes the technical specification/design as HTML-first source of truth
 2. Stays alive as the **subject matter expert (SME)**
 3. Impl agents reference the spec (and can ask the spec agent for clarifications)
 
-**Lifecycle:** Spec agents persist until Flynn explicitly directs them to be killed. They outlive impl agents.
+**Lifecycle:** Spec agents persist until the product owner explicitly directs them to be killed. They outlive impl agents.
 
-See `/Users/mike/.codex/skills/spec-homing/SKILL.md` for spec placement conventions.
+See `~/.codex/skills/spec-homing/SKILL.md` for spec placement conventions.
 
 ### Step 1: Setup (Impl Agent)
 
@@ -163,7 +163,7 @@ git worktree add ~/src/worktrees/clawline-{agent}/ -b {agent}
 
 - Impl agent works in `~/src/worktrees/clawline-{agent}/` exclusively.
 - Impl agent references the spec written by the spec agent.
-- Commits go to `main` (YOLO mode, unless Flynn specifies a branch).
+- Commits go to `main` (YOLO mode, unless the product owner specifies a branch).
 - Push to `origin/main` when work is ready:
   ```bash
   git add -A && git commit -m "descriptive message" && git push origin main
@@ -172,36 +172,36 @@ git worktree add ~/src/worktrees/clawline-{agent}/ -b {agent}
   ```bash
   git pull --ff-only origin main
   ```
-  If `--ff-only` fails (diverged), **stop and ask Flynn**. Do not merge or rebase.
+  If `--ff-only` fails (diverged), **stop and ask the product owner**. Do not merge or rebase.
 
 ### Step 3: Deploy
 
-- **Only with Flynn's explicit approval.** Never auto-deploy.
+- **Only with the product owner's explicit approval.** Never auto-deploy.
 - Deploy from the **canonical repo** (`~/src/clawline/`): `git pull --ff-only origin main`, then build + install.
 - Report: SHA deployed, build result, install result, launch result.
 
 ### Step 4: Verify
 
-Flynn tests on device. Two outcomes:
+The product owner tests on device. Two outcomes:
 
 - **🐛 Bug found before branch cleanup** → send bug report to the agent (it still has its worktree + session context). Agent fixes in-place, pushes again. Return to Step 3.
-- **🐛 Bug found after merge/rehome** → use the original rehomed feature agent. Either let it fix on canonical main if Flynn directs a small YOLO fix, or create a follow-up worktree/branch and resume that same agent there. Do **not** create a fresh agent for same-feature verification bugs unless the original agent is unavailable or Flynn explicitly asks.
+- **🐛 Bug found after merge/rehome** → use the original rehomed feature agent. Either let it fix on canonical main if the product owner directs a small YOLO fix, or create a follow-up worktree/branch and resume that same agent there. Do **not** create a fresh agent for same-feature verification bugs unless the original agent is unavailable or the product owner explicitly asks.
 - **✅ Verified** → proceed to Step 5/final cleanup as appropriate.
 
 ### Step 4.5: Tag (Optional)
 
-When Flynn confirms a build is good and says "tag it":
+When the product owner confirms a build is good and says "tag it":
 
 ```bash
 # From the canonical repo
 cd ~/src/clawline
-git tag v{YYYY-MM-DD} HEAD    # or v{short-desc} if Flynn specifies
+git tag v{YYYY-MM-DD} HEAD    # or v{short-desc} if the product owner specifies
 git push origin v{YYYY-MM-DD}
 ```
 
-- **Only Flynn decides when to tag.** Deployers and agents never tag on their own.
+- **Only the product owner decides when to tag.** Deployers and agents never tag on their own.
 - Tags mark verified-good commits. Anyone wanting stable code checks out the latest tag.
-- Tag naming: `v{YYYY-MM-DD}` by default, or `v{descriptive-name}` if Flynn specifies.
+- Tag naming: `v{YYYY-MM-DD}` by default, or `v{descriptive-name}` if the product owner specifies.
 
 ### Step 5: Debrief (Exit Interview)
 
@@ -221,7 +221,7 @@ git push origin v{YYYY-MM-DD}
 
 ### Step 6: Cleanup vs Rehome
 
-For **long feature branches that Flynn has verified**, final cleanup may kill the tmux session and remove the worktree:
+For **long feature branches that the product owner has verified**, final cleanup may kill the tmux session and remove the worktree:
 
 ```bash
 # Kill the tmux session
@@ -233,7 +233,7 @@ cd ~/src/clawline && git worktree remove ~/src/worktrees/clawline-{agent}/
 
 For **small/review-only branches merged before full device verification**, do **not** kill the feature agent. Remove the worktree/branch if appropriate, then rehome the same agent to canonical `~/src/clawline` main so it can fix verification bugs with its preserved context.
 
-**Final kill happens ONLY after Flynn says the feature is verified or explicitly says to end that agent.** Merged is not verified.
+**Final kill happens ONLY after the product owner says the feature is verified or explicitly says to end that agent.** Merged is not verified.
 
 ---
 
@@ -243,18 +243,18 @@ Main is a **moving target**. Agents push freely, so HEAD may contain unverified 
 
 **Tags are the stability mechanism:**
 - `main` HEAD = latest code, possibly broken or incomplete
-- Latest tag = last commit Flynn verified on device and explicitly tagged
+- Latest tag = last commit the product owner verified on device and explicitly tagged
 - If you need known-good code, check out the latest tag, not HEAD
 
 **Tagging flow:**
 1. Deployer builds from `main` HEAD, installs to device
-2. Flynn tests on device
-3. If good, Flynn says "tag it"
+2. The product owner tests on device
+3. If good, the product owner says "tag it"
 4. Deployer runs `git tag v{name}` + `git push origin v{name}`
 
-**Who can tag:** Only the deployer, on Flynn's explicit instruction. Agents never tag.
+**Who can tag:** Only the deployer, on the product owner's explicit instruction. Agents never tag.
 
-**Tag naming:** `v{YYYY-MM-DD}` by default (e.g., `v2026-02-10`). Flynn may specify a descriptive name instead (e.g., `v-sbb-state-machine`).
+**Tag naming:** `v{YYYY-MM-DD}` by default (e.g., `v2026-02-10`). The product owner may specify a descriptive name instead (e.g., `v-sbb-state-machine`).
 
 ---
 
@@ -272,7 +272,7 @@ Agents should `git pull --ff-only` before starting new work to pick up other age
 
 ### Conflict resolution
 
-If `git pull --ff-only` fails → **stop and ask Flynn**. Never merge, rebase, or force-push.
+If `git pull --ff-only` fails → **stop and ask the product owner**. Never merge, rebase, or force-push.
 
 ---
 
@@ -287,13 +287,13 @@ The canonical repo (`~/src/clawline/`) is the **hub**:
 
 ---
 
-## TARS Away Mode
+## Provider Host Away Mode
 
-When working in away mode (agents on TARS instead of eezo):
+When agents work from a provider host instead of a development host:
 
-- Same process applies: worktrees from the TARS canonical repo (`~/src/clawline/`).
-- TARS agents use `notify` (on PATH) for alerts.
-- Deploy from TARS canonical repo when devices are reachable; otherwise deploy from eezo.
+- Same process applies: worktrees come from the provider host canonical repository (`~/src/clawline/`).
+- Agents on the provider host use `notify` (on PATH) for alerts.
+- Deploy from the provider host canonical repository when devices are reachable; otherwise deploy from the development host.
 - Gateway restart policy (provider deploys): use service-managed restart only (`openclaw gateway restart`), never manual `node ... gateway` starts.
 - Post-restart verification is required: exactly one process owns TCP `18789`, and the launchd job (`ai.openclaw.gateway` or legacy `bot.molt.gateway`) reports healthy state.
 - If split ownership is detected, run recovery in order: `openclaw gateway stop` -> confirm `18789` is free -> `openclaw gateway start` -> re-verify single ownership.
@@ -304,9 +304,9 @@ When working in away mode (agents on TARS instead of eezo):
 ## Session Lifecycle Rules
 
 - **Never mass-kill sessions.** Always list exactly which sessions to kill, get explicit confirmation.
-- **Personal sessions (`flynn-*`) are never killed** without Flynn explicitly naming them.
-- **Project sessions (Floatty, Helm, etc.) are never killed** without Flynn explicitly naming them.
-- **Agent sessions persist until Flynn verifies** the feature they were working on.
+- **Personal sessions (`personal-user-*`) are never killed** without the product owner explicitly naming them.
+- **Project sessions (Floatty, Helm, etc.) are never killed** without the product owner explicitly naming them.
+- **Agent sessions persist until the product owner verifies** the feature they were working on.
 - **Rehomed feature agents remain responsible for same-feature verification bugs.** Reuse the original agent; do not spawn a fresh one by default.
 - **Canonical repos are never deleted** — they're the source of truth and deploy point.
 
@@ -321,10 +321,10 @@ Before spinning up an agent:
 
 Before cleaning up or rehoming:
 - [ ] Classify lifecycle: long verified branch final teardown, or small/review-only branch that still needs later device verification
-- [ ] If final teardown: Flynn has verified on device or explicitly said to end the agent
+- [ ] If final teardown: the product owner has verified on device or explicitly said to end the agent
 - [ ] If small/review-only: rehome the same agent to canonical main instead of killing it
 - [ ] Exit debrief completed when doing final teardown, notes saved to ticket
-- [ ] Confirm with Flynn which session(s) to kill when killing is actually intended
+- [ ] Confirm with the product owner which session(s) to kill when killing is actually intended
 - [ ] Remove worktree: `cd ~/src/clawline && git worktree remove ~/src/worktrees/clawline-{agent}`
 - [ ] Delete branch local/remote only after merge/subsumption is confirmed
 

@@ -573,7 +573,7 @@ struct MessageInputBarBoundaryTests {
             T1185ProofBackdrop {
                 t1185NotificationBubble(
                     id: "t1185-single",
-                    title: "Flynn Spatial",
+                    title: "Sample Spatial",
                     content: "Single Spatial notification containment proof: this card should sit inside the host with rounded standard visionOS glass.",
                     assignedNumber: 1,
                     visibleNotificationCount: 1,
@@ -765,8 +765,8 @@ struct MessageInputBarBoundaryTests {
         #expect(inputWidth == CGFloat(232))
     }
 
-    @Test("Notification layout host keeps Ansible landscape safe area out of root width")
-    func notificationLayoutHostKeepsAnsibleLandscapeSafeAreaOutOfRootWidth() {
+    @Test("Notification layout host keeps the test device's landscape safe area out of root width")
+    func notificationLayoutHostKeepsTestDeviceLandscapeSafeAreaOutOfRootWidth() {
         let viewportWidth = CGFloat(852)
         let stackWidth = CGFloat(562.5)
         let peekWidth = CGFloat(18)

@@ -105,25 +105,25 @@ struct ClawlineTests {
         #expect(
             ChatViewModel.placeholderText(
                 displayName: "Main",
-                sessionKey: "agent:main:clawline:flynn:main"
-            ) == "Main — agent:main:clawline:flynn:main"
+                sessionKey: "agent:main:clawline:example-user:main"
+            ) == "Main — agent:main:clawline:example-user:main"
         )
         #expect(ChatViewModel.placeholderText(displayName: "Main", sessionKey: "") == "Main")
     }
 
     @Test("T001: Clawline personal terminal streams allow built-in and custom suffixes")
     func sessionKeyAllowsPersonalTerminalStreamSuffixes() {
-        #expect(SessionKey.isClawlinePersonalDM("agent:main:clawline:flynn:main"))
-        #expect(SessionKey.isClawlinePersonalDM("agent:main:clawline:flynn:dm"))
-        #expect(SessionKey.isClawlinePersonalDM("agent:main:clawline:flynn:s_abcd1234"))
-        #expect(SessionKey.isClawlinePersonalDM("agent:aux:clawline:flynn:s_abcd1234"))
+        #expect(SessionKey.isClawlinePersonalDM("agent:main:clawline:example-user:main"))
+        #expect(SessionKey.isClawlinePersonalDM("agent:main:clawline:example-user:dm"))
+        #expect(SessionKey.isClawlinePersonalDM("agent:main:clawline:example-user:s_abcd1234"))
+        #expect(SessionKey.isClawlinePersonalDM("agent:aux:clawline:example-user:s_abcd1234"))
     }
 
     @Test("T001: Clawline personal terminal streams reject invalid suffixes")
     func sessionKeyRejectsInvalidPersonalTerminalStreamSuffixes() {
-        #expect(!SessionKey.isClawlinePersonalDM("agent:main:clawline:flynn:global_dm"))
-        #expect(!SessionKey.isClawlinePersonalDM("agent:main:clawline:flynn:s_deadbee"))
-        #expect(!SessionKey.isClawlinePersonalDM("agent:main:clawline:flynn:s_deadbeez"))
+        #expect(!SessionKey.isClawlinePersonalDM("agent:main:clawline:example-user:global_dm"))
+        #expect(!SessionKey.isClawlinePersonalDM("agent:main:clawline:example-user:s_deadbee"))
+        #expect(!SessionKey.isClawlinePersonalDM("agent:main:clawline:example-user:s_deadbeez"))
         #expect(!SessionKey.isClawlinePersonalDM("agent:main:clawline::main"))
         #expect(!SessionKey.isClawlinePersonalDM("server:main"))
     }

@@ -141,7 +141,7 @@ struct TerminalBubbleUIKitViewTests {
             streaming: false,
             attachments: [],
             deviceId: nil,
-            sessionKey: "agent:main:clawline:mike:dm"
+            sessionKey: "agent:main:clawline:example-user:dm"
         )
         let presentation = MessagePresentation(
             parts: [.terminalSession(descriptor)],

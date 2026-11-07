@@ -12,7 +12,7 @@ describe("chatSendState", () => {
         draft: "Hello",
         isSubmitting: false,
         provisioningState: "ready",
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         stagedAttachmentCount: 0,
         transportPhase: "live"
       })
@@ -21,7 +21,7 @@ describe("chatSendState", () => {
       canSend: true,
       connectionState: "live",
       isSendButtonEnabled: true,
-      placeholder: "Personal — agent:main:clawline:flynn:main",
+      placeholder: "Personal — agent:main:clawline:example-user:main",
       sendAction: "send",
       sendAriaLabel: "Send"
     });
@@ -32,7 +32,7 @@ describe("chatSendState", () => {
         draft: "Hello",
         isSubmitting: false,
         provisioningState: "ready",
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         stagedAttachmentCount: 0,
         transportPhase: "recovering"
       })
@@ -52,7 +52,7 @@ describe("chatSendState", () => {
         draft: "Hello",
         isSubmitting: false,
         provisioningState: "ready",
-        sessionKey: "agent:main:clawline:flynn:main",
+        sessionKey: "agent:main:clawline:example-user:main",
         stagedAttachmentCount: 0,
         transportPhase: "failed"
       })
@@ -73,7 +73,7 @@ describe("chatSendState", () => {
           attachments: [],
           content: "Retry me",
           createdAt: 1,
-          sessionKey: "agent:main:clawline:flynn:main",
+          sessionKey: "agent:main:clawline:example-user:main",
           wireAttachments: []
         },
         transportPhase: "live"
@@ -91,7 +91,7 @@ describe("chatSendState", () => {
           attachments: [],
           content: "Retry me",
           createdAt: 1,
-          sessionKey: "agent:main:clawline:flynn:main",
+          sessionKey: "agent:main:clawline:example-user:main",
           wireAttachments: []
         },
         transportPhase: "recovering"

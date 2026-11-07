@@ -6,8 +6,8 @@ test("scroll state restores on stream switch and reload, and unread stream selec
   page
 }) => {
   const port = 23_801 + Math.floor(Math.random() * 1_000);
-  const mainSessionKey = "agent:main:clawline:flynn:main";
-  const sideSessionKey = "agent:main:clawline:flynn:side";
+  const mainSessionKey = "agent:main:clawline:example-user:main";
+  const sideSessionKey = "agent:main:clawline:example-user:side";
 
   const mainTranscript = Array.from({ length: 90 }, (_, index) => ({
     type: "message",
@@ -75,7 +75,7 @@ test("scroll state restores on stream switch and reload, and unread stream selec
             type: "pair_result",
             success: true,
             token: "jwt-phase5-scroll-token",
-            userId: "user_flynn"
+            userId: "user_example"
           })
         );
         return;
@@ -86,7 +86,7 @@ test("scroll state restores on stream switch and reload, and unread stream selec
           JSON.stringify({
             type: "auth_result",
             success: true,
-            userId: "user_flynn",
+            userId: "user_example",
             replayCount: mainTranscript.length + sideReplayTranscript.length,
             sessionKeys: [mainSessionKey, sideSessionKey]
           })
@@ -94,7 +94,7 @@ test("scroll state restores on stream switch and reload, and unread stream selec
         socket.send(
           JSON.stringify({
             type: "session_info",
-            userId: "user_flynn",
+            userId: "user_example",
             isAdmin: false,
             sessionKeys: [mainSessionKey, sideSessionKey]
           })
@@ -190,12 +190,12 @@ test("scroll state restores on stream switch and reload, and unread stream selec
         JSON.stringify(session.deviceId)
       );
     }, {
-      claimedName: "Flynn Browser",
+      claimedName: "Example Browser",
       deviceId: "phase5-scroll-device",
       isAdmin: false,
       serverUrl: `ws://127.0.0.1:${port}/ws`,
       token: "jwt-phase5-scroll-token",
-      userId: "user_flynn"
+      userId: "user_example"
     });
 
     await page.goto(`/chat/${mainSessionKey}`);

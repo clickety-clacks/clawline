@@ -5,8 +5,8 @@ test("two tabs keep independent sockets, routing, and unread state", async ({
   page
 }) => {
   const port = 18_801 + Math.floor(Math.random() * 1_000);
-  const mainSessionKey = "agent:main:clawline:flynn:main";
-  const sideSessionKey = "agent:main:clawline:flynn:side";
+  const mainSessionKey = "agent:main:clawline:example-user:main";
+  const sideSessionKey = "agent:main:clawline:example-user:side";
   let authCount = 0;
   let outboundMessageCount = 0;
   let serverMessageCounter = 0;
@@ -40,7 +40,7 @@ test("two tabs keep independent sockets, routing, and unread state", async ({
             type: "pair_result",
             success: true,
             token: "jwt-test-token",
-            userId: "user_flynn"
+            userId: "user_example"
           })
         );
         return;
@@ -52,7 +52,7 @@ test("two tabs keep independent sockets, routing, and unread state", async ({
           JSON.stringify({
             type: "auth_result",
             success: true,
-            userId: "user_flynn",
+            userId: "user_example",
             sessionId: `sess_${authCount}`,
             isAdmin: false,
             replayCount: 1,
@@ -67,7 +67,7 @@ test("two tabs keep independent sockets, routing, and unread state", async ({
         socket.send(
           JSON.stringify({
             type: "session_info",
-            userId: "user_flynn",
+            userId: "user_example",
             isAdmin: false,
             sessionKeys: [mainSessionKey, sideSessionKey]
           })
@@ -146,7 +146,7 @@ test("two tabs keep independent sockets, routing, and unread state", async ({
 
   try {
     await page.goto("/pair");
-    await page.getByLabel("Name").fill("Flynn Browser");
+    await page.getByLabel("Name").fill("Example Browser");
     await page.getByLabel("Provider address").fill(`ws://127.0.0.1:${port}/ws`);
     await page.getByRole("button", { name: "Pair browser" }).click();
 
@@ -223,8 +223,8 @@ test("reload resumes multi-session state with per-stream replay cursors", async 
   page
 }) => {
   const port = 19_901 + Math.floor(Math.random() * 1_000);
-  const mainSessionKey = "agent:main:clawline:flynn:main";
-  const sideSessionKey = "agent:main:clawline:flynn:side";
+  const mainSessionKey = "agent:main:clawline:example-user:main";
+  const sideSessionKey = "agent:main:clawline:example-user:side";
   const authPayloads: Array<Record<string, unknown>> = [];
   const transcriptBySession = new Map<string, Array<Record<string, unknown>>>([
     [
@@ -262,7 +262,7 @@ test("reload resumes multi-session state with per-stream replay cursors", async 
             type: "pair_result",
             success: true,
             token: "jwt-test-token",
-            userId: "user_flynn"
+            userId: "user_example"
           })
         );
         return;
@@ -282,7 +282,7 @@ test("reload resumes multi-session state with per-stream replay cursors", async 
           JSON.stringify({
             type: "auth_result",
             success: true,
-            userId: "user_flynn",
+            userId: "user_example",
             sessionId: `sess_${authPayloads.length}`,
             isAdmin: false,
             replayCount: replayMessages.length,
@@ -297,7 +297,7 @@ test("reload resumes multi-session state with per-stream replay cursors", async 
         socket.send(
           JSON.stringify({
             type: "session_info",
-            userId: "user_flynn",
+            userId: "user_example",
             isAdmin: false,
             sessionKeys: [mainSessionKey, sideSessionKey]
           })
@@ -337,7 +337,7 @@ test("reload resumes multi-session state with per-stream replay cursors", async 
 
   try {
     await page.goto("/pair");
-    await page.getByLabel("Name").fill("Flynn Browser");
+    await page.getByLabel("Name").fill("Example Browser");
     await page.getByLabel("Provider address").fill(`ws://127.0.0.1:${port}/ws`);
     await page.getByRole("button", { name: "Pair browser" }).click();
 

@@ -6,7 +6,7 @@ test("interactive HTML bubbles stay sandboxed, block network access, and use the
   page
 }) => {
   const port = 24_601 + Math.floor(Math.random() * 1_000);
-  const sessionKey = "agent:main:clawline:flynn:main";
+  const sessionKey = "agent:main:clawline:example-user:main";
   const interactiveCallbacks: unknown[] = [];
   let blockedFetchCount = 0;
 
@@ -63,7 +63,7 @@ test("interactive HTML bubbles stay sandboxed, block network access, and use the
             type: "pair_result",
             success: true,
             token: "jwt-phase6-token",
-            userId: "user_flynn"
+            userId: "user_example"
           })
         );
         return;
@@ -82,7 +82,7 @@ test("interactive HTML bubbles stay sandboxed, block network access, and use the
         JSON.stringify({
           type: "auth_result",
           success: true,
-          userId: "user_flynn",
+          userId: "user_example",
           replayCount: 0,
           sessionKeys: [sessionKey]
         })
@@ -90,7 +90,7 @@ test("interactive HTML bubbles stay sandboxed, block network access, and use the
       socket.send(
         JSON.stringify({
           type: "session_info",
-          userId: "user_flynn",
+          userId: "user_example",
           isAdmin: true,
           sessionKeys: [sessionKey]
         })
@@ -163,7 +163,7 @@ test("interactive HTML bubbles stay sandboxed, block network access, and use the
   try {
     await page.setViewportSize({ width: 820, height: 1180 });
     await page.goto("/pair");
-    await page.getByLabel("Name").fill("Flynn Browser");
+    await page.getByLabel("Name").fill("Example Browser");
     await page.getByLabel("Provider address").fill(`ws://127.0.0.1:${port}/ws`);
     await page.getByRole("button", { name: "Pair browser" }).click();
     await expect(page).toHaveURL(new RegExp(`/chat/${escapeForRegExp(sessionKey)}$`));

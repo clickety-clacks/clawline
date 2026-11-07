@@ -6,7 +6,7 @@ test("terminal bubbles render through the dedicated runtime and reconnect honest
   page
 }) => {
   const port = 23_501 + Math.floor(Math.random() * 1_000);
-  const sessionKey = "agent:main:clawline:flynn:main";
+  const sessionKey = "agent:main:clawline:example-user:main";
   let terminalAuthCount = 0;
   let latestTerminalSocket: WebSocket | null = null;
 
@@ -36,7 +36,7 @@ test("terminal bubbles render through the dedicated runtime and reconnect honest
             type: "pair_result",
             success: true,
             token: "jwt-phase6-token",
-            userId: "user_flynn"
+            userId: "user_example"
           })
         );
         return;
@@ -50,7 +50,7 @@ test("terminal bubbles render through the dedicated runtime and reconnect honest
         JSON.stringify({
           type: "auth_result",
           success: true,
-          userId: "user_flynn",
+          userId: "user_example",
           replayCount: 0,
           sessionKeys: [sessionKey]
         })
@@ -58,7 +58,7 @@ test("terminal bubbles render through the dedicated runtime and reconnect honest
       socket.send(
         JSON.stringify({
           type: "session_info",
-          userId: "user_flynn",
+          userId: "user_example",
           isAdmin: true,
           sessionKeys: [sessionKey]
         })
@@ -96,10 +96,10 @@ test("terminal bubbles render through the dedicated runtime and reconnect honest
               data: Buffer.from(
                 JSON.stringify({
                   version: 2,
-                  terminalSessionId: "term_eezo_1",
-                  title: "eezo",
+                  terminalSessionId: "term_example_1",
+                  title: "terminal-host.example",
                   destination: {
-                    address: "mike@eezo"
+                    address: "user@terminal-host.example"
                   },
                   capabilities: {
                     interactive: true,
@@ -134,7 +134,7 @@ test("terminal bubbles render through the dedicated runtime and reconnect honest
         terminalAuthCount += 1;
         socket.send(JSON.stringify({ type: "terminal_ready" }));
         socket.send(JSON.stringify({ type: "terminal_backfill_end" }));
-        socket.send("connected to eezo\r\n$ ");
+        socket.send("connected to terminal-host.example\r\n$ ");
         return;
       }
 
@@ -175,19 +175,19 @@ test("terminal bubbles render through the dedicated runtime and reconnect honest
   try {
     await page.setViewportSize({ width: 820, height: 1180 });
     await page.goto("/pair");
-    await page.getByLabel("Name").fill("Flynn Browser");
+    await page.getByLabel("Name").fill("Example Browser");
     await page.getByLabel("Provider address").fill(`ws://127.0.0.1:${port}/ws`);
     await page.getByRole("button", { name: "Pair browser" }).click();
     await expect(page).toHaveURL(new RegExp(`/chat/${escapeForRegExp(sessionKey)}$`));
 
-    const terminalCard = page.getByTestId("terminal-attachment-term_eezo_1");
+    const terminalCard = page.getByTestId("terminal-attachment-term_example_1");
     await expect(terminalCard).toBeVisible();
-    await expect(page.getByText("mike@eezo")).toBeVisible();
+    await expect(page.getByText("user@terminal-host.example")).toBeVisible();
     await expect.poll(() => terminalAuthCount).toBe(1);
     await expect(terminalCard.locator(".xterm")).toBeVisible();
     await expect
       .poll(() => terminalCard.locator(".xterm-rows").textContent())
-      .toContain("connected to eezo");
+      .toContain("connected to terminal-host.example");
 
     latestTerminalSocket?.close();
     await expect(page.getByText("Terminal disconnected.")).toBeVisible();

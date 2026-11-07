@@ -454,17 +454,17 @@ struct ChatFlowOrganicComplianceTests {
 
     @Test("Bug T190: Markdown link runs strip trailing backticks before preview extraction")
     func messagePresentationStripsTrailingBackticksFromMarkdownDetectedURLs() {
-        let message = sampleMessage(content: "http://tars:18800/www/tracker-dashboard.html`")
+        let message = sampleMessage(content: "http://provider-host:18800/www/tracker-dashboard.html`")
         let presentation = buildPresentation(message)
 
-        #expect(presentation.detectedURLs.map(\.absoluteString) == ["http://tars:18800/www/tracker-dashboard.html"])
+        #expect(presentation.detectedURLs.map(\.absoluteString) == ["http://provider-host:18800/www/tracker-dashboard.html"])
         #expect(presentation.parts.contains(where: { part in
             if case .linkPreview(let url) = part {
-                return url.absoluteString == "http://tars:18800/www/tracker-dashboard.html"
+                return url.absoluteString == "http://provider-host:18800/www/tracker-dashboard.html"
             }
             return false
         }))
-        #expect(renderedMarkdownText(from: message, stripDetectedURLs: false) == "http://tars:18800/www/tracker-dashboard.html`")
+        #expect(renderedMarkdownText(from: message, stripDetectedURLs: false) == "http://provider-host:18800/www/tracker-dashboard.html`")
 
         let rendered = renderMarkdownForTests(
             markdown: message.content,
@@ -483,7 +483,7 @@ struct ChatFlowOrganicComplianceTests {
             return
         }
         let text = attributed.string as NSString
-        let urlRange = text.range(of: "http://tars:18800/www/tracker-dashboard.html")
+        let urlRange = text.range(of: "http://provider-host:18800/www/tracker-dashboard.html")
         let backtickRange = text.range(of: "`")
         #expect(urlRange.location != NSNotFound)
         #expect(backtickRange.location != NSNotFound)
@@ -635,7 +635,7 @@ struct ChatFlowOrganicComplianceTests {
             data: data,
             assetId: nil
         )
-        let message = sampleMessage(content: "Live logs:", attachments: [terminalAttachment], sessionKey: "agent:main:clawline:mike:dm")
+        let message = sampleMessage(content: "Live logs:", attachments: [terminalAttachment], sessionKey: "agent:main:clawline:example-user:dm")
         let presentation = buildPresentation(message)
 
         #expect(presentation.parts.contains(where: { part in
@@ -675,7 +675,7 @@ struct ChatFlowOrganicComplianceTests {
         let message = sampleMessage(
             content: "Live logs:",
             attachments: [terminalAttachment],
-            sessionKey: "agent:main:clawline:mike:s_abcd1234"
+            sessionKey: "agent:main:clawline:example-user:s_abcd1234"
         )
         let presentation = buildPresentation(message)
 
@@ -712,7 +712,7 @@ struct ChatFlowOrganicComplianceTests {
             data: data,
             assetId: nil
         )
-        let message = sampleMessage(content: "Live logs:", attachments: [terminalAttachment], sessionKey: SessionKey.clawlineMain(userId: "mike"))
+        let message = sampleMessage(content: "Live logs:", attachments: [terminalAttachment], sessionKey: SessionKey.clawlineMain(userId: "example-user"))
         let presentation = buildPresentation(message)
 
         #expect(presentation.parts.contains(where: { part in
@@ -850,7 +850,7 @@ struct ChatFlowOrganicComplianceTests {
             sampleMessage(
                 content: "Two rich docs",
                 attachments: [terminalAttachment, interactiveAttachment],
-                sessionKey: SessionKey.clawlineMain(userId: "mike")
+                sessionKey: SessionKey.clawlineMain(userId: "example-user")
             )
         )
 

@@ -7,7 +7,7 @@ test("file input, paste, and drag-drop stage attachments and send them through u
 }) => {
   test.setTimeout(45_000);
   const port = 22_931 + Math.floor(Math.random() * 1_000);
-  const sessionKey = "agent:main:clawline:flynn:main";
+  const sessionKey = "agent:main:clawline:example-user:main";
   const uploadRequests: Array<{ filename: string; mimeType: string }> = [];
   const socketMessages: Array<{
     attachments: unknown[];
@@ -120,7 +120,7 @@ test("file input, paste, and drag-drop stage attachments and send them through u
             type: "pair_result",
             success: true,
             token: "jwt-phase4-token",
-            userId: "user_flynn"
+            userId: "user_example"
           })
         );
         return;
@@ -131,7 +131,7 @@ test("file input, paste, and drag-drop stage attachments and send them through u
           JSON.stringify({
             type: "auth_result",
             success: true,
-            userId: "user_flynn",
+            userId: "user_example",
             replayCount: 0,
             sessionKeys: [sessionKey]
           })
@@ -139,7 +139,7 @@ test("file input, paste, and drag-drop stage attachments and send them through u
         socket.send(
           JSON.stringify({
             type: "session_info",
-            userId: "user_flynn",
+            userId: "user_example",
             isAdmin: false,
             sessionKeys: [sessionKey]
           })
@@ -220,7 +220,7 @@ test("file input, paste, and drag-drop stage attachments and send them through u
 
   try {
     await page.goto("/pair");
-    await page.getByLabel("Name").fill("Flynn Browser");
+    await page.getByLabel("Name").fill("Example Browser");
     await page.getByLabel("Provider address").fill(`ws://127.0.0.1:${port}/ws`);
     await page.getByRole("button", { name: "Pair browser" }).click();
 

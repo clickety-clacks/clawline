@@ -26,7 +26,7 @@ describe("SessionListSheet", () => {
     expect(
       resolveStreamDisplayName({
         displayName: "",
-        sessionKey: "agent:main:clawline:flynn:research_notes"
+        sessionKey: "agent:main:clawline:example-user:research_notes"
       })
     ).toBe("Research Notes");
   });
@@ -35,13 +35,13 @@ describe("SessionListSheet", () => {
     expect(
       resolveStreamDisplayName({
         displayName: "Personal",
-        sessionKey: "agent:main:clawline:flynn:main"
+        sessionKey: "agent:main:clawline:example-user:main"
       })
     ).toBe("Personal");
   });
 
   it("parses the trailing session segment into title case", () => {
-    expect(parseStreamName("agent:main:clawline:flynn:side_thread")).toBe("Side Thread");
+    expect(parseStreamName("agent:main:clawline:example-user:side_thread")).toBe("Side Thread");
   });
 
   it("keeps the stream picker on a measured-width scrolling list", () => {
@@ -61,7 +61,7 @@ describe("SessionListSheet", () => {
     const onDeleteSession = vi.fn();
     render(
       <SessionListSheet
-        activeSessionKey="agent:main:clawline:flynn:main"
+        activeSessionKey="agent:main:clawline:example-user:main"
         filterQuery=""
         isOpen={true}
         onClose={vi.fn()}
@@ -70,11 +70,11 @@ describe("SessionListSheet", () => {
         onFilterQueryChange={vi.fn()}
         onRenameSession={onRenameSession}
         onSelectSession={vi.fn()}
-        provisionedSessionKeys={["agent:main:clawline:flynn:main"]}
+        provisionedSessionKeys={["agent:main:clawline:example-user:main"]}
         streamDotStateBySessionKey={{}}
         streams={[streamRecord({
           displayName: "Main",
-          sessionKey: "agent:main:clawline:flynn:main"
+          sessionKey: "agent:main:clawline:example-user:main"
         })]}
         transportPhase="live"
         unreadBySessionKey={{}}
@@ -114,20 +114,20 @@ describe("SessionListSheet", () => {
     const createdStream = streamRecord({
       displayName: "New Chat",
       orderIndex: 1,
-      sessionKey: "agent:main:clawline:flynn:new_chat"
+      sessionKey: "agent:main:clawline:example-user:new_chat"
     });
 
     function Harness() {
       const [streams, setStreams] = useState([
         streamRecord({
           displayName: "Main",
-          sessionKey: "agent:main:clawline:flynn:main"
+          sessionKey: "agent:main:clawline:example-user:main"
         })
       ]);
 
       return (
         <SessionListSheet
-          activeSessionKey="agent:main:clawline:flynn:new_chat"
+          activeSessionKey="agent:main:clawline:example-user:new_chat"
           filterQuery="zzz"
           isOpen={true}
           onClose={onClose}
@@ -140,8 +140,8 @@ describe("SessionListSheet", () => {
           onRenameSession={vi.fn()}
           onSelectSession={onSelectSession}
           provisionedSessionKeys={[
-            "agent:main:clawline:flynn:main",
-            "agent:main:clawline:flynn:new_chat"
+            "agent:main:clawline:example-user:main",
+            "agent:main:clawline:example-user:new_chat"
           ]}
           streamDotStateBySessionKey={{}}
           streams={streams}

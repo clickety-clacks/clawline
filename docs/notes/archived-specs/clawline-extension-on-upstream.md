@@ -369,7 +369,7 @@ At minimum, the validation artifact must map each of the test-provider proof ite
 
 ## Acceptance Criteria
 
-This migration is ready for the product owner verification only when all of the following are true:
+This migration is ready for verification by the product owner only when all of the following are true:
 
 1. Clawline runtime ownership has moved from `src/clawline/*` to `extensions/clawline/src/runtime/*`.
 2. `extensions/clawline/**` no longer depends on Clawline-specific plugin-sdk exports.

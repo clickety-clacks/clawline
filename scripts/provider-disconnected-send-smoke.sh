@@ -7,14 +7,36 @@ SCHEME="${SCHEME:-Clawline}"
 SIMULATOR_NAME="${SIMULATOR_NAME:-iPhone 17}"
 SIMULATOR_ID="${SIMULATOR_ID:-}"
 BUNDLE_ID="${BUNDLE_ID:-co.clicketyclacks.Clawline}"
-PROVIDER_SSH="${PROVIDER_SSH:-provider.example.test}"
-PROVIDER_SSH_USER="${PROVIDER_SSH_USER:-test-user}"
-PROVIDER_URL="${PROVIDER_URL:-http://provider.example.test:18800}"
-TEST_DEVICE_ID="${CLAWLINE_TEST_DEVICE_ID:-00000000-0000-4000-8000-000000000003}"
-TEST_USER_ID="${CLAWLINE_TEST_USER_ID:-clawline_ios_disconnected_send_test}"
+PROVIDER_SSH="${PROVIDER_SSH:-}"
+PROVIDER_SSH_USER="${PROVIDER_SSH_USER:-}"
+PROVIDER_URL="${PROVIDER_URL:-}"
+TEST_DEVICE_ID="${CLAWLINE_TEST_DEVICE_ID:-}"
+TEST_USER_ID="${CLAWLINE_TEST_USER_ID:-}"
 DRAFT_TEXT="${DRAFT_TEXT:-Disconnected send smoke $(date +%s)}"
 ARTIFACT_DIR="${ARTIFACT_DIR:-$ROOT_DIR/scratch/test-provider-disconnected-send-smoke/$(date +%Y%m%d-%H%M%S)}"
 RESET_SIM_KEYCHAIN="${RESET_SIM_KEYCHAIN:-1}"
+
+required_inputs=(
+  PROVIDER_SSH
+  PROVIDER_SSH_USER
+  PROVIDER_URL
+  CLAWLINE_TEST_DEVICE_ID
+  CLAWLINE_TEST_USER_ID
+)
+missing_inputs=()
+for input_name in "${required_inputs[@]}"; do
+  [[ -n "${!input_name:-}" ]] || missing_inputs+=("$input_name")
+done
+if (( ${#missing_inputs[@]} > 0 )); then
+  printf 'Usage: PROVIDER_SSH=<target> PROVIDER_SSH_USER=<user> PROVIDER_URL=<url> CLAWLINE_TEST_DEVICE_ID=<id> CLAWLINE_TEST_USER_ID=<id> %s\n' "$0" >&2
+  printf 'Required environment inputs: %s\n' "${required_inputs[*]}" >&2
+  printf 'Missing required inputs: %s\n' "${missing_inputs[*]}" >&2
+  exit 2
+fi
+
+PROVIDER_ADDRESS="${PROVIDER_URL#*://}"
+PROVIDER_ADDRESS="${PROVIDER_ADDRESS%%/*}"
+[[ -n "$PROVIDER_ADDRESS" ]] || { printf 'PROVIDER_URL must include a host.\n' >&2; exit 2; }
 
 mkdir -p "$ARTIFACT_DIR"
 
@@ -201,7 +223,7 @@ force_tcp_disconnect() {
   [[ -n "$peer_ip" && -n "$peer_port" && "$peer_ip" != "$peer_port" ]] || {
     fail "could not parse peer address '$peer'"
   }
-  log "Forcing TCP close for provider.example.test:18800 peer $peer_ip:$peer_port"
+  log "Forcing TCP close for provider peer $peer_ip:$peer_port"
   ssh "$PROVIDER_SSH" "sudo -n ss -K dst '$peer_ip' dport = :'$peer_port' sport = :18800 >/dev/null"
 }
 
@@ -245,7 +267,7 @@ complete_pairing_flow() {
   xcodebuildmcp ui-automation type-text --simulator-id "$SIMULATOR_ID" --text "clawline ios smoke"
   xcodebuildmcp ui-automation tap --simulator-id "$SIMULATOR_ID" --id "pairing_name_submit" --post-delay 1
   xcodebuildmcp ui-automation tap --simulator-id "$SIMULATOR_ID" --id "pairing_address_input" --post-delay 0.5
-  xcodebuildmcp ui-automation type-text --simulator-id "$SIMULATOR_ID" --text "provider.example.test:18800"
+  xcodebuildmcp ui-automation type-text --simulator-id "$SIMULATOR_ID" --text "$PROVIDER_ADDRESS"
   xcodebuildmcp ui-automation tap --simulator-id "$SIMULATOR_ID" --id "pairing_address_submit" --post-delay 1
 }
 
@@ -334,7 +356,7 @@ peers="$(extract_new_peers "$before_connections" "$after_connections" || true)"
   cat "$before_connections"
   log "After connections:"
   cat "$after_connections"
-  fail "expected at least one new provider.example.test:18800 connection"
+  fail "expected at least one new provider HTTP connection"
 }
 
 xcodebuildmcp ui-automation tap --simulator-id "$SIMULATOR_ID" --id "prompt_input" --post-delay 0.5
@@ -343,8 +365,8 @@ wait_for_snapshot_contains "Send message" "draft-ready-send-affordance"
 
 remote_ws_connections >"$after_connections"
 peers="$(extract_new_peers "$before_connections" "$after_connections" || true)"
-[[ -n "$peers" ]] || fail "expected at least one active provider.example.test:18800 connection before disconnect"
-log "Forcing TCP close for active test-provider peers: $(printf '%s' "$peers" | tr '\n' ' ')"
+[[ -n "$peers" ]] || fail "expected an active provider connection before disconnect"
+log "Forcing TCP close for active provider peers: $(printf '%s' "$peers" | tr '\n' ' ')"
 for peer in $peers; do
   [[ -n "$peer" ]] || continue
   force_tcp_disconnect "$peer"

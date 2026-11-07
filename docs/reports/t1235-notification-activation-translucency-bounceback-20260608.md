@@ -19,7 +19,7 @@ Sections before `Continuation Update: 2026-06-09 Proof Cleanup / Review Narrowin
 ## Continuation Update: 2026-06-08 02:40 PDT
 
 Additional observed symptom:
-- the product owner-visible T1235 update reported that the visible notification Reply and Close controls cannot be tapped.
+- the T1235 update visible to the product owner reported that the visible notification Reply and Close controls cannot be tapped.
 - Expected behavior: Reply opens the notification reply flow; Close reply closes that flow; Dismiss closes the notification; these controls must remain single-tap targets while whole-card navigation and drag/peek/dock continue to work.
 
 Reply / Close / Dismiss hit-testing analysis:

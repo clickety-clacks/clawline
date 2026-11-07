@@ -1,7 +1,7 @@
 # Web Bubble Sizing Regression
 
 ## Status
-Ready for the product owner verification on branch `clawline-web-parity-layout-batch`.
+Ready for verification by the product owner on branch `clawline-web-parity-layout-batch`.
 
 ## Source Truth
 Checked source docs on 2026-05-09:

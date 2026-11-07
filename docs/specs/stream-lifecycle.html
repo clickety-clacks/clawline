@@ -139,7 +139,7 @@
 <p>Response <code>200</code>:</p>
 <pre><code class="json">
 {
-  &quot;deletedSessionKey&quot;: &quot;agent:main:clawline:flynn:s_8fa12c44&quot;
+  &quot;deletedSessionKey&quot;: &quot;agent:main:clawline:example-user:s_8fa12c44&quot;
 }
 </code></pre>
 
@@ -186,9 +186,9 @@
 <p>Response <code>201</code>:</p>
 <pre><code class="json">
 {
-  &quot;forkedFrom&quot;: &quot;agent:main:clawline:flynn:main&quot;,
+  &quot;forkedFrom&quot;: &quot;agent:main:clawline:example-user:main&quot;,
   &quot;stream&quot;: {
-    &quot;sessionKey&quot;: &quot;agent:main:clawline:flynn:s_a1b2c3d4&quot;,
+    &quot;sessionKey&quot;: &quot;agent:main:clawline:example-user:s_a1b2c3d4&quot;,
     &quot;displayName&quot;: &quot;Parser Refactor&quot;,
     &quot;kind&quot;: &quot;custom&quot;,
     &quot;orderIndex&quot;: 5,
@@ -229,8 +229,8 @@
 <p>Request:</p>
 <pre><code class="json">
 {
-  &quot;sourceSessionKey&quot;: &quot;agent:main:clawline:flynn:s_a1b2c3d4&quot;,
-  &quot;targetSessionKey&quot;: &quot;agent:main:clawline:flynn:main&quot;,
+  &quot;sourceSessionKey&quot;: &quot;agent:main:clawline:example-user:s_a1b2c3d4&quot;,
+  &quot;targetSessionKey&quot;: &quot;agent:main:clawline:example-user:main&quot;,
   &quot;summary&quot;: &quot;Parser refactor complete. Decision: keep incremental tokenizer path.&quot;,
   &quot;closeSource&quot;: true,
   &quot;idempotencyKey&quot;: &quot;req_999&quot;
@@ -242,8 +242,8 @@
 {
   &quot;merged&quot;: true,
   &quot;mergeMessageId&quot;: &quot;s_6001&quot;,
-  &quot;sourceSessionKey&quot;: &quot;agent:main:clawline:flynn:s_a1b2c3d4&quot;,
-  &quot;targetSessionKey&quot;: &quot;agent:main:clawline:flynn:main&quot;,
+  &quot;sourceSessionKey&quot;: &quot;agent:main:clawline:example-user:s_a1b2c3d4&quot;,
+  &quot;targetSessionKey&quot;: &quot;agent:main:clawline:example-user:main&quot;,
   &quot;sourceClosed&quot;: true
 }
 </code></pre>
@@ -314,8 +314,8 @@ CREATE TABLE IF NOT EXISTS stream_lineage (
 <pre><code class="json">
 {
   &quot;type&quot;: &quot;stream_forked&quot;,
-  &quot;parentSessionKey&quot;: &quot;agent:main:clawline:flynn:main&quot;,
-  &quot;childSessionKey&quot;: &quot;agent:main:clawline:flynn:s_a1b2c3d4&quot;,
+  &quot;parentSessionKey&quot;: &quot;agent:main:clawline:example-user:main&quot;,
+  &quot;childSessionKey&quot;: &quot;agent:main:clawline:example-user:s_a1b2c3d4&quot;,
   &quot;seedMessageId&quot;: &quot;s_5001&quot;
 }
 </code></pre>
@@ -323,8 +323,8 @@ CREATE TABLE IF NOT EXISTS stream_lineage (
 <pre><code class="json">
 {
   &quot;type&quot;: &quot;stream_merged&quot;,
-  &quot;sourceSessionKey&quot;: &quot;agent:main:clawline:flynn:s_a1b2c3d4&quot;,
-  &quot;targetSessionKey&quot;: &quot;agent:main:clawline:flynn:main&quot;,
+  &quot;sourceSessionKey&quot;: &quot;agent:main:clawline:example-user:s_a1b2c3d4&quot;,
+  &quot;targetSessionKey&quot;: &quot;agent:main:clawline:example-user:main&quot;,
   &quot;mergeMessageId&quot;: &quot;s_6001&quot;,
   &quot;sourceClosed&quot;: true
 }

@@ -77,8 +77,8 @@ On subsequent launches:
      "deviceId": "ABC123",
      "lastMessageId": "s_active_stream_fallback",
      "replayCursorsBySessionKey": {
-       "agent:main:clawline:flynn:main": "s_main_last_seen",
-       "agent:main:clawline:flynn:dm": "s_dm_last_seen"
+       "agent:main:clawline:example-user:main": "s_main_last_seen",
+       "agent:main:clawline:example-user:dm": "s_dm_last_seen"
      }
    }
    ```
@@ -128,7 +128,7 @@ The client may call `GET /version` (no auth) to verify `protocolVersion: 1` befo
 {
   "type": "message",
   "id": "c_123",
-  "sessionKey": "agent:main:clawline:flynn:main",
+  "sessionKey": "agent:main:clawline:example-user:main",
   "content": "Hello",
   "attachments": []
 }
@@ -147,7 +147,7 @@ Echoed user message schema (server -> client):
   "role": "user",
   "content": "Hello",
   "timestamp": 1704672000000,
-  "sessionKey": "agent:main:clawline:flynn:main",
+  "sessionKey": "agent:main:clawline:example-user:main",
   "streaming": false,
   "deviceId": "ABC123",
   "clientMessageId": "c_123",
@@ -170,7 +170,7 @@ Non-streaming (timestamps are Unix epoch milliseconds):
   "role": "assistant",
   "content": "Hi",
   "timestamp": 1704672000000,
-  "sessionKey": "agent:main:clawline:flynn:main",
+  "sessionKey": "agent:main:clawline:example-user:main",
   "replyToMessageId": "s_789",
   "replyToClientMessageId": "c_123",
   "streaming": false
@@ -185,7 +185,7 @@ Streaming (partial messages):
   "role": "assistant",
   "content": "Hi there",
   "timestamp": 1704672000000,
-  "sessionKey": "agent:main:clawline:flynn:main",
+  "sessionKey": "agent:main:clawline:example-user:main",
   "replyToMessageId": "s_789",
   "replyToClientMessageId": "c_123",
   "streaming": true
@@ -244,7 +244,7 @@ Messages carry a `sessionKey` field that identifies which conversation stream th
   "role": "assistant",
   "content": "Hello",
   "timestamp": 1735600000000,
-  "sessionKey": "agent:main:clawline:flynn:main",
+  "sessionKey": "agent:main:clawline:example-user:main",
   "streaming": false
 }
 ```
@@ -316,7 +316,7 @@ Attachments appear on both **client → server** messages and **server → clien
 {
   "type": "message",
   "id": "c_124",
-  "sessionKey": "agent:main:clawline:flynn:main",
+  "sessionKey": "agent:main:clawline:example-user:main",
   "content": "Check this",
   "attachments": [
     { "type": "image", "mimeType": "image/jpeg", "data": "<base64>" }
@@ -344,7 +344,7 @@ Attachments appear on both **client → server** messages and **server → clien
 {
   "type": "message",
   "id": "c_125",
-  "sessionKey": "agent:main:clawline:flynn:main",
+  "sessionKey": "agent:main:clawline:example-user:main",
   "content": "Here is the file",
   "attachments": [{ "type": "url", "url": "http://host:port/media/m_123" }]
 }

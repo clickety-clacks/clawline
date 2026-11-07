@@ -139,9 +139,9 @@ Request body:
 ```json
 {
   "sessionKeys": [
-    "agent:main:clawline:flynn:s_bravo",
-    "agent:main:clawline:flynn:main",
-    "agent:main:clawline:flynn:s_alpha"
+    "agent:main:clawline:example-user:s_bravo",
+    "agent:main:clawline:example-user:main",
+    "agent:main:clawline:example-user:s_alpha"
   ]
 }
 ```
@@ -152,7 +152,7 @@ Response body:
 {
   "streams": [
     {
-      "sessionKey": "agent:main:clawline:flynn:s_bravo",
+      "sessionKey": "agent:main:clawline:example-user:s_bravo",
       "displayName": "Bravo",
       "kind": "custom",
       "orderIndex": 0,

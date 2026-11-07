@@ -6,7 +6,7 @@ Status: Recon spec for feasibility study
 
 ## Scope and Method
 
-This document is based on direct source inspection of the Clawline iOS/iPad codebase in `/Users/mike/src/clawline`, with emphasis on the main iOS target plus relevant companion targets when they affect architecture or shared behavior.
+This document is based on direct source inspection of the Clawline iOS/iPad codebase in `$HOME/src/clawline`, with emphasis on the main iOS target plus relevant companion targets when they affect architecture or shared behavior.
 
 Primary source footprint inspected:
 
@@ -1363,7 +1363,7 @@ Sample payloads:
   "type": "pair_request",
   "protocolVersion": 1,
   "deviceId": "9F6A1A72-3FE2-4B89-87D8-95D813B01234",
-  "claimedName": "Flynn MacBook",
+  "claimedName": "Example Laptop",
   "deviceInfo": { "platform": "Web", "model": "Chrome 136" }
 }
 ```
@@ -1375,7 +1375,7 @@ Sample payloads:
   "token": "<jwt-or-gateway-session-token>",
   "deviceId": "9F6A1A72-3FE2-4B89-87D8-95D813B01234",
   "lastMessageId": "s_8c7d40d1",
-  "adoptedSessionKeys": ["agent:main:clawline:flynn:s_91ab23ef"],
+  "adoptedSessionKeys": ["agent:main:clawline:example-user:s_91ab23ef"],
   "clientFeatures": ["terminal_bubbles_v1"],
   "client": {
     "id": "co.clicketyclacks.clawline.web",
@@ -1524,7 +1524,7 @@ Sample payloads:
   "content": "Still streaming",
   "timestamp": 1764133200000,
   "streaming": true,
-  "sessionKey": "agent:main:clawline:flynn:main",
+  "sessionKey": "agent:main:clawline:example-user:main",
   "attachments": []
 }
 ```
@@ -1534,7 +1534,7 @@ Sample payloads:
   "type": "stream_snapshot",
   "streams": [
     {
-      "sessionKey": "agent:main:clawline:flynn:main",
+      "sessionKey": "agent:main:clawline:example-user:main",
       "displayName": "Main",
       "kind": "main",
       "orderIndex": 0,
@@ -1904,7 +1904,7 @@ Routes and screens required in Phase 1:
 | Settings overlay on the chat route | Drawer/modal, not a dedicated route |
 | Awaiting approval surface | Required if `pair_pending` or `device_not_approved` occurs |
 
-Tests required before Phase 1 is ready for Flynn verification:
+Tests required before Phase 1 is ready for operator verification:
 
 - Serialization tests for every Phase 1 event: `pair_request`, `pair_result`, `auth`, `auth_result`, `message`, `ack`, `stream_snapshot`, `session_info`, `error`.
 - Transport-machine tests for: duplicate reconnect intent suppression, auth success transition, auth failure transition, and manual retry out of recovery.
